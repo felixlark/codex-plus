@@ -1,0 +1,10 @@
+name: Test
+on:
+  push:
+  pull_request:
+jobs:
+  swift:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/test

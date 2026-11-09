@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+SOURCE_APP="${CODEX_PLUS_BUILD_ROOT:-$HOME/Library/Caches/codex-plus/build}/Codex Plus.app"
+TARGET_APP="/Applications/Codex Plus.app"
+codesign --verify --deep --strict "$SOURCE_APP"
+if pgrep -x CodexPlus >/dev/null; then
+  echo "Quit the running Codex Plus from its menu before reinstalling." >&2
+  exit 1
+fi
+if [[ -d "$TARGET_APP" ]]; then
+  BACKUP="$(mktemp -d "$HOME/Library/Caches/codex-plus/previous-install.XXXXXX")"
+  ditto "$TARGET_APP" "$BACKUP/Codex Plus.app"
+  rm -rf "$TARGET_APP"
+fi
+ditto --norsrc --noextattr "$SOURCE_APP" "$TARGET_APP"
+codesign --verify --deep --strict "$TARGET_APP"
+open "$TARGET_APP"
