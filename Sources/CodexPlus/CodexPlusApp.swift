@@ -56,6 +56,10 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.menu = menu
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
         let quitItem = NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         appMenu.addItem(quitItem)
@@ -78,6 +82,11 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showSettings()
             UserDefaults.standard.set(true, forKey: "hasShownSettings")
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
