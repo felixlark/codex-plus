@@ -54,6 +54,15 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
+        let mainMenu = NSMenu()
+        let appMenu = NSMenu()
+        let quitItem = NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        appMenu.addItem(quitItem)
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+        NSApp.mainMenu = mainMenu
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
