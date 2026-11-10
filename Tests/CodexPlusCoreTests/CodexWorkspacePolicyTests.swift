@@ -2,6 +2,48 @@ import XCTest
 @testable import CodexPlusCore
 
 final class CodexWorkspacePolicyTests: XCTestCase {
+    func testPreferenceChangeConsumesQueuedSwitchBeforeDuplicateEvents() {
+        var tracker = CodexWorkspaceSwitchTracker<String>()
+        _ = tracker.observe(window: "w", chat: "A", workspaceOpen: false)
+        // B's notification is pending when the preference changes. The observer
+        // cancels that inspection and seeds the current B synchronously.
+        tracker.displaySelectionDidChange()
+        XCTAssertFalse(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+        XCTAssertFalse(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+        XCTAssertTrue(tracker.observe(window: "w", chat: "C", workspaceOpen: false))
+    }
+
+    func testPreferenceChangeWaitsThroughUnknownAndModalAndClearsOnDetach() {
+        for context in [CodexWorkspaceStructuralContext.unknown, .dialog] {
+            var tracker = CodexWorkspaceSwitchTracker<String>()
+            _ = tracker.observe(window: "w", chat: "A", workspaceOpen: false)
+            tracker.displaySelectionDidChange()
+            tracker.observeStructuralContext(context)
+            XCTAssertTrue(tracker.seedOnlyAfterDisplaySelectionChange)
+            XCTAssertFalse(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+            XCTAssertTrue(tracker.observe(window: "w", chat: "C", workspaceOpen: false))
+            tracker.displaySelectionDidChange()
+            tracker.reset() // Disabled, permission revoked, or target exited.
+            XCTAssertFalse(tracker.seedOnlyAfterDisplaySelectionChange)
+            XCTAssertFalse(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+            XCTAssertTrue(tracker.observe(window: "w", chat: "C", workspaceOpen: false))
+            tracker.displaySelectionDidChange()
+            tracker.startOutsideChat()
+            XCTAssertFalse(tracker.seedOnlyAfterDisplaySelectionChange)
+            XCTAssertTrue(tracker.observe(window: "w", chat: "D", workspaceOpen: false))
+        }
+    }
+
+    func testSkippedDisplayStillConsumesTaskSwitchAndMovingSameTaskStaysClosed() {
+        var tracker = CodexWorkspaceSwitchTracker<String>()
+        _ = tracker.observe(window: "w", chat: "A", workspaceOpen: false)
+        // Observer consumes B before the screen gate rejects its action.
+        XCTAssertTrue(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+        // Moving B to a selected screen preserves B's manual pane state.
+        XCTAssertFalse(tracker.observe(window: "w", chat: "B", workspaceOpen: false))
+        XCTAssertTrue(tracker.observe(window: "w", chat: "C", workspaceOpen: false))
+    }
+
     func testStartupAndDuplicateNotificationsDoNotOpenPane() {
         var tracker = CodexWorkspaceSwitchTracker<String>()
         XCTAssertFalse(tracker.observe(window: "w1", chat: "a", workspaceOpen: false))
