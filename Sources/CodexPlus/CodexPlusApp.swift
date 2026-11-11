@@ -12,6 +12,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private let settings = SettingsModel()
+    private let launcher = CodexLauncher()
 
     static func main() {
         if CommandLine.arguments.contains("--status") {
@@ -24,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.2.0\nUsage: CodexPlus [--status | --help]\nLaunch the installed app for its menu and settings.")
+            print("Codex Plus 0.3.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -47,11 +48,16 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
+        launcher.start()
+        if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.button?.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Codex Plus")
         statusItem?.button?.toolTip = "Codex Plus"
         let menu = NSMenu()
         menu.delegate = self
+        let openItem = NSMenuItem(title: "打开 Codex（F6）", action: #selector(openCodex), keyEquivalent: "")
+        openItem.target = self
+        menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q"))
@@ -72,23 +78,28 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.2.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.3.0",
+                        "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
-                        "workspace": self.observer.status()]
+                        "workspace": self.observer.status(), "launcher": self.launcher.status()]
             }
         } catch {
             settings.error = "状态接口启动失败。\(error.localizedDescription)"
         }
-        if !UserDefaults.standard.bool(forKey: "hasShownSettings") {
+        if CommandLine.arguments.contains("--settings") || !UserDefaults.standard.bool(forKey: "hasShownSettings") {
             showSettings()
             UserDefaults.standard.set(true, forKey: "hasShownSettings")
         }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showSettings()
+        launcher.open(source: "reopen")
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        launcher.stop { NSApp.reply(toApplicationShouldTerminate: true) } ? .terminateLater : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -108,7 +119,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.title = "Codex Plus"
             window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: 500, height: 340)
-            window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog))
+            window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
             window.center()
             settingsWindow = window
         }
@@ -117,6 +128,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func openCodex() { launcher.open() }
 }
 
 final class SettingsModel: ObservableObject {
@@ -207,11 +219,16 @@ final class SettingsModel: ObservableObject {
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     @ObservedObject var catalog: CodexWorkspaceDisplayCatalog
+    @ObservedObject var launcher: CodexLauncher
 
     var body: some View {
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
             Text("Codex Plus").font(.title2.bold())
+            Text("按 F6 打开 Codex，项目随任务活动自动置顶。Codex Plus 在菜单栏运行。")
+            Text(launcher.summary).font(.callout).foregroundColor(.secondary)
+            Button("打开 Codex（F6）") { launcher.open() }
+            Divider()
             Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
                 .foregroundColor(.secondary)
             Toggle("自动展开 Codex 工作区", isOn: $model.enabled)

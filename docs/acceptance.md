@@ -60,3 +60,30 @@ Hardened Runtime 和安全时间戳。构建与安装的 Mach-O UUID 相同。
 
 ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送 ⌘N 后，宿主新窗口实际进入 Codex 模式，
 因此上方“ChatGPT 视图按 ⌘N 后保持收起”保留独立待验收状态。
+
+
+## 0.3.0 Project 活动排序与 F6 入口（2026-11-11）
+
+执行电脑 Sol。安装候选 0.3.0 build 4，Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-11 13:21:57；构建与安装 Mach-O UUID 同为 `1B48616F-C393-332B-AF49-AEB7ED5F2336`。官方宿主为原签名 Codex 26.1103.60933（本机包名ChatGPT.app，bundle com.openai.codex，Team 2DC432GLL2）。前后验签通过，供应商文件未改写。
+
+- [x] 普通启动器与官方应用各有Dock item的实验已确认；最终Plus为LSUIElement/accessory，无自己的Dock item，官方Codex保留Dock item。
+- [x] 查实生效的Default Karabiner profile；仅四处Codex入口命令改到Plus，F3、普通F5、CapsLock、右Command及其他字段保持。配置备份及生成器check通过。
+- [x] 安装版冷启动参数--open-codex打开独立测试资料的官方宿主；两个已审资源在首次执行前适配，无额外Page.reload。
+- [x] 相同Karabiner命令重复打开走reopen；入口计数增加，Plus及宿主PID不变，右侧布局按已存在PID完成。
+- [x] Longbiao按实体F6后，入口计数由2增至7；仍为同一Plus与官方宿主，没有重复启动。
+- [x] 同一安装候选：折叠B执行sleep120；后来在C取得CP-C FINAL FOREGROUND OK并保留未发送草稿。B完成后置顶，B仍折叠、C仍选中、草稿完整。随后查看B，存在CP-B FINAL BACKGROUND OK及Worked for 2m 5s。
+- [x] 手动重载同一聊天后，所选C、原生草稿及B/C/A顺序恢复；活动时间与原生时间均参与。
+- [x] 新聊天重载保持新聊天，不错误打开此前C聊天或其草稿。DOM占位文字探针不可靠的一次失败保留；最终以AX的Do anything空输入及路由/旧内容缺席联合核验。
+- [x] 终止自有controller后，Swift自动重连；Plus PID84332、宿主PID84870不变，controller由84442变99173；没有强制刷新或关闭宿主，C及草稿保持，后续重载继续适配。
+- [x] 原生File → New Window创建第二真实窗口，首次执行即协议6；两个窗口均显示B/C/A，控制器无拦截错误。
+- [x] 33项Swift核心测试、3项活动时间/多窗口/路由回归、4类动态Electron fixture通过；Dock Switch全套Node及55项Swift测试通过。
+- [ ] Longbiao最终接受此功能；Issue #1保持开放。
+
+独立测试资料、三个本地项目和证据保留；覆盖为本地Codex项目。远程Codex/SSH及ChatGPT来源未作真实账号交互验收；不据本地结果外推。既有原生导航的消费者链及Pinned/自定义区回归复用对应未变接缝和fixture证据。
+
+正式入口恢复时保留已运行的生产Codex（PID2355及其任务）；该旧实例尚无启动调试通道。当前运行实例由F6激活，下次正常退出后再经F6启动才会加载自动排序；不为测试关闭已有任务。关闭Plus只断开自有控制器，正常退出官方宿主后调试监听关闭。回退0.3需同时恢复Plus旧安装及所保留的F6配置，保持Dock Switch旧观察器停用。
+
+本机候选证据：`~/Library/Logs/codex-plus/launcher-20261111/`，包括installed-reload.json、installed-new-chat-reload.json、installed-multiwindow.json、installed-acceptance-status.json、karabiner-migration.json、installed-final-reload.png。历史实验与未通过记录继续保留，未冒充当前通过证据。
+
+
+共享宿主协调收尾：已正常退出测试Plus84332及controller99173，先回读确认官方测试宿主仍运行，再正常退出84870及其backend85608，59068监听不再可达。生产2355/2425保留原启动时间，未启动生产CDP控制器或重载生产；未修改其他任务的全局并发设置。由于既有“调查cloudd卡顿原因”任务正在核验生产宿主，本任务保存安全点并不再激活/启动生产App。已安装正式候选和F6配置保留，下一次F6冷启动不带验收参数，将使用正式资料；不把独立测试实例写作生产重开或全局配置生效证据。

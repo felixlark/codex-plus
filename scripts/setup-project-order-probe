@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TOOLS="$HOME/Library/Caches/codex-plus/project-order-probe"
+mkdir -p "$TOOLS"
+cp "$ROOT/tools/project-order-probe/package.json" "$ROOT/tools/project-order-probe/package-lock.json" "$TOOLS/"
+npm ci --ignore-scripts --prefix "$TOOLS" --cache "$HOME/Library/Caches/codex-plus/npm" --no-audit --no-fund
+if [[ "${1:-}" == "--fixture" ]]; then
+  electron_config_cache="$HOME/Library/Caches/codex-plus/electron" node "$TOOLS/node_modules/electron/install.js"
+fi

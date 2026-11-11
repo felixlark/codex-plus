@@ -1,8 +1,12 @@
 # Codex Plus
 
-Codex Plus 是独立的 macOS 菜单栏应用，为 Codex 提供工作区自动展开。
+Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供 F6 启动入口、Project 活动排序和工作区自动展开。官方 Codex 安装包及签名保持原样。
 
-当前版本支持在 Codex 视图新建任务或切换任务时，展开已收起的右侧栏。ChatGPT 视图保持收起。已展开的工作区保留现有标签页，当前任务手动收起后保持收起。
+0.3.0 通过现有 Karabiner 的 F6 规则打开 Codex Plus，再启动或激活官方 Codex。Codex Plus 不显示 Dock 图标；官方 Codex 仍有自己的 Dock 图标。项目按任务活动自动置顶，后台完成也会参与排序；手动重载可恢复所选聊天、原生草稿及活动顺序。当前真实验收覆盖本地 Codex 项目，远程和 ChatGPT 来源保留未验收。
+
+已有官方 Codex 若以普通方式运行，F6 会激活它；正常退出后再从 F6 启动，增强才会装入。启动器不会关闭已有任务，也不自动重载页面。窗口布局在宿主启动后按实际 PID 交给已有 Dock Switch，保持原 F6 的右侧布局。
+
+在 Codex 视图新建任务或切换任务时，仍会展开已收起的右侧栏。ChatGPT 视图保持收起。已展开的工作区保留现有标签页，当前任务手动收起后保持收起。
 
 0.2.0 增加“适用屏幕”：默认所有屏幕，也可勾选实际连接的多块屏幕。选择自动保存，下一次新建或切换任务时生效；移动当前窗口时保留工作区状态。屏幕断开后保留已选条目，相同身份重连后恢复适用。所选屏幕为空时暂停自动展开。
 
@@ -32,6 +36,19 @@ Codex Plus 是独立的 macOS 菜单栏应用，为 Codex 提供工作区自动�
 本次拆分在 [Issue #1](https://github.com/felixlark/codex-plus/issues/1) 跟踪。
 
 验收步骤见[验收清单](docs/acceptance.md)。
+
+Project 活动排序的[设计与接缝记录](docs/designs/project-activity-order.md)和 [EGM 评审记录](docs/reviews/project-activity-order-egm.md)保留了原型失败及后续修订。运行时只适配已审核的 26.1103.60933 资源路径与源码摘要；未知版本正常打开官方应用并报告增强暂不可用。实际接入发生在首个页面脚本执行前，后续窗口及重载沿同一控制器接入。
+
+本机 F6 配置由 Dock Switch 的独立 Karabiner 配置生成器维护；F6 及既有硬件别名均调用 Codex Plus 的 `--open-codex`，不会抢先直接启动官方宿主。仅配置生成工具改变，Dock Switch 安装包保持不变。冷热启动共用同一入口，可通过状态中的 `launcher.entryRequests`、`lastEntrySource`、宿主 PID 与控制器 PID 核对；注册或配置本身不等于实体按键验收。
+
+开发依赖为精确锁定的 Acorn 8.15.0 和 Electron 45.2.3，保存在本机缓存；产品只打包 Acorn 与许可，使用已验签官方应用内的 Node 运行控制器。隔离 fixture 及原文恢复检查：
+
+```sh
+./scripts/setup-project-order-probe --fixture
+node scripts/probe-project-order.mjs --mode fixture --scenario all --out "$HOME/Library/Logs/codex-plus/project-order/fixture.json"
+```
+
+生产启动使用安装版入口。`probe-project-order.mjs` 的旧 host 模式是历史接缝诊断工具，不应与产品控制器同时运行。关闭 Codex Plus 不结束官方 Codex；已执行的内存增强保留到页面重载，重新打开 Plus 可对既有自有调试实例恢复连接。扩展仅保存自己的任务活动时间及路由所有权标记，原生项目手动顺序、聊天与草稿由 Codex 继续管理。
 
 核心逻辑源自 [dock-switch #49](https://github.com/felixlark/dock-switch/issues/49) 和 [PR #50](https://github.com/felixlark/dock-switch/pull/50)，保留 MIT 许可。Codex Plus 独立维护源码、配置、权限、启动与运行状态。Codex 提供原生的同等自动展开设置后，可停用此适配器。
 

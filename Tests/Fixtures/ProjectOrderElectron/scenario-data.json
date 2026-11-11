@@ -1,0 +1,13 @@
+{
+  "initial": {
+    "order": ["A", "B", "C"],
+    "groups": [{"projectId":"A","threadKeys":["local:A"]},{"projectId":"B","threadKeys":["remote:B"]},{"projectId":"C","threadKeys":["chatgpt:C"]}],
+    "timestamps": {"local:A":1000,"remote:B":3000,"chatgpt:C":2000}
+  },
+  "updated": {
+    "order": ["A", "B", "C"],
+    "groups": [{"projectId":"A","threadKeys":["local:A"]},{"projectId":"B","threadKeys":["remote:B"]},{"projectId":"C","threadKeys":["chatgpt:C"]}],
+    "timestamps": {"local:A":1000,"remote:B":3000,"chatgpt:C":2000},
+    "updatedTimestamps": {"local:A":1000,"remote:B":3000,"chatgpt:C":4000}
+  }
+}

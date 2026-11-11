@@ -2,5 +2,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+node --test Tests/project-activity.test.mjs
 swift test --scratch-path "$HOME/Library/Caches/codex-plus/swift-test" \
   --cache-path "$HOME/Library/Caches/codex-plus/swift-cache"
