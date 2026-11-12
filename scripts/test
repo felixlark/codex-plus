@@ -2,5 +2,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+if [[ ! -f "$HOME/Library/Caches/codex-plus/project-order-probe/node_modules/acorn/dist/acorn.mjs" ]]; then
+  "$ROOT/scripts/setup-project-order-probe"
+fi
+node --test Tests/*.test.mjs
 swift test --scratch-path "$HOME/Library/Caches/codex-plus/swift-test" \
   --cache-path "$HOME/Library/Caches/codex-plus/swift-cache"

@@ -42,7 +42,37 @@ public final class CodexWorkspaceObserver {
         if let workspaceOpen { result["workspaceOpen"] = workspaceOpen }
         if let pid { result["targetPID"] = pid }
         if let lastPressResult { result["lastPressResult"] = lastPressResult }
+        let displays = CodexWorkspaceDisplayCatalog.capture()
+        let selection = CodexWorkspaceDisplayPreference.load()
+        let decision = displayDecision(selection: selection, displays: displays)
+        result["displaySelectionMode"] = selection?.mode.rawValue ?? "invalid"
+        result["selectedDisplayCount"] = selection?.selectedDisplays.count ?? 0
+        result["connectedSelectedDisplayCount"] = displays.filter { selection?.contains($0) == true }.count
+        result["focusedDisplayName"] = decision.display?.name
+        result["displayEligible"] = decision.eligible
+        result["displayDecision"] = decision.reason.rawValue
         return result
+    }
+
+    public func displayDecision() -> CodexWorkspaceDisplayDecision {
+        displayDecision(selection: CodexWorkspaceDisplayPreference.load(), displays: CodexWorkspaceDisplayCatalog.capture())
+    }
+
+    private func displayDecision(selection: CodexWorkspaceDisplaySelection?,
+                                 displays: [CodexWorkspaceDisplay]) -> CodexWorkspaceDisplayDecision {
+        let frame = focusedStandardWindow().flatMap(windowFrame)
+        return CodexWorkspaceDisplayPolicy.decide(selection: selection, windowFrame: frame, displays: displays)
+    }
+
+    public func displaySelectionDidChange() {
+        pending?.cancel()
+        pending = nil
+        generation += 1
+        guard observer != nil, CodexWorkspacePreference.enabled, AXIsProcessTrusted() else { return }
+        tracker.displaySelectionDidChange()
+        if let sample = sampleForInspection() {
+            _ = tracker.observe(window: AXIdentity(sample.window), chat: AXIdentity(sample.toolbar), workspaceOpen: sample.open)
+        }
     }
 
     public func start() {
@@ -213,7 +243,7 @@ public final class CodexWorkspaceObserver {
             // The object is gone: compare only its saved opaque identity, never
             // read its attributes. Existing notifications can also resume seeding.
             clearDialog()
-            tracker.reset()
+            tracker.invalidateView()
         }
         if name == kAXTitleChangedNotification {
             guard attribute(element, kAXRoleAttribute) as? String == kAXWindowRole else { return }
@@ -241,6 +271,9 @@ public final class CodexWorkspaceObserver {
         guard CodexWorkspacePreference.enabled, AXIsProcessTrusted(), let sample = sampleForInspection() else { return }
         guard tracker.observe(window: AXIdentity(sample.window), chat: AXIdentity(sample.toolbar), workspaceOpen: sample.open),
               let button = sample.newTab else { return }
+        let decision = CodexWorkspaceDisplayPolicy.decide(selection: CodexWorkspaceDisplayPreference.load(),
+            windowFrame: sample.frame, displays: CodexWorkspaceDisplayCatalog.capture())
+        guard decision.eligible else { return }
         // Re-read immediately before AXPress: no cached button on a newly navigated
         // chat/window, no activation, no retries after an unknown action result.
         guard let current = sampleForInspection(), CFEqual(current.window, sample.window),
@@ -248,6 +281,10 @@ public final class CodexWorkspaceObserver {
               let currentButton = current.newTab, CFEqual(currentButton, button),
               attribute(currentButton, kAXEnabledAttribute) as? Bool == true,
               CodexWorkspacePreference.enabled, AXIsProcessTrusted() else { return }
+        let selection = CodexWorkspaceDisplayPreference.load()
+        let currentDecision = CodexWorkspaceDisplayPolicy.decide(selection: selection, windowFrame: current.frame,
+            displays: CodexWorkspaceDisplayCatalog.capture())
+        guard CodexWorkspaceDisplayPolicy.permitsAction(selection: selection, previous: decision, current: currentDecision) else { return }
         let result = AXUIElementPerformAction(currentButton, kAXPressAction as CFString)
         pressCount += 1
         lastPressResult = result.rawValue
@@ -282,7 +319,7 @@ public final class CodexWorkspaceObserver {
             workspaceOpen = nil
             // Rename can permanently replace the toolbar AX identity. Its first
             // recognized successor must seed a fresh baseline, not count as a switch.
-            tracker.reset()
+            tracker.invalidateView()
             watchDialog(element)
             return nil
         case .chatGPT:
@@ -294,7 +331,7 @@ public final class CodexWorkspaceObserver {
         case .outside:
             workspaceOpen = nil
             clearDialog()
-            if awaitingInitialSnapshot {
+            if awaitingInitialSnapshot || tracker.seedOnlyAfterDisplaySelectionChange {
                 awaitingInitialSnapshot = false
                 tracker.startOutsideChat()
             }
@@ -310,6 +347,7 @@ public final class CodexWorkspaceObserver {
         let toolbar: AXUIElement
         let open: Bool
         let newTab: AXUIElement?
+        let frame: CGRect?
     }
 
     private enum Snapshot {
@@ -402,10 +440,20 @@ public final class CodexWorkspaceObserver {
             }
         })
         switch state {
-        case .open: return .chat(Sample(window: window, toolbar: toolbar, open: true, newTab: nil))
-        case .closed(let button): return .chat(Sample(window: window, toolbar: toolbar, open: false, newTab: button.element))
+        case .open: return .chat(Sample(window: window, toolbar: toolbar, open: true, newTab: nil, frame: windowFrame(window)))
+        case .closed(let button): return .chat(Sample(window: window, toolbar: toolbar, open: false, newTab: button.element, frame: windowFrame(window)))
         case .absent, .unknown: return .unknown
         }
+    }
+
+    private func windowFrame(_ window: AXUIElement) -> CGRect? {
+        guard let position = attribute(window, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
+              let size = attribute(window, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        var dimensions = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
+        return CGRect(origin: point, size: dimensions)
     }
 
     /// Structural/header traversal only. Never enter the conversation, composer,

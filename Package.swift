@@ -10,6 +10,7 @@ let package = Package(
         .executableTarget(
             name: "CodexPlus",
             dependencies: ["CodexPlusCore"],
+            exclude: ["Resources"],
             linkerSettings: [.unsafeFlags([
                 "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT",
                 "-Xlinker", "__info_plist", "-Xlinker", "AppInfo.plist"

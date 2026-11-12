@@ -14,4 +14,4 @@ if [[ -d "$TARGET_APP" ]]; then
 fi
 ditto --norsrc --noextattr "$SOURCE_APP" "$TARGET_APP"
 codesign --verify --deep --strict "$TARGET_APP"
-open "$TARGET_APP"
+open "$TARGET_APP" --args "$@"

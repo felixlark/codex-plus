@@ -1,10 +1,24 @@
 # Codex Plus
 
-Codex Plus 是独立的 macOS 菜单栏应用，为 Codex 提供工作区自动展开。
+0.5.0 增加「自动发送建议提示词」开关，默认关闭。开启后，当前前台 Codex 聊天在本轮结束后出现新的原生建议，Plus 会自动采纳并通过原生发送按钮继续一轮；可能连续续轮。输入草稿、输入法组合、附件、对话框、切换聊天或失去焦点会取消尚未提交的动作，已采纳草稿保留。同一 turn 的建议只尝试一次，重连与重载均不重放。当前适配官方 Codex 26.1106.51428；安装后已打开的旧页面需重载，原有任务继续运行。
 
-当前版本支持在 Codex 视图新建任务或切换任务时，展开已收起的右侧栏。ChatGPT 视图保持收起。已展开的工作区保留现有标签页，当前任务手动收起后保持收起。
+从页面左下角 Codex Plus 或菜单栏打开设置，在「页面增强」中切换「自动发送建议提示词」。状态命令的 `launcher.suggestionAutoSend` 返回开关、页面接入、采纳与提交计数，不输出提示词正文。设计与边界见[建议提示词方案](docs/designs/auto-send-suggestions.md)。
 
-需要 macOS 13 或更新版本，以及用户为 Codex Plus 单独授予的辅助功能权限。当前适配已在 Codex 26.1103.60933 的英文界面上核验。界面结构变化、未知模式或读取失败时跳过动作。
+Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供统一增强入口、F6 启动、Project 活动排序和工作区自动展开。官方 Codex 安装包及签名保持原样。
+
+0.5.1 将页面入口、App 与菜单栏图标统一为圆形标识：Plus 使用圆环加号，贪吃蛇采用同族圆环；App 使用深墨绿与薄荷绿，菜单栏使用系统着色的矢量模板。图形和尺寸见 [图标规范](docs/visual-identity.md)。Codex Plus 保持最左侧导航条的左下角第一项，打开与菜单栏共用的原生设置窗口；贪吃蛇保持左上按钮组末尾、紧接“项目”下面。两个入口复用原生按钮外观、尺寸、悬停与分组间距。悬停显示名称，两个按钮也支持键盘访问。游戏支持方向键／WASD、空格暂停／继续、Esc 关闭及按钮操作；关闭、切换任务和退出 Plus 会释放本局。现有原生按钮保持相对顺序，收起项目侧栏后两个入口继续可用。增强功能统一由本仓和同一个 Plus 运行实例管理。
+
+页面接入适配 Codex 26.1106.51428。设置显示页面入口与项目排序各自的接入状态；普通方式已运行的 Codex 需要保存工作、正常退出后经 F6 启动。Plus 安装和已有普通宿主的首次页面接入分别验收。实现与验收见[统一入口方案](docs/designs/unified-feature-entry.md)及[验收记录](docs/acceptance.md)。
+
+0.3.0 通过现有 Karabiner 的 F6 规则打开 Codex Plus，再启动或激活官方 Codex。Codex Plus 不显示 Dock 图标；官方 Codex 仍有自己的 Dock 图标。项目按任务活动自动置顶，后台完成也会参与排序；手动重载可恢复所选聊天、原生草稿及活动顺序。当前真实验收覆盖本地 Codex 项目，远程和 ChatGPT 来源保留未验收。
+
+已有官方 Codex 若以普通方式运行，F6 会激活它；正常退出后再从 F6 启动，增强才会装入。启动器不会关闭已有任务，也不自动重载页面。窗口布局在宿主启动后按实际 PID 交给已有 Dock Switch，保持原 F6 的右侧布局。
+
+在 Codex 视图新建任务或切换任务时，仍会展开已收起的右侧栏。ChatGPT 视图保持收起。已展开的工作区保留现有标签页，当前任务手动收起后保持收起。
+
+0.2.0 增加“适用屏幕”：默认所有屏幕，也可勾选实际连接的多块屏幕。选择自动保存，下一次新建或切换任务时生效；移动当前窗口时保留工作区状态。屏幕断开后保留已选条目，相同身份重连后恢复适用。所选屏幕为空时暂停自动展开。
+
+需要 macOS 13 或更新版本，以及用户为 Codex Plus 单独授予的辅助功能权限。当前页面入口已在 Codex 26.1106.51428 的英文界面及浅深色主题核验。界面结构变化、未知模式或读取失败时跳过对应增强。
 
 ## 开发与安装
 
@@ -19,13 +33,30 @@ Codex Plus 是独立的 macOS 菜单栏应用，为 Codex 提供工作区自动�
 
 安装后从菜单栏打开设置，启用“自动展开 Codex 工作区”，授予辅助功能权限，并按需启用“登录时启动”。
 
+在“适用屏幕”切换到“所选屏幕”后逐屏勾选。首次自选会勾选当前可识别的在线屏幕；此后接入的新屏幕保持未选。屏幕身份读取失败或窗口归属有歧义时，自选模式跳过动作，并在只读状态中返回原因。设置窗口支持调整大小和滚动。
+
 状态命令通过当前用户的本地只读接口查询应用运行状态。接口位于 `~/Library/Application Support/codex-plus/status.sock`，返回模式、权限、订阅与动作计数，排查时不需要读取聊天内容。
+
+屏幕诊断包含 `displaySelectionMode`、`selectedDisplayCount`、`connectedSelectedDisplayCount`、`focusedDisplayName`、`displayEligible` 和 `displayDecision`。屏幕归属按当前 Codex 窗口中心判断，偏好使用系统 ColorSync UUID 保存，状态输出省略完整硬件标识。
 
 ## 验收与跟踪
 
 本次拆分在 [Issue #1](https://github.com/felixlark/codex-plus/issues/1) 跟踪。
 
 验收步骤见[验收清单](docs/acceptance.md)。
+
+Project 活动排序的[设计与接缝记录](docs/designs/project-activity-order.md)和 [EGM 评审记录](docs/reviews/project-activity-order-egm.md)保留了原型失败及后续修订。运行时只适配已审核的 26.1103.60933 资源路径与源码摘要；未知版本正常打开官方应用并报告增强暂不可用。实际接入发生在首个页面脚本执行前，后续窗口及重载沿同一控制器接入。
+
+本机 F6 配置由 Dock Switch 的独立 Karabiner 配置生成器维护；F6 及既有硬件别名均调用 Codex Plus 的 `--open-codex`，不会抢先直接启动官方宿主。仅配置生成工具改变，Dock Switch 安装包保持不变。冷热启动共用同一入口，可通过状态中的 `launcher.entryRequests`、`lastEntrySource`、宿主 PID 与控制器 PID 核对；注册或配置本身不等于实体按键验收。
+
+开发依赖为精确锁定的 Acorn 8.15.0 和 Electron 45.2.3，保存在本机缓存；产品只打包 Acorn 与许可，使用已验签官方应用内的 Node 运行控制器。隔离 fixture 及原文恢复检查：
+
+```sh
+./scripts/setup-project-order-probe --fixture
+node scripts/probe-project-order.mjs --mode fixture --scenario all --out "$HOME/Library/Logs/codex-plus/project-order/fixture.json"
+```
+
+生产启动使用安装版入口。`probe-project-order.mjs` 的旧 host 模式是历史接缝诊断工具，不应与产品控制器同时运行。关闭 Codex Plus 会移除自有页面按钮和游戏，官方 Codex 继续运行；已执行的排序适配保留到页面重载。重新打开 Plus 可对既有自有调试实例恢复连接。扩展仅保存自己的任务活动时间及路由所有权标记，原生项目手动顺序、聊天与草稿由 Codex 继续管理。
 
 核心逻辑源自 [dock-switch #49](https://github.com/felixlark/dock-switch/issues/49) 和 [PR #50](https://github.com/felixlark/dock-switch/pull/50)，保留 MIT 许可。Codex Plus 独立维护源码、配置、权限、启动与运行状态。Codex 提供原生的同等自动展开设置后，可停用此适配器。
 

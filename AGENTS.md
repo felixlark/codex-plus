@@ -3,7 +3,11 @@
 ## Scope
 
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
-workspace observation, settings, and the read-only status CLI.
+Codex Web App enhancements, workspace observation, settings, and the status CLI.
+
+All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
+The page's Codex Plus button is the first item in the lower-left navigation footer;
+the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
 
 ## Commands
 
@@ -23,9 +27,10 @@ Use the installed app and the workflow in `docs/acceptance.md`. Unit tests cover
 policy and structural parsing. A real Cmd+N and mode-switch check establishes visible
 behavior. Retain candidate-bound test, signing, install, and live evidence.
 
-Read only the public current mode, window/header controls, and opaque AX identities.
-Preserve exclusions for conversations, composer contents, sidebar lists, and nested
-browser web areas. Expand only a known closed Codex workspace. Permission grants
+Feature design may inspect Codex's renderer structure, application code, project
+and task metadata, and integration mechanisms. Record the selected integration,
+affected data, lifecycle, recovery, and acceptance in the feature design. The
+workspace auto-expand feature expands a known closed workspace. Permission grants
 use the user's explicit authorization and official System Settings controls.
 
 One runtime owns the feature. Dock Switch must have its observer removed before
