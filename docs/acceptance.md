@@ -4,7 +4,7 @@
 
 ## 0.6.0 后台原生建议（2026-11-12）
 
-Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `CAA6708B-4AC6-3DA6-AB6C-98449F774272`，安装版严格验签通过。官方宿主 `26.1106.51428` 的包未修改。JS资源安装与源码SHA256一致。开关通过原UserDefaults保留true，原生设置窗实际显示“无需打开会话”“已开启 · 前后台聊天的新建议将自动发送”。
+Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `443A8B04-FEA3-35EF-92E8-7F44FB205A9B`，安装版与构建缓存的可执行文件SHA256同为`c889c83e556d5c5d7b46a81cd43d961162d06a9a3aa00187cdbc72268d1a2055`，安装版严格验签通过。build12的UUID为`CAA6708B-4AC6-3DA6-AB6C-98449F774272`；build13因嵌入的Info.plist版本号变化重新链接。原记录误将build12 UUID沿用于13，发布前已按安装包、缓存及保留备份核正。官方宿主 `26.1106.51428` 的包未修改。JS资源安装与源码SHA256一致。开关通过原UserDefaults保留true，原生设置窗实际显示“无需打开会话”“已开启 · 前后台聊天的新建议将自动发送”。
 
 - build12真实后台发送：保持其他聊天选中，官方send_message_to_thread只给既有测试chat `01a1ce66-e97c-73c1-abdc-1a523ff783aa` 发送无工具/文件的seed；原生live建议触发。自动产生用户消息“只回复 CP-BACKGROUND 自动续轮完成，本轮到此结束”，下一轮 `01a1cf4a-8ecc-7260-968d-d1e64d0ca886` completed，官方read_thread读回。整个发送前未导航到目标chat；用户期间可自行切换其他chat。随后另一原生建议也自动续轮，证实可能连续执行。
 - 草稿保护：上述成功后才打开测试chat，填入36字未发送的本案终止验收草稿，再切走。后台seed轮 `01a1cf4b-f131-79a2-bd5e-093f95051183` completed并实际生成新的live候选；target probe为false，协调器显示draft-or-state-changed，后续官方read_thread仍停在该轮，未自动发送。草稿保留，开关始终true。检查覆盖切走后的原生保留composer节点。
