@@ -2,6 +2,18 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.5.2 F6 沿用 Dock Switch 定位（2026-11-12）
+
+Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开从 Dock Switch 安装配置读取 ChatGPT 的 `placement`，当前为 `external_fill`；定位由 Dock Switch 按实际宿主 PID 执行。配置修改下次打开生效，读取失败保留窗口位置。构建与安装 Mach-O UUID 同为 `414C2C9A-79BC-382B-BDC9-F8B9A81FCFDC`，Developer ID Team HJG65XBC25、Hardened Runtime 和安全时间戳有效，安装版严格验签通过。旧版备份在 `~/Library/Caches/codex-plus/previous-install.jkIOi7/Codex Plus.app`。
+
+- [x] 16 项 Node、35 项 Swift 检查通过。新增回归覆盖 ChatGPT 与 Codex 规则区分、设置更改后重新读取、铺满／半屏透传、不可读／缺失配置保持原位。
+- [x] F6 对应的实际启动命令在安装版上将既有窗口从右屏移回主外屏；状态为 `placementSource=dock-switch`、`placementRule=external_fill`、`placement=placed`。
+- [x] Longbiao 按一次实体 F6 后，入口计数 5→6，Plus PID4922、宿主 PID5156 保持；真实窗口 w-11718 从右屏 `(2022,-1050,1920,1050)` 回到 DELL U3219Q 工作区 `(-538,-1410,2560,1410)`，官方 Computer Use 可见确认。
+- [x] 最终页面入口与项目排序 active，自动建议 enabled=true、pageReady=true、unknown=0；工作区观察正常。现场保留主外屏正常运行，既有用户设置沿用。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。本次实体 F6 覆盖已运行宿主的打开路径。
+
+证据：`~/Library/Logs/codex-plus/dock-placement-20261112/` 的 tests.log、build.log、install.log、installed-signing.log、dock-switch-rule.json、displays.json、before-physical-f6.json、after-physical-f6.json 和 physical-f6-windows.json。
+
 - [x] 独立安装版能启动，菜单栏可打开设置、关闭窗口和退出。
 - [x] Codex Plus 的辅助功能权限已授权，状态显示正在观察 Codex。
 - [x] Codex 视图按 ⌘N 后自动展开右侧工作区。

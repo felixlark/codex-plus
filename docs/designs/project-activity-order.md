@@ -273,6 +273,6 @@ F6原生回读注册成功但物理按键仍未收到回调。候选把注册目
 
 Plus去掉第二套Carbon F6注册，直接由现有Karabiner唯一负责F6。冷启动在didFinishLaunching处理--open-codex，已运行时由applicationShouldHandleReopen处理；两者调用同一launcher.open，单controller与既有host优先激活规则保持。read-only状态增加entryRequests/lastEntrySource，用来核对入口实际被调用而不把注册状态冒充按键成功。正常登录启动不主动打开Codex。
 
-原F6的右侧布局由Plus在宿主已存在后调用既有Dock Switch CLI：place --pid <已确认宿主PID> --placement side_right_fill；不使用会自行打开应用的--app路径，避免在调试参数启动前另开官方Codex。CLI已有安装与权限，缺失或失败只报告布局状态，不改官方包或新增授权；每次入口请求合并为一个待布局状态，单个布局Process为writer。后台自启动/重连没有用户入口请求时不移动窗口。成功与否仍以实际窗口位置和原始任务验收为准。
+Plus 在宿主已存在后读取 Dock Switch 的 ConfigStore 所用安装配置 `/Applications/dock-switch.app/Contents/Resources/app/src/config.json`，按宿主包名 ChatGPT 匹配 `dock_items`，将其 `placement` 原样交给既有 Dock Switch CLI：`place --pid <已确认宿主PID> --placement <已保存规则>`。显示器选择与铺满／半屏计算继续由 Dock Switch 负责；每次打开重新读取，设置更改在下次打开生效。配置缺失、不可读或没有定位规则时保留窗口，状态为 `configuration-unavailable`；`placementSource`、`placementRule` 与执行结果一同通过现有状态接口提供。CLI 已有安装与权限，缺失或失败只报告布局状态，不改官方包或新增授权；每次入口请求合并为一个待布局状态，单个布局 Process 为 writer。后台自启动／重连没有用户入口请求时保持窗口。成功与否以实际窗口位置和原始任务验收为准。
 
 验收：同一已安装Plus，首次冷启动命令能打开原签名宿主并在首次脚本前适配；已运行执行同一命令时entryRequests增加、官方PID/PlusPID保持；Plus退出后同一入口能再次启动；实际F6或其硬件别名亦触发上述入口；Plus没有Dock item，官方Codex有Dock item；默认已有生产Codex无通道时激活并保持任务，等其下一次正常退出后才带调试启动。独立profile仍逐项报告，不把测试profile当作生产采用。
