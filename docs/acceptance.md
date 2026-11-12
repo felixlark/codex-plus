@@ -109,3 +109,16 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 界面工具：官方 Computer Use 用于 Plus 设置与菜单退出。它按 bundle ID 选中日常实例，独立实例选择受限；按用户对原生控制的既有授权，使用 agent-desktop 1.2.0 的窗口编号 `w-8692`／`w-8750` 做验收，必要按键走 `--headed press --window-id`。公开 CoreGraphics 窗口清单与只读 CDP 状态作辅助证据。GUI 操作由主 Agent 单 writer 执行。独立资料沿用现有 acceptance-20261110，保留已有测试项目与草稿。
 
 证据位于 `~/Library/Logs/codex-plus/unified-entry-20261112/`：tests-final.log、build.log、install.log、installed-acceptance-status.json、fixture-*.json、installed-snake-final.png、installed-snake-light.png；早期不通过记录保留。正式现场恢复到默认启动参数的菜单栏 Plus，日常 Codex 与任务保留；独立测试实例正常退出，独立验收与日常首次冷启动分别报告。
+
+## 0.4.1 导航位置与图标修正（2026-11-12）
+
+按用户最新纠正：贪吃蛇移到左上导航按钮组 Projects／项目正下方，Codex Plus 保持左下角第一项并重设计图标。执行电脑 Sol，正式安装版 0.4.1 build 7；Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:05:08。构建与安装 Mach-O UUID 同为 `9598A7F8-F549-3AEA-8E71-8B12FCD42CAA`，安装版严格验签通过。
+
+- [x] 官方 Computer Use 截图与可访问性树确认 Projects 后紧接贪吃蛇，底部顺序为 Plus、Usage、Profile，入口各一份。
+- [x] 只读页面尺寸核对：Projects、贪吃蛇、Plus 均为 36×36，SVG 均为 20×20，颜色相同；上方组间距为原生 8px，现有分隔线保留。Plus 使用侧栏窗口加号，蛇使用同线宽轮廓。
+- [x] 通过页面 Plus 实际打开安装版原生设置，`settingsRequests=1`，页面接入提示正确；关闭设置后通过蛇按钮打开游戏，真实关闭按钮返回原聊天。
+- [x] 替换 Plus 后接入已运行的日常官方宿主 40564，未退出或重载宿主；Plus 81083、controller 81102，页面与项目排序 active，现有任务继续。前版日常实例尚未接入的历史边界由本次当前运行态接入证据补充。
+- [x] 10 项 Node、33 项 Swift 检查通过；签名构建、安装与 `git diff --check` 通过。图标静态检查无发现。小范围位置与样式修正复用前版游戏逻辑及生命周期验证。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+官方 Computer Use 为本次 GUI 取证与点击主工具；菜单栏退出无窗口的旧 Plus 使用已授权的原生菜单工具。agent-desktop 截图因缺 Screen Recording 权限未成功，未新增权限，最终保存官方 Computer Use 实际返回的截图。证据：`~/Library/Logs/codex-plus/entry-refinement-20261112/`，含 installed-navigation.png、installed-snake.png、installed-layout.json、installed-status.json、tests.log、build.log。最终设置和游戏窗口关闭，菜单栏 Plus 与日常官方宿主正常运行。

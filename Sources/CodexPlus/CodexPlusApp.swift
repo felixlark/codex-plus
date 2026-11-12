@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.4.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.4.1\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -79,7 +79,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.4.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.4.1",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,

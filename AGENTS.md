@@ -7,7 +7,7 @@ Codex Web App enhancements, workspace observation, settings, and the status CLI.
 
 All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
 The page's Codex Plus button is the first item in the lower-left navigation footer;
-the Snake validation button is the last item in that same footer. Keep the independent menu-bar app.
+the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
 
 ## Commands
 
