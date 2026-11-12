@@ -1,108 +1,128 @@
 import {createHash} from 'node:crypto';
+export const backgroundGuardBinding='__codexPlusBackgroundGuard';
+export const reviewedBackgroundDependency=Object.freeze({path:'webview/assets/async/514766.2d2f1ddc86.js',sha256:'943016fbef25cbfe62703ea7ab5ee7d2e9971b8db3681147fb983e7bd12e6f39'});
+export const reviewedBackgroundResource=Object.freeze({path:'webview/assets/async/739301.37a39f26d6.js',sha256:'acc2174e4ed3d2068af26c1731f08e8978c853864aea9c0a917ae9d246885058'});
 
-export const reviewedSuggestionResource=Object.freeze({
-  path:'webview/assets/async/864380.74f4445879.js',
-  sha256:'63ad0177e7b2d888cbf80db7ed6167c73f0012a652fc6ecd10f34052a1e87ff0',
-});
-
-export function adaptSuggestions(source) {
-  if(createHash('sha256').update(source).digest('hex')!==reviewedSuggestionResource.sha256)return {supported:false,reason:'unreviewed-suggestion-source'};
-  source=source.toString();
-  const widget='i.dataset.cumberbatch="",i.inert=!0',reuse='if(r.text===o?.prediction.text)return{...o,prediction:r};';
-  if(source.split(widget).length!==2||source.split(reuse).length!==2)return {supported:false,reason:'suggestion-structure'};
-  const metadata='i.dataset.cumberbatch="",!("kind"in l)&&l.sourceTurnId&&(()=>{const s=e.get(f.ww);if(s?.latestTurnId===l.sourceTurnId)i.dataset.codexPlusSuggestion=JSON.stringify({protocol:1,hostId:s.hostId,threadId:s.threadId,sourceTurnId:l.sourceTurnId,expected:n.textContent});})(),i.inert=!0';
-  source=source.replace(widget,metadata).replace(reuse,'if(r.text===o?.prediction.text&&r.sourceTurnId===o?.prediction.sourceTurnId&&("kind"in r)===("kind"in o.prediction))return{...o,prediction:r};');
-  return {supported:true,source:'globalThis.__codexPlusSuggestionHost=1;'+source};
+export function adaptBackgroundSuggestions(original,adapted=original.toString()) {
+  if(createHash('sha256').update(original).digest('hex')!==reviewedBackgroundResource.sha256)return {supported:false,reason:'unreviewed-background-source'};
+  const register='function nG(e,t,I,C){',cache='e.queryClient.setQueryData((0,t_.pv)(u,d,l),f)';
+  if(adapted.split(register).length!==2||adapted.split(cache).length!==2)return {supported:false,reason:'background-structure'};
+  const registration='globalThis.__codexPlusBackgroundSuggestions.register(globalThis.__codexPlusBackgroundNative(e,t,I,()=>nH&&(C?.()??!0)&&(0,nr.oI)(),{drafts:n("TSib"),identities:n("V3rO"),composer:n("Sd8U"),wrap:n("GNwQ").GB}));';
+  const captured=`(${cache},globalThis.__codexPlusBackgroundSuggestions.capture(t,c,f,()=>a()&&e.get(t_.S8)===h&&e.get(G.chatGptAuthenticatedAccountId$)===u&&e.get(G.o8)===d))`;
+  const prefix=`;globalThis.__codexPlusBackgroundNative=(${createNativeSuggestionContext.toString()});globalThis.__codexPlusBackgroundSuggestions??=(${createBackgroundSuggestionBridge.toString()})(${JSON.stringify(backgroundGuardBinding)});\n`;
+  return {supported:true,source:prefix+adapted.replace(register,register+registration).replace(cache,captured)};
 }
 
-// The renderer exposes observations and synchronous guarded actions. Only the
-// connected controller schedules actions; losing it leaves any accepted draft.
-export function installSuggestionReader() {
-  if(globalThis.__codexPlusSuggestions?.protocol===1)return;
-  let revision=0,pending=null,composing=false;
-  const events=['keydown','pointerdown','beforeinput','compositionstart','compositionend','focusout'];
-  const changed=e=>{if(e.type==='compositionstart')composing=true;if(e.type==='compositionend')composing=false;if(e.isTrusted)revision++;};
-  for(const event of events)document.addEventListener(event,changed,true);
-  const blurred=()=>{revision++;};window.addEventListener('blur',blurred);
-  function route(){return new URL(location.href).searchParams.get('initialRoute')??'/';}
-  function visible(e){return !!e&&e.isConnected&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';}
-  function blocked(root){return [...document.querySelectorAll('dialog[open],[role="dialog"],[role="alertdialog"]')].some(visible)||!!root.querySelector('[data-attachment-id],[data-composer-attachments-row] > *,[data-composer-takeover]');}
-  function editorText(editor){return editor.pmViewDesc?.node?.textContent??editor.textContent;}
-  function sendButton(root){const buttons=[...root.querySelectorAll('button[aria-label="Send"],button[aria-label="发送"]')].filter(visible);return buttons.length===1&&!buttons[0].disabled?buttons[0]:null;}
-  function context(editor,meta){
-    const current=route(),match=current.match(/^\/(local|remote)\/([^/?#]+)(?:[?#].*)?$/);
-    const root=editor.closest('[data-codex-composer-root]');
-    if(!match||match[2]!==meta.threadId||!root||root.querySelectorAll('[data-codex-composer="true"]').length!==1)return null;
-    return {root,route:current};
+// These adapters only use the reviewed host's native client and existing scope.
+export function createNativeSuggestionContext(scope,hostId,client,isCurrent,{drafts,identities,composer,wrap}) {
+  const dispose=value=>value?.[Symbol.dispose]?.();
+  function probe(target){
+    if(target.hostId!==hostId||!isCurrent())return false;
+    const aliases=new Set(keys(target));
+    if([...aliases].some(key=>drafts.lD(scope,key)))return false;
+    let root=scope.node;while(root.parent)root=root.parent;
+    const seen=new Set();
+    function visit(node,ancestors){
+      if(seen.has(node))return true;seen.add(node);
+      const chain=new Map(ancestors);chain.set(node.token.id,node);
+      if(node.token===composer.PR&&aliases.has(node.key)&&drafts.rD(wrap(composer.PR,chain,node)))return false;
+      for(const entries of node.retainedScopeEntries.values())for(const entry of entries.values())if(!visit(entry.node,chain))return false;
+      return true;
+    }
+    return visit(root,scope.chain);
   }
-  function eligible(editor,root){return !composing&&document.visibilityState==='visible'&&document.hasFocus()&&visible(editor)&&editor.contentEditable==='true'&&!blocked(root)&&(document.activeElement===editor||document.activeElement===document.body);}
+  function keys(target){return [...new Set([identities.JJ(scope,target.threadId),identities.s8(target.threadId)])];}
+  async function validate(target,ownMessageId){
+    const values=[];
+    try{
+      const meta=await client.getCachedConversationMetadata(target.threadId);values.push(meta);
+      const follow=await client.getFollowUpContext(target.threadId);values.push(follow);
+      const history=await client.getLoadedConversationHistory(target.threadId);values.push(history);
+      const execution=await client.getThreadExecutionState(target.threadId);values.push(execution);
+      const archiving=await client.isConversationArchiving(target.threadId);
+      if(!probe(target)||archiving||meta?.streamRole?.role!=='owner'||meta.ephemeral||meta.sideConversation||follow?.resumeState!=='resumed'||follow.isClosedSubagent||follow.mode==='durable'||follow.latestCollaborationMode?.mode==='plan')return false;
+      const turns=history?.turns;if(!Array.isArray(turns))return false;
+      const latest=turns.filter(t=>t.turnId!=null).at(-1);
+      if(latest?.turnId!==target.latestTurnId||latest.status!=='completed'||latest.automationKind!=null||latest.params?.turnTrigger?.startsWith('automation_'))return false;
+      const pending=turns.filter(t=>t.status==='inProgress');
+      if(pending.some(t=>t.turnId!=null||!ownMessageId||t.params?.clientUserMessageId!==ownMessageId)||pending.length>1)return false;
+      // Before native dispatch its own optimistic turn is present. Other work
+      // must never be steered, queued behind, or mistaken for that turn.
+      if(execution?.hasMisalignmentPolicyViolation||execution?.activeTurnId!=null||execution?.inProgress&&pending.length!==1)return false;
+      return probe(target);
+    }finally{for(const value of values.reverse())dispose(value);}
+  }
+  return {hostId,client,probe,keys,validate,send:(target,text,messageId,assertCurrent)=>client.startTurnWithOutcome(target.threadId,{request:{threadId:target.threadId,input:[{type:'text',text,text_elements:[]}],clientUserMessageId:messageId},context:{inheritThreadSettings:true,assertRequestCurrent:assertCurrent}})};
+}
+
+export function createBackgroundSuggestionBridge(binding,environment={}) {
+  const now=environment.now??Date.now,contexts=new Map(),candidates=new Map(),guards=new Map();
+  let settings=null,expires=0,inputRevision=0;
+  const changed=event=>{if(event.isTrusted)inputRevision++;};
+  const doc=environment.document??globalThis.document;
+  for(const type of ['beforeinput','pointerdown','compositionstart','keydown'])doc?.addEventListener(type,changed,true);
+  const live=()=>settings?.enabled===true&&now()<expires;
+  const keyFor=t=>JSON.stringify([t.hostId,t.threadId,t.latestTurnId]);
+  function configure(next){
+    if(settings?.connection===next.connection&&next.revision<settings.revision)return;
+    if(!settings||settings.connection!==next.connection||settings.revision!==next.revision||settings.enabled!==next.enabled){candidates.clear();for(const resolve of guards.values())resolve(false);guards.clear();}
+    settings={...next};expires=now()+5000;
+  }
+  function register(context){contexts.set(context.hostId,context);}
+  function capture(client,target,prediction,current){
+    const context=contexts.get(target.hostId);
+    if(!live()||context?.client!==client||target.generationTrigger!=='live'||prediction.sourceTurnId!==target.latestTurnId||typeof prediction.text!=='string'||!prediction.text.trim()||!current())return;
+    const key=keyFor(target);
+    for(const [k,c]of candidates)if(c.target.hostId===target.hostId&&c.target.threadId===target.threadId)candidates.delete(k);
+    candidates.set(key,{key,target,prediction,current,context,born:now(),settings:{...settings}});
+  }
   function inspect(){
-    const base={supported:globalThis.__codexPlusSuggestionHost===1,route:route(),revision,focused:document.hasFocus()&&document.visibilityState==='visible'};
-    if(!base.supported)return {...base,reason:'page-reload-required'};
-    if(pending){const {editor,meta,root}=pending;return {...base,pending:true,key:pending.key,valid:pending.revision===revision&&pending.route===base.route&&eligible(editor,root)&&editorText(editor)===meta.expected&&!editor.querySelector('[data-cumberbatch]'),ready:!!sendButton(root),empty:editorText(editor)==='',working:[...root.querySelectorAll('button[aria-label="Stop"],button[aria-label="停止"]')].some(visible)};}
-    const widgets=[...document.querySelectorAll('[data-cumberbatch][data-codex-plus-suggestion]')].filter(visible);
-    const candidates=[];
-    for(const widget of widgets){try{
-      const meta=JSON.parse(widget.dataset.codexPlusSuggestion),editor=widget.closest('[data-codex-composer="true"]');
-      if(meta.protocol!==1||typeof meta.expected!=='string'||!meta.expected.trim()||typeof meta.hostId!=='string'||typeof meta.threadId!=='string'||typeof meta.sourceTurnId!=='string'||!editor)continue;
-      const ctx=context(editor,meta);if(!ctx)continue;
-      const key=JSON.stringify([meta.hostId,meta.threadId,meta.sourceTurnId]);
-      // A prediction is a decoration, so its visible text is outside the doc.
-      const empty=editor.pmViewDesc?.node?editor.pmViewDesc.node.textContent==='':editor.cloneNode(true);
-      let blank=empty===true;if(empty instanceof Node){empty.querySelectorAll('[data-cumberbatch]').forEach(e=>e.remove());blank=empty.textContent.trim()==='';}
-      candidates.push({key,revision,route:ctx.route,eligible:blank&&eligible(editor,ctx.root),meta,editor,root:ctx.root,widget});
-    }catch{}}
-    if(candidates.length!==1)return {...base,reason:candidates.length?'ambiguous-composer':'no-suggestion'};
-    const c=candidates[0];return {...base,key:c.key,eligible:c.eligible,reason:c.eligible?'ready':'inactive-or-user-content'};
+    for(const [key,c]of candidates)if(now()-c.born>60000||!c.current())candidates.delete(key);
+    return {supported:true,protocol:2,registered:contexts.size,inputRevision,candidates:live()?[...candidates.values()].map(c=>({key:c.key,target:c.target})):[]};
   }
-  function accept(expected){
-    const snapshot=inspect();if(!snapshot.eligible||snapshot.key!==expected.key||snapshot.route!==expected.route||snapshot.revision!==expected.revision)return {ok:false,reason:'changed-before-accept'};
-    const widget=[...document.querySelectorAll('[data-codex-plus-suggestion]')].find(e=>{try{const m=JSON.parse(e.dataset.codexPlusSuggestion);return JSON.stringify([m.hostId,m.threadId,m.sourceTurnId])===expected.key&&visible(e);}catch{return false;}});
-    if(!widget)return {ok:false,reason:'suggestion-gone'};
-    const editor=widget.closest('[data-codex-composer="true"]'),meta=JSON.parse(widget.dataset.codexPlusSuggestion),ctx=context(editor,meta);
-    editor.focus({preventScroll:true});
-    pending={editor,meta,root:ctx.root,key:expected.key,route:ctx.route,revision};
-    editor.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',code:'Tab',keyCode:9,which:9,bubbles:true,cancelable:true}));
-    editor.dispatchEvent(new KeyboardEvent('keyup',{key:'Tab',code:'Tab',keyCode:9,which:9,bubbles:true}));
-    return {ok:true,revision};
+  function probe(target){try{return {ok:contexts.get(target.hostId)?.probe(target)===true,inputRevision};}catch{return {ok:false,inputRevision};}}
+  function requestGuard(c,operation){
+    if(!live()||settings.connection!==c.settings.connection||settings.revision!==c.settings.revision)return Promise.resolve(false);
+    const requestId=globalThis.crypto.randomUUID();
+    return new Promise(resolve=>{
+      const timer=setTimeout(()=>{guards.delete(requestId);resolve(false);},2000);
+      guards.set(requestId,ok=>{clearTimeout(timer);resolve(ok===true);});
+      try{globalThis[binding](JSON.stringify({protocol:2,requestId,operation,key:c.key,connection:settings.connection,revision:settings.revision}));}catch{clearTimeout(timer);guards.delete(requestId);resolve(false);}
+    });
   }
-  function submit(key){const snapshot=inspect();if(!pending||pending.key!==key||!snapshot.valid||!snapshot.ready)return {ok:false,reason:'changed-before-send'};const button=sendButton(pending.root);button.click();return {ok:true};}
-  function cancel(){pending=null;}
-  function dispose(){cancel();for(const event of events)document.removeEventListener(event,changed,true);window.removeEventListener('blur',blurred);delete globalThis.__codexPlusSuggestions;}
-  globalThis.__codexPlusSuggestions={protocol:1,inspect,accept,submit,cancel,dispose};
+  function resolveGuard(requestId,ok){const resolve=guards.get(requestId);guards.delete(requestId);resolve?.(ok);}
+  async function submit({key,operation}){
+    const c=candidates.get(key);candidates.delete(key);
+    if(!c)return {outcome:'rejected',reason:'candidate-gone'};
+    const messageId=globalThis.crypto.randomUUID();
+    const valid=()=>live()&&settings.connection===c.settings.connection&&settings.revision===c.settings.revision&&c.current()&&c.context===contexts.get(c.target.hostId)&&probe(c.target).ok;
+    const assertCurrent=async()=>{
+      if(!valid()||!await c.context.validate(c.target,messageId)||!valid()||!await requestGuard(c,operation)||!valid())throw Error('Codex Plus suggestion admission cancelled');
+    };
+    try{
+      await assertCurrent();
+      const outcome=await c.context.send(c.target,c.prediction.text,messageId,assertCurrent);
+      return {outcome:['accepted','rejected','unconfirmed'].includes(outcome)?outcome:'unconfirmed'};
+    }catch{return {outcome:'unconfirmed'};}
+  }
+  function dispose(){configure({connection:settings?.connection,revision:(settings?.revision??0)+1,enabled:false});for(const type of ['beforeinput','pointerdown','compositionstart','keydown'])doc?.removeEventListener(type,changed,true);}
+  return {protocol:2,configure,register,capture,inspect,probe,submit,resolveGuard,dispose};
 }
 
 export class SuggestionCoordinator {
-  constructor({attempts=[],persist}){this.attempts=new Set(attempts);this.persist=persist;this.enabled=false;this.revision=0;this.baselines=new Set();this.pending=null;this.cancellations=[];this.counts={attempted:0,accepted:0,submitted:0,unknown:0};this.reason='disabled';}
-  configure(enabled){if(this.enabled===enabled)return;this.enabled=enabled;this.revision++;this.baselines.clear();if(this.pending)this.cancellations.push(this.pending.id);this.pending=null;this.reason=enabled?'waiting-for-new-suggestion':'disabled';}
-  async tick(pages,act){
+  constructor({attempts=[],persist}){this.attempts=new Set(attempts);this.persist=persist;this.enabled=false;this.revision=0;this.pending=null;this.counts={attempted:0,accepted:0,submitted:0,unknown:0};this.reason='disabled';}
+  configure(enabled){if(this.enabled===enabled)return;this.enabled=enabled;this.revision++;this.reason=enabled?'waiting-for-new-suggestion':'disabled';}
+  async tick(pages,{probe,submit}){
+    if(!this.enabled||this.pending)return;
     const revision=this.revision;
-    for(const id of this.cancellations.splice(0))await act(id,'cancel').catch(()=>{});
-    if(!this.enabled)return;
-    if(this.pending){
-      const p=this.pending,page=pages.find(p=>p.id===this.pending.id),s=page?.snapshot;
-      // Native submission can move focus and clear/recreate the editor. Once
-      // sent, observe the result without scheduling another action.
-      if(p.sent){if(s&&s.key===p.key&&s.route===p.route&&(s.empty||s.working)){this.counts.submitted++;this.reason='submitted';}else{this.counts.unknown++;this.reason='submission-unconfirmed';}this.pending=null;await act(p.id,'cancel');return;}
-      if(!s||s.key!==p.key||s.route!==p.route||!s.focused||s.revision!==p.inputRevision||!s.valid){this.pending=null;await act(p.id,'cancel');this.reason='cancelled';return;}
-      if(!s.ready){this.pending=null;await act(p.id,'cancel');this.reason='send-unavailable';return;}
+    for(const page of pages)for(const candidate of page.snapshot.candidates??[]){
+      if(this.attempts.has(candidate.key))continue;
+      if(!await probe(candidate.target)||!this.enabled||revision!==this.revision){this.reason='draft-or-state-changed';continue;}
+      this.attempts.add(candidate.key);
+      try{await this.persist([...this.attempts]);}catch{this.configure(false);this.reason='attempt-storage-unavailable';return;}
       if(!this.enabled||revision!==this.revision)return;
-      // Clear before awaiting so a failed command is never retried.
-      this.pending=null;
-      let result;try{result=await act(p.id,'submit',p.key);}catch{this.counts.unknown++;this.reason='submission-unconfirmed';return;}
-      if(result?.ok&&this.enabled&&revision===this.revision)this.pending={...p,sent:true};
-      else this.reason=result?.reason??'cancelled';
-      return;
-    }
-    for(const page of pages){const s=page.snapshot;
-      if(!this.baselines.has(page.id)){this.baselines.add(page.id);if(s.key)this.attempts.add(s.key);continue;}
-      if(!s.supported||!s.eligible||!s.key||this.attempts.has(s.key))continue;
-      this.attempts.add(s.key);
-      try{await this.persist([...this.attempts]);}catch{this.enabled=false;this.revision++;this.reason='attempt-storage-unavailable';return;}
-      if(!this.enabled||this.revision!==revision)return;
-      this.counts.attempted++;
-      let result;try{result=await act(page.id,'accept',{key:s.key,route:s.route,revision:s.revision});}catch{this.reason='accept-unconfirmed';return;}
-      if(result?.ok&&this.enabled&&revision===this.revision){this.counts.accepted++;this.pending={id:page.id,key:s.key,route:s.route,inputRevision:result.revision??s.revision,sent:false};this.reason='accepted';}else this.reason=result?.reason??'cancelled';
+      const operation=globalThis.crypto.randomUUID();this.pending={id:page.id,key:candidate.key,target:candidate.target,operation,revision};this.counts.attempted++;
+      try{const result=await submit(page.id,{key:candidate.key,operation});if(result?.outcome==='accepted'){this.counts.accepted++;this.counts.submitted++;this.reason='submitted-in-background';}else if(result?.outcome==='rejected')this.reason='native-rejected';else{this.counts.unknown++;this.reason='submission-unconfirmed';}}catch{this.counts.unknown++;this.reason='submission-unconfirmed';}finally{this.pending=null;}
       return;
     }
   }

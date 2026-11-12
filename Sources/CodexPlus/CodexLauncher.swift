@@ -122,7 +122,7 @@ final class CodexLauncher: ObservableObject {
         else if suggestion?["supported"] as? Bool == false { suggestionSummary = "当前 Codex 版本待适配" }
         else if suggestion?["enabled"] as? Bool == false { suggestionSummary = "自动发送已暂停，请重新启用" }
         else if suggestion?["pageReady"] as? Bool != true { suggestionSummary = "当前页面需重载后接入" }
-        else { suggestionSummary = "已开启 · 当前聊天的新建议将自动发送" }
+        else { suggestionSummary = "已开启 · 前后台聊天的新建议将自动发送" }
         pageSummary = connected && entries?["phase"] as? String == "active"
             ? "已接入 · 左下角 Plus 设置与上方贪吃蛇"
             : (entries?["supported"] as? Bool == false ? "当前 Codex 版本待适配；菜单栏设置可用" : "等待页面连接；普通启动后需正常退出，再按 F6")

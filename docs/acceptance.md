@@ -2,6 +2,19 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.6.0 后台原生建议（2026-11-12）
+
+Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `CAA6708B-4AC6-3DA6-AB6C-98449F774272`，安装版严格验签通过。官方宿主 `26.1106.51428` 的包未修改。JS资源安装与源码SHA256一致。开关通过原UserDefaults保留true，原生设置窗实际显示“无需打开会话”“已开启 · 前后台聊天的新建议将自动发送”。
+
+- build12真实后台发送：保持其他聊天选中，官方send_message_to_thread只给既有测试chat `01a1ce66-e97c-73c1-abdc-1a523ff783aa` 发送无工具/文件的seed；原生live建议触发。自动产生用户消息“只回复 CP-BACKGROUND 自动续轮完成，本轮到此结束”，下一轮 `01a1cf4a-8ecc-7260-968d-d1e64d0ca886` completed，官方read_thread读回。整个发送前未导航到目标chat；用户期间可自行切换其他chat。随后另一原生建议也自动续轮，证实可能连续执行。
+- 草稿保护：上述成功后才打开测试chat，填入36字未发送的本案终止验收草稿，再切走。后台seed轮 `01a1cf4b-f131-79a2-bd5e-093f95051183` completed并实际生成新的live候选；target probe为false，协调器显示draft-or-state-changed，后续官方read_thread仍停在该轮，未自动发送。草稿保留，开关始终true。检查覆盖切走后的原生保留composer节点。
+- 最终build13只移除候选条数的硬上限，发送与检查链路未变化；复用build12真实发送/保护证据，7项定向Node测试重跑通过。原候选完整scripts/test为17 Node +35 Swift全部通过。签名build/install后主页面重载，bridge protocol2/registered3、mode background-native、pageReady true已读回。重启恢复不重放来源轮。
+- 已核代码接缝：原生J8Ro后台live缓存写入，GNwQ原生scope包装及retainedScopeEntries生命周期；独立复审见[评审记录](reviews/background-suggestions-egm.md)。关闭/持久化故障/跨窗口重复/晚期许可拒绝有确定性测试；本轮保持用户开启偏好，没有为验收临时关闭总开关。原生未生成或过滤的场景不声称覆盖。
+
+证据：`~/Library/Logs/codex-plus/background-suggestion-20261112/`，含official-thread-readback.json、seed-route.jsonl、after-background.jsonl、draft-block-candidate.jsonl、tests.txt、build13.txt及运行状态。运行态以该目录RESULT.md的最新读回为准。
+
+0.5.2的F6定位基线沿用：另一owner已通过NanoKVM真实USB键盘完成热启动entry6→7和正常退出后的冷启动，旧Plus4922/host5156退出，新Plus41501/controller41502/host41520；DELL外屏external_fill正确，autoSend true与三项增强恢复，按键释放。该证据绑定0.5.2 build11，未声称build13重新做了KVM冷启动。原始记录 `~/Library/Logs/codex-plus/kvm-acceptance-20261112/`。
+
 ## 0.5.2 F6 沿用 Dock Switch 定位（2026-11-12）
 
 Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开从 Dock Switch 安装配置读取 ChatGPT 的 `placement`，当前为 `external_fill`；定位由 Dock Switch 按实际宿主 PID 执行。配置修改下次打开生效，读取失败保留窗口位置。构建与安装 Mach-O UUID 同为 `414C2C9A-79BC-382B-BDC9-F8B9A81FCFDC`，Developer ID Team HJG65XBC25、Hardened Runtime 和安全时间戳有效，安装版严格验签通过。旧版备份在 `~/Library/Caches/codex-plus/previous-install.jkIOi7/Codex Plus.app`。

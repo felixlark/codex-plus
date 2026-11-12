@@ -8,7 +8,7 @@ import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
-import {reviewedSuggestionResource,adaptSuggestions,installSuggestionReader,SuggestionCoordinator} from './suggestion-auto-send.mjs';
+import {backgroundGuardBinding,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
@@ -30,8 +30,28 @@ let attempts=[],attemptStoreReady=true;
 try{const value=JSON.parse(await fs.readFile(attemptFile,'utf8'));if(!Array.isArray(value)||value.some(k=>typeof k!=='string'))throw Error('Invalid attempt store');attempts=value;}catch(error){if(error.code!=='ENOENT')attemptStoreReady=false;}
 const suggestions=new SuggestionCoordinator({attempts,persist:async keys=>{if(!attemptStoreReady)throw Error('Attempt store unavailable');try{await fs.writeFile(attemptFile+'.tmp',JSON.stringify(keys),{mode:0o600});await fs.rename(attemptFile+'.tmp',attemptFile);}catch(error){attemptStoreReady=false;throw error;}}});
 suggestions.configure(values['auto-send-suggestions']&&attemptStoreReady);
-const suggestionSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'){(${installSuggestionReader.toString()})();}`;
-function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean')suggestions.configure(message.enabled&&attemptStoreReady);}catch{}}
+const suggestionPolicy=()=>({connection,revision:suggestions.revision,enabled:suggestions.enabled&&suggestionSupported&&attemptStoreReady});
+async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Promise.allSettled([...sessions].filter(([,s])=>s.main).map(([id])=>command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.configure(${JSON.stringify(policy)})`})));
+}
+function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
+async function probeSuggestions(target){
+  const generation=suggestions.revision,initial=pageSet(),ids=[...sessions].filter(([,s])=>s.main).map(([id])=>id);
+  if(!ids.length)return false;
+  const probe=async()=>Promise.all(ids.map(async id=>{const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.probe(${JSON.stringify(target)})`,returnByValue:true});return r.result.value;}));
+  try{const first=await probe();if(first.some(p=>!p?.ok))return false;const last=await probe();return suggestions.enabled&&generation===suggestions.revision&&initial===pageSet()&&last.every((p,i)=>p?.ok&&p.inputRevision===first[i].inputRevision);}catch{return false;}
+}
+async function suggestionGuard(message){
+  const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
+  if(stopping||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  let request;try{request=JSON.parse(event.payload);}catch{return;}
+  if(request.protocol!==2||typeof request.requestId!=='string'||request.requestId.length>100)return;
+  const p=suggestions.pending;
+  let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
+  if(ok)ok=await probeSuggestions(p.target);
+  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping;
+  await command(message.sessionId,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.resolveGuard(${JSON.stringify(request.requestId)},${ok})`,contextId:event.executionContextId});
+}
+function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean'){suggestions.configure(message.enabled&&attemptStoreReady);void updateSuggestionPolicy();}}catch{}}
 
 const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
@@ -70,14 +90,16 @@ async function main(){
       try{
         const entry=archive.entries.find(e=>e.path===resource.path);if(!entry)throw new Error('Unsupported resource');
         const source=await archive.read(entry);
-        const adaptation=await resource.adapt(source);
+        let adaptation=await resource.adapt(source);
+        if(resource.path===reviewedHostResource.path&&adaptation.supported){
+          const dependency=archive.entries.find(e=>e.path===reviewedBackgroundDependency.path);
+          if(dependency&&createHash('sha256').update(await archive.read(dependency)).digest('hex')===reviewedBackgroundDependency.sha256){const background=adaptBackgroundSuggestions(source,adaptation.source);suggestionSupported=background.supported;if(background.supported)adaptation=background;}
+        }
         if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
         resource.replacement=Buffer.from(adaptation.source).toString('base64');
       }catch(error){state.projectOrder={supported:false,phase:'unsupported-host',reason:error.message};}
     }
-    if(!state.projectOrder.supported)resources.length=0;
-    const entry=archive.entries.find(e=>e.path===reviewedSuggestionResource.path);
-    if(entry&&state.projectOrder.supported){const adaptation=adaptSuggestions(await archive.read(entry));if(adaptation.supported){suggestionSupported=true;resources.push({...reviewedSuggestionResource,kind:'suggestion',url:'app://-/'+reviewedSuggestionResource.path.replace(/^webview\//,''),replacement:Buffer.from(adaptation.source).toString('base64')});}}
+    if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
   if(values.attach){
@@ -108,7 +130,7 @@ async function main(){
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
     if(message.method==='Runtime.executionContextDestroyed'){sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
     if(message.method==='Runtime.executionContextsCleared'){sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
-    if(message.method==='Runtime.bindingCalled')void nativeAction(message).catch(fail);
+    if(message.method==='Runtime.bindingCalled'){void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
@@ -123,13 +145,13 @@ async function main(){
       if(targetInfo.type==='page'&&!stopping){
         const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
         if(resources.length){work.push(command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
-        if(suggestionSupported)work.push(command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:suggestionSource}).then(result=>{session.suggestionScript=result.identifier;}));
+        if(suggestionSupported)work.push(command(sessionId,'Runtime.addBinding',{name:backgroundGuardBinding}));
         if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
         await command(sessionId,'Runtime.runIfWaitingForDebugger');
         await Promise.all(work);
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
         if(session.main){
-          if(suggestionSupported){await command(sessionId,'Runtime.evaluate',{expression:suggestionSource});await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.cancel()'});}
+          if(suggestionSupported)await updateSuggestionPolicy();
           if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
           if(runtime.result.value===6)state.projectOrder.phase='active';
@@ -159,6 +181,7 @@ async function main(){
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();
+  const suggestionHeartbeat=setInterval(()=>{if(!stopping)void updateSuggestionPolicy();},1000);
   let inspecting=false;
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID){clearInterval(monitor);void shutdown();return;}
@@ -169,13 +192,12 @@ async function main(){
         const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
         if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}}
       if(suggestionSupported){
-        const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.inspect()',returnByValue:true});if(r.result.value)pages.push({id,snapshot:r.result.value});}
-        await suggestions.tick(pages,async(id,action,arg)=>{
+        const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.inspect()',returnByValue:true});if(r.result.value)pages.push({id,snapshot:r.result.value});}
+        await suggestions.tick(pages,{probe:probeSuggestions,submit:async(id,arg)=>{
           if(stopping||!cdp.open)throw Error('Controller disconnected');
-          const expression=`globalThis.__codexPlusSuggestions?.${action}(${arg===undefined?'':JSON.stringify(arg)})`;
-          const r=await command(id,'Runtime.evaluate',{expression,returnByValue:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
-        });
-        const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,pageReady:pages.some(p=>p.snapshot.supported)};
+          const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.submit(${JSON.stringify(arg)})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
+        }});
+        const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,mode:'background-native',pageReady:pages.length>0&&pages.every(p=>p.snapshot.registered>0)};
         if(!snapshot.pageReady)snapshot.reason='page-reload-required';
         if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
       }
@@ -190,7 +212,7 @@ async function shutdown(){
     for(const session of sessions.keys())await command(session,'Runtime.runIfWaitingForDebugger').catch(()=>{});
     while(inFlight.size)await Promise.allSettled([...inFlight]);
     for(const [id,session]of sessions){
-      if(suggestionSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.dispose()'}).catch(()=>{});if(session.suggestionScript)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.suggestionScript}).catch(()=>{});}
+      if(suggestionSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
       if(featureSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
       await command(id,'Fetch.disable').catch(()=>{});
     }

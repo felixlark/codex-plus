@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.5.2\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.6.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -89,7 +89,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.5.2",
+                return ["ok": true, "app": "Codex Plus", "version": "0.6.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -251,7 +251,7 @@ struct SettingsView: View {
             Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
             Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
             Toggle("自动发送建议提示词", isOn: $model.autoSendSuggestions)
-            Text("当前聊天出现新的建议后自动采纳并发送，可能连续开启后续轮次。关闭可随时停止。")
+            Text("聊天在后台产生新的原生建议后自动发送，无需打开会话。可能连续开启后续轮次；关闭后停止尚未提交的动作。")
                 .font(.callout).foregroundColor(.secondary)
             Text("建议提示词：\(launcher.suggestionSummary)").font(.callout).foregroundColor(.secondary)
             Divider()
