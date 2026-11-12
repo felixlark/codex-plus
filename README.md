@@ -12,7 +12,7 @@ Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供统一增�
 
 0.3.0 通过现有 Karabiner 的 F6 规则打开 Codex Plus，再启动或激活官方 Codex。Codex Plus 不显示 Dock 图标；官方 Codex 仍有自己的 Dock 图标。项目按任务活动自动置顶，后台完成也会参与排序；手动重载可恢复所选聊天、原生草稿及活动顺序。当前真实验收覆盖本地 Codex 项目，远程和 ChatGPT 来源保留未验收。
 
-已有官方 Codex 若以普通方式运行，F6 会激活它；正常退出后再从 F6 启动，增强才会装入。启动器不会关闭已有任务，也不自动重载页面。窗口布局在宿主启动后按实际 PID 交给已有 Dock Switch，保持原 F6 的右侧布局。
+已有官方 Codex 若以普通方式运行，F6 会激活它；正常退出后再从 F6 启动，增强才会装入。启动器不会关闭已有任务，也不自动重载页面。0.5.2 起，每次打开时从 Dock Switch 安装版的已保存配置读取 ChatGPT 的定位规则，按实际宿主 PID 交给 Dock Switch 执行。更改 Dock Switch 定位设置后，下次打开即可生效；配置缺失或不可读时保留窗口位置，状态显示 `configuration-unavailable`。状态中的 `launcher.placementSource` 和 `placementRule` 可核对本次使用的规则。
 
 在 Codex 视图新建任务或切换任务时，仍会展开已收起的右侧栏。ChatGPT 视图保持收起。已展开的工作区保留现有标签页，当前任务手动收起后保持收起。
 

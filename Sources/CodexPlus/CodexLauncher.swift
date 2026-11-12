@@ -1,4 +1,5 @@
 import AppKit
+import CodexPlusCore
 
 /// The accessory app owns one external controller. It never terminates Codex.
 final class CodexLauncher: ObservableObject {
@@ -22,6 +23,7 @@ final class CodexLauncher: ObservableObject {
     private var needsPlacement = false
     private var placementProcess: Process?
     private var placementStatus = "idle"
+    private var placementRule: String?
     private let appURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
     private let profile: String?
     private let stateURL: URL
@@ -89,6 +91,7 @@ final class CodexLauncher: ObservableObject {
         ["hotKey": "F6", "hotKeySource": "Karabiner", "dockItem": false,
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
          "entryRequests": entryRequests, "lastEntrySource": lastEntrySource, "placement": placementStatus,
+         "placementSource": "dock-switch", "placementRule": placementRule as Any? ?? NSNull(),
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
@@ -144,6 +147,8 @@ final class CodexLauncher: ObservableObject {
     private func place(_ host: NSRunningApplication) {
         guard needsPlacement, placementProcess == nil else { return }
         needsPlacement = false
+        placementRule = DockSwitchPlacement.load(appName: appURL.deletingPathExtension().lastPathComponent)
+        guard let placementRule else { placementStatus = "configuration-unavailable"; return }
         let node = "/opt/homebrew/bin/node"
         let cli = "/Applications/dock-switch.app/Contents/Resources/app/bin/dock-switch-cli.js"
         guard FileManager.default.isExecutableFile(atPath: node), FileManager.default.fileExists(atPath: cli) else {
@@ -152,7 +157,7 @@ final class CodexLauncher: ObservableObject {
         // Target the already-open host, so placement cannot launch a second Codex.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: node)
-        process.arguments = [cli, "place", "--pid", String(host.processIdentifier), "--placement", "side_right_fill"]
+        process.arguments = [cli, "place", "--pid", String(host.processIdentifier), "--placement", placementRule]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] exited in DispatchQueue.main.async {
