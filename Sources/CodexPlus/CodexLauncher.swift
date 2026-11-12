@@ -4,6 +4,7 @@ import AppKit
 final class CodexLauncher: ObservableObject {
     @Published private(set) var summary = "F6 打开 Codex"
     @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
+    @Published private(set) var suggestionSummary = "已关闭"
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
     private var controllerOutput: Pipe?
@@ -76,6 +77,14 @@ final class CodexLauncher: ObservableObject {
         return false
     }
 
+    func setAutoSendSuggestions(_ enabled: Bool) {
+        let message: [String: Any] = ["type": "suggestion-settings", "version": 1, "enabled": enabled]
+        if let data = try? JSONSerialization.data(withJSONObject: message) {
+            try? controllerInput?.write(contentsOf: data + Data([10]))
+        }
+        refresh()
+    }
+
     func status() -> [String: Any] {
         ["hotKey": "F6", "hotKeySource": "Karabiner", "dockItem": false,
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
@@ -84,7 +93,8 @@ final class CodexLauncher: ObservableObject {
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
          "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],
-         "settingsRequests": settingsRequests]
+         "settingsRequests": settingsRequests,
+         "suggestionAutoSend": snapshot["suggestionAutoSend"] ?? ["enabled": false, "phase": "unavailable"]]
     }
 
     private func ownedHost() -> NSRunningApplication? {
@@ -102,6 +112,14 @@ final class CodexLauncher: ObservableObject {
         let entries = snapshot["pageEntries"] as? [String: Any]
         let order = snapshot["projectOrder"] as? [String: Any]
         let connected = controller?.isRunning == true
+        let suggestion = snapshot["suggestionAutoSend"] as? [String: Any]
+        if !UserDefaults.standard.bool(forKey: "autoSendSuggestions") { suggestionSummary = "已关闭" }
+        else if !connected { suggestionSummary = "等待连接" }
+        else if suggestion?["storageReady"] as? Bool == false { suggestionSummary = "记录暂不可用，已暂停" }
+        else if suggestion?["supported"] as? Bool == false { suggestionSummary = "当前 Codex 版本待适配" }
+        else if suggestion?["enabled"] as? Bool == false { suggestionSummary = "自动发送已暂停，请重新启用" }
+        else if suggestion?["pageReady"] as? Bool != true { suggestionSummary = "当前页面需重载后接入" }
+        else { suggestionSummary = "已开启 · 当前聊天的新建议将自动发送" }
         pageSummary = connected && entries?["phase"] as? String == "active"
             ? "已接入 · 左下角 Plus 设置与上方贪吃蛇"
             : (entries?["supported"] as? Bool == false ? "当前 Codex 版本待适配；菜单栏设置可用" : "等待页面连接；普通启动后需正常退出，再按 F6")
@@ -154,6 +172,7 @@ final class CodexLauncher: ObservableObject {
         var arguments = [resources.appendingPathComponent("controller.mjs").path, "--app", appURL.path, "--state", stateURL.path]
         if let profile { arguments += ["--profile", profile] }
         if attach { arguments.append("--attach") }
+        if UserDefaults.standard.bool(forKey: "autoSendSuggestions") { arguments.append("--auto-send-suggestions") }
         process.arguments = arguments
         let output = Pipe(), input = Pipe()
         process.standardOutput = output

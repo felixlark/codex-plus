@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.4.1\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.5.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -44,6 +44,10 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onEnabledChange = { [weak self] in
             self?.observer.stop()
             self?.observer.start()
+        }
+        settings.onSuggestionChange = { [weak self] in
+            guard let self else { return }
+            self.launcher.setAutoSendSuggestions(self.settings.autoSendSuggestions)
         }
         settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
@@ -79,7 +83,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.4.1",
+                return ["ok": true, "app": "Codex Plus", "version": "0.5.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -142,6 +146,13 @@ final class SettingsModel: ObservableObject {
             onEnabledChange?()
         }
     }
+    @Published var autoSendSuggestions = UserDefaults.standard.bool(forKey: "autoSendSuggestions") {
+        didSet {
+            UserDefaults.standard.set(autoSendSuggestions, forKey: "autoSendSuggestions")
+            onSuggestionChange?()
+        }
+    }
+    var onSuggestionChange: (() -> Void)?
     @Published var launchAtLogin = false
     @Published var trusted = false
     @Published var error: String?
@@ -233,6 +244,10 @@ struct SettingsView: View {
             Text("页面增强").font(.headline)
             Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
             Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
+            Toggle("自动发送建议提示词", isOn: $model.autoSendSuggestions)
+            Text("当前聊天出现新的建议后自动采纳并发送，可能连续开启后续轮次。关闭可随时停止。")
+                .font(.callout).foregroundColor(.secondary)
+            Text("建议提示词：\(launcher.suggestionSummary)").font(.callout).foregroundColor(.secondary)
             Divider()
             Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
                 .foregroundColor(.secondary)

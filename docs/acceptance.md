@@ -122,3 +122,22 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [ ] Longbiao 最终接受；Issue #1 保持开放。
 
 官方 Computer Use 为本次 GUI 取证与点击主工具；菜单栏退出无窗口的旧 Plus 使用已授权的原生菜单工具。agent-desktop 截图因缺 Screen Recording 权限未成功，未新增权限，最终保存官方 Computer Use 实际返回的截图。证据：`~/Library/Logs/codex-plus/entry-refinement-20261112/`，含 installed-navigation.png、installed-snake.png、installed-layout.json、installed-status.json、tests.log、build.log。最终设置和游戏窗口关闭，菜单栏 Plus 与日常官方宿主正常运行。
+
+
+## 0.5.0 建议提示词自动发送（2026-11-12）
+
+执行电脑 Sol，基线 f456ef4。最终安装版 `/Applications/Codex Plus.app` 0.5.0 build 9，Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:19:53；构建与安装 Mach-O UUID 均为 `92D67DC7-3145-3A31-95BF-89219FAC7013`。官方宿主 Codex 26.1106.51428、PID 40564，全程保留进程与已有任务。
+
+- [x] 两位独立方案初审及一次 fresh-context 定向复审完成；修订后零 Blocker/Major。候选代码独立审查完成，状态显示及路由支持意见已落实。
+- [x] 16 项 Node、33 项 Swift 全测通过；最终结果观察分支的 6 项建议专项回归通过。隔离 Electron fixture 的 12 项页面动作/输入法/草稿/附件/卸载检查通过。
+- [x] 官方 Computer Use 核验真实安装版开关默认关闭、开启/关闭、状态变化；重装/重启保持关闭值，原有工作区、屏幕选择和登录启动保持。
+- [x] 从原生 File → New Window 新建独立验收窗口，当前 renderer 的原生预测资源被适配；既有日常窗口继续运行。当前已加载旧资源的页面需重载或新窗口接入。
+- [x] 原生验收聊天「验收 Codex Plus 建议提示词」中，第一轮结束后原生建议「继续无副作用验收」出现，关闭时保持；开启后旧建议作为基线跳过。第二轮完成后新 sourceTurnId 的同文建议被自动采纳并通过原生 Send 提交，下一轮真实完成为 `CP-SUGGESTION 第三轮完成`。第三轮 id 为 `01a1ce68-b9f1-79f0-87bb-8556e5e16db6`，官方 read_thread 读回 completed。
+- [x] 该原生采纳/提交接缝在 build 8 验收；最终 build 9 保持同一接缝和页面脚本，提交后焦点/输入 revision 变化的结果观察使用最终专项回归验证，复用未变接缝证据。最终 build 9 中人工草稿保持且零尝试，开关关闭和页面接入读回通过。
+- [x] 控制器层确定性覆盖：默认关闭、旧建议基线、跨窗口同 turn 单次认领、关闭发生于落盘等待期间、落盘失败停用、用户事件/焦点/路由取消、结果未知不重试、重连持久化防重放。原生读取函数的组合输入与附件保护由 fixture 补充。
+- [ ] 远程 Codex、更多界面语言和跨设备来源真实验收；当前原生验收覆盖本机英文界面。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+本机证据 `~/Library/Logs/codex-plus/auto-suggestion-20261112/`：tests.log、tests-final-suggestion.log、dom-fixture.json、build-final.log、install-final.log、native-auto-send.json、build9-native-observations.json、final-disabled-status.json。原生测试模型实际 GPT-6.1 Sol / High，未改变其他任务设置。界面由官方 Computer Use 和 agent-desktop 1.2.0（精确窗口 w-9427）操作；只读 CDP 和官方 read_thread 辅助核验。验收窗口关闭，原生草稿保留，正式 Plus 恢复默认关闭的正常运行状态。
+
+同案三步：方案评审完成，实施与上述范围验收完成，X 推文待最终正文确认/发布。

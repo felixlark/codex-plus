@@ -8,11 +8,12 @@ import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
+import {reviewedSuggestionResource,adaptSuggestions,installSuggestionReader,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
 const {openAsar,adaptSidebar,adaptReloadRoute,reviewedHostResource,reviewedRouteResource}=await import(adapterURL.href);
-const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/ChatGPT.app'},profile:{type:'string'},state:{type:'string'},attach:{type:'boolean',default:false}}});
+const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/ChatGPT.app'},profile:{type:'string'},state:{type:'string'},attach:{type:'boolean',default:false},'auto-send-suggestions':{type:'boolean',default:false}}});
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
 let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[]};
@@ -23,10 +24,18 @@ const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
-let featureSupported=false;
+let featureSupported=false,suggestionSupported=false;
+const attemptFile=path.join(path.dirname(stateFile),'suggestion-attempts.json');
+let attempts=[],attemptStoreReady=true;
+try{const value=JSON.parse(await fs.readFile(attemptFile,'utf8'));if(!Array.isArray(value)||value.some(k=>typeof k!=='string'))throw Error('Invalid attempt store');attempts=value;}catch(error){if(error.code!=='ENOENT')attemptStoreReady=false;}
+const suggestions=new SuggestionCoordinator({attempts,persist:async keys=>{if(!attemptStoreReady)throw Error('Attempt store unavailable');try{await fs.writeFile(attemptFile+'.tmp',JSON.stringify(keys),{mode:0o600});await fs.rename(attemptFile+'.tmp',attemptFile);}catch(error){attemptStoreReady=false;throw error;}}});
+suggestions.configure(values['auto-send-suggestions']&&attemptStoreReady);
+const suggestionSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'){(${installSuggestionReader.toString()})();}`;
+function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean')suggestions.configure(message.enabled&&attemptStoreReady);}catch{}}
+
 const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
-replies.on('line',line=>{try{const reply=JSON.parse(line),request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line),request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
 async function nativeAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -38,7 +47,7 @@ async function nativeAction(message){
   process.stdout.write(JSON.stringify({type:'ui-action',version:1,action:'open-settings',requestId})+'\n');
 }
 
-const resources=[reviewedHostResource,reviewedRouteResource].map(resource=>({...resource,url:'app://-/'+resource.path.replace(/^webview\//,'')}));
+const resources=[reviewedHostResource,reviewedRouteResource].map((resource,index)=>({...resource,kind:'project-order',adapt:index===0?source=>adaptSidebar(source,{host:true,resourcePath:resource.path}):adaptReloadRoute,url:'app://-/'+resource.path.replace(/^webview\//,'')}));
 function mainURL(value){const url=new URL(value);return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&!/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(url.searchParams.get('initialRoute')??'');}
 function command(session,method,params={}){return cdp.call(method,params,session);}
 function assertOwner(pid,endpoint){
@@ -61,12 +70,15 @@ async function main(){
       try{
         const entry=archive.entries.find(e=>e.path===resource.path);if(!entry)throw new Error('Unsupported resource');
         const source=await archive.read(entry);
-        const adaptation=resource===resources[0]?await adaptSidebar(source,{host:true,resourcePath:resource.path}):await adaptReloadRoute(source);
+        const adaptation=await resource.adapt(source);
         if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
         resource.replacement=Buffer.from(adaptation.source).toString('base64');
       }catch(error){state.projectOrder={supported:false,phase:'unsupported-host',reason:error.message};}
     }
     if(!state.projectOrder.supported)resources.length=0;
+    const entry=archive.entries.find(e=>e.path===reviewedSuggestionResource.path);
+    if(entry&&state.projectOrder.supported){const adaptation=adaptSuggestions(await archive.read(entry));if(adaptation.supported){suggestionSupported=true;resources.push({...reviewedSuggestionResource,kind:'suggestion',url:'app://-/'+reviewedSuggestionResource.path.replace(/^webview\//,''),replacement:Buffer.from(adaptation.source).toString('base64')});}}
+    state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
@@ -111,11 +123,13 @@ async function main(){
       if(targetInfo.type==='page'&&!stopping){
         const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
         if(resources.length){work.push(command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
+        if(suggestionSupported)work.push(command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:suggestionSource}).then(result=>{session.suggestionScript=result.identifier;}));
         if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
         await command(sessionId,'Runtime.runIfWaitingForDebugger');
         await Promise.all(work);
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
         if(session.main){
+          if(suggestionSupported){await command(sessionId,'Runtime.evaluate',{expression:suggestionSource});await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.cancel()'});}
           if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
           if(runtime.result.value===6)state.projectOrder.phase='active';
@@ -138,7 +152,7 @@ async function main(){
       if(stopping){await original();return;}
       const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
       if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
-      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';state.projectOrder.phase='active';
+      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';if(resource.kind==='project-order')state.projectOrder.phase='active';
     }catch(error){state.errors.push('Response adaptation failed');try{await original();}catch{await cdp.call('Target.detachFromTarget',{sessionId}).catch(()=>{});}}
     finally{await publish();}
   }
@@ -149,10 +163,22 @@ async function main(){
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID){clearInterval(monitor);void shutdown();return;}
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
-    if(inspecting||stopping||!featureSupported)return;inspecting=true;
-    try{const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.status()',returnByValue:true});if(r.result.value)pages.push(r.result.value);}
-      const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
-      if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}
+    if(inspecting||stopping)return;inspecting=true;
+    try{
+      if(featureSupported){const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.status()',returnByValue:true});if(r.result.value)pages.push(r.result.value);}
+        const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
+        if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}}
+      if(suggestionSupported){
+        const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.inspect()',returnByValue:true});if(r.result.value)pages.push({id,snapshot:r.result.value});}
+        await suggestions.tick(pages,async(id,action,arg)=>{
+          if(stopping||!cdp.open)throw Error('Controller disconnected');
+          const expression=`globalThis.__codexPlusSuggestions?.${action}(${arg===undefined?'':JSON.stringify(arg)})`;
+          const r=await command(id,'Runtime.evaluate',{expression,returnByValue:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
+        });
+        const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,pageReady:pages.some(p=>p.snapshot.supported)};
+        if(!snapshot.pageReady)snapshot.reason='page-reload-required';
+        if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
+      }
     }catch{}finally{inspecting=false;}
   },1000);
 }
@@ -164,6 +190,7 @@ async function shutdown(){
     for(const session of sessions.keys())await command(session,'Runtime.runIfWaitingForDebugger').catch(()=>{});
     while(inFlight.size)await Promise.allSettled([...inFlight]);
     for(const [id,session]of sessions){
+      if(suggestionSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSuggestions?.dispose()'}).catch(()=>{});if(session.suggestionScript)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.suggestionScript}).catch(()=>{});}
       if(featureSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
       await command(id,'Fetch.disable').catch(()=>{});
     }
