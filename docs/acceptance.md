@@ -141,3 +141,17 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 本机证据 `~/Library/Logs/codex-plus/auto-suggestion-20261112/`：tests.log、tests-final-suggestion.log、dom-fixture.json、build-final.log、install-final.log、native-auto-send.json、build9-native-observations.json、final-disabled-status.json。原生测试模型实际 GPT-6.1 Sol / High，未改变其他任务设置。界面由官方 Computer Use 和 agent-desktop 1.2.0（精确窗口 w-9427）操作；只读 CDP 和官方 read_thread 辅助核验。验收窗口关闭，原生草稿保留，正式 Plus 恢复默认关闭的正常运行状态。
 
 同案三步：方案评审完成，实施与上述范围验收完成，X 推文待最终正文确认/发布。
+
+## 0.5.1 圆形图标（2026-11-12）
+
+用户要求页面图标统一圆形，并设计 App 和菜单栏图标。以 3dc4bc9 为集成基线，采用 Impeccable 的局部图标精修流程。Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.1 build 10；Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:25:20。构建与安装 Mach-O UUID 均为 `B6B4216D-5ABD-37A2-97C0-36F932F41FA8`，严格验签通过。
+
+- [x] Plus 为圆环加号，蛇为同族圆环；安装版实际页面截图及只读几何核对确认入口各一份、按钮 36×36、SVG 20×20、圆环半径 7.25、线宽 1.4、fill=none，位置及原生展示属性保持。
+- [x] App 使用深墨绿圆底和浅薄荷标识，透明图形导出完整 16…1024 像素 ICNS；Finder 中的安装版图标已实际显示并保留 OCU 截图。
+- [x] 菜单栏使用自有 18pt 矢量 PDF，NSImage 读回为 NSPDFImageRep；设为 template，由系统处理颜色。实际展开菜单并进入设置成功。页面 Plus 也实际打开相同设置；自动建议开关保持关闭、原有屏幕和登录启动保留。
+- [x] 圆形蛇入口实际打开游戏，关闭回到原聊天；最终游戏和 Plus 设置关闭，本轮打开的 Finder Applications 验收窗口已关闭，原有 Finder 窗口保留。
+- [x] 16 项 Node、33 项 Swift 通过；Impeccable 图标静态检查无发现；签名构建、安装、plist 与 diff 检查通过。图标改动复用未变游戏和建议功能验收，未重复发送聊天测试消息。
+- [x] 原正式宿主 PID40564 全程保留，未退出或重载；新 Plus PID2438、controller2446，页面和排序 active。建议功能保持 disabled，既有旧页面的 page-reload-required 状态原样保留。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/circular-identity-20261112/`，包括小尺寸浅深色预览、installed-navigation.png、installed-finder.png、installed-settings.png、installed-snake.png、installed-layout.json、installed-final-status.json、tests.log、build.log、signing.log。OCU 用于截图及页面/原生设置；无窗口的菜单栏由已授权原生工具操作。菜单图标的全屏像素截图未取得：OCU 无可选 key window，CUA 同样超时，原生截图工具缺 Screen Recording 权限；未新增权限，菜单可用性与安装包矢量资源分别取证，不将预览冒充实际菜单截图。

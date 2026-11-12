@@ -25,12 +25,13 @@ export function installFeatureEntry(options, createGame, openGame) {
     buttons.get('settings')?.setAttribute('aria-busy','true');
     try{globalThis[options.binding](JSON.stringify({version:1,action:'open-settings',requestId:id}));}catch{complete(id,false);}
   }
-  const icons={settings:'<rect x="2.5" y="3.5" width="15" height="13" rx="3"/><path d="M7 3.5v13m5.25-8.75v5.5m-2.75-2.75H15"/>',snake:'<path d="M4 3.5h8.5a3 3 0 0 1 0 6h-5a3.5 3.5 0 0 0 0 7H16M4 3.5v3m3-3v1.5"/><circle cx="16" cy="16.5" r=".65" fill="currentColor" stroke="none"/>'};
+  const ring='<circle cx="10" cy="10" r="7.25"/>';
+  const icons={settings:`${ring}<path d="M10 6.75v6.5M6.75 10h6.5"/>`,snake:`${ring}<path d="M7 6.5h4.5c2.3 0 2.3 3.5 0 3.5h-3c-2.3 0-2.3 3.5 0 3.5H13"/>`};
   for(const [id,label,action] of [['settings','Codex Plus',settings],['snake','贪吃蛇',()=>{if(game){game.focus();return;}game=openGame(createGame,()=>{game=null;});}]]){
     const b=document.createElement('button');b.type='button';b.dataset.codexPlusEntry=id;b.title=label;b.setAttribute('aria-label',label);
     // Icons are fixed product markup, never host or message content.
     const inner=document.createElement('span');
-    inner.innerHTML=`<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${icons[id]}</svg>`;
+    inner.innerHTML=`<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${icons[id]}</svg>`;
     const span=document.createElement('span');span.className='sr-only';span.textContent=label;inner.append(span);b.append(inner);b.addEventListener('click',action);buttons.set(id,b);
   }
   function applyPresentation(button,template){

@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.5.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.5.1\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -56,7 +56,13 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem?.button?.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Codex Plus")
+        let menuIcon = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "pdf")
+            .flatMap { NSImage(contentsOf: $0) }
+            ?? NSImage(systemSymbolName: "plus.circle", accessibilityDescription: "Codex Plus")
+        menuIcon?.isTemplate = true
+        menuIcon?.size = NSSize(width: 18, height: 18)
+        statusItem?.button?.image = menuIcon
+        statusItem?.button?.setAccessibilityLabel("Codex Plus")
         statusItem?.button?.toolTip = "Codex Plus"
         let menu = NSMenu()
         menu.delegate = self
@@ -83,7 +89,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.5.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.5.1",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
