@@ -5,6 +5,10 @@
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
 Codex Web App enhancements, workspace observation, settings, and the status CLI.
 
+All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
+The page's Codex Plus button is the first item in the lower-left navigation footer;
+the Snake validation button is the last item in that same footer. Keep the independent menu-bar app.
+
 ## Commands
 
 - Tests `./scripts/test`

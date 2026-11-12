@@ -1,6 +1,10 @@
 # Codex Plus
 
-Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供 F6 启动入口、Project 活动排序和工作区自动展开。官方 Codex 安装包及签名保持原样。
+Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供统一增强入口、F6 启动、Project 活动排序和工作区自动展开。官方 Codex 安装包及签名保持原样。
+
+0.4.0 在 Codex 最左侧导航条的左下角按钮区增加两个入口：第一项「Codex Plus」打开与菜单栏共用的原生设置窗口，最后一项「贪吃蛇」打开页面内游戏。悬停显示名称，两个按钮也支持键盘访问。游戏支持方向键／WASD、空格暂停／继续、Esc 关闭及按钮操作；关闭、切换任务和退出 Plus 会释放本局。现有原生按钮保持相对顺序，收起项目侧栏后两个入口继续可用。增强功能统一由本仓和同一个 Plus 运行实例管理。
+
+页面接入适配 Codex 26.1106.51428。设置显示页面入口与项目排序各自的接入状态；普通方式已运行的 Codex 需要保存工作、正常退出后经 F6 启动。Plus 安装和已有普通宿主的首次页面接入分别验收。实现与验收见[统一入口方案](docs/designs/unified-feature-entry.md)及[验收记录](docs/acceptance.md)。
 
 0.3.0 通过现有 Karabiner 的 F6 规则打开 Codex Plus，再启动或激活官方 Codex。Codex Plus 不显示 Dock 图标；官方 Codex 仍有自己的 Dock 图标。项目按任务活动自动置顶，后台完成也会参与排序；手动重载可恢复所选聊天、原生草稿及活动顺序。当前真实验收覆盖本地 Codex 项目，远程和 ChatGPT 来源保留未验收。
 
@@ -10,7 +14,7 @@ Codex Plus 是独立的 macOS 菜单栏应用，为官方 Codex 提供 F6 启动
 
 0.2.0 增加“适用屏幕”：默认所有屏幕，也可勾选实际连接的多块屏幕。选择自动保存，下一次新建或切换任务时生效；移动当前窗口时保留工作区状态。屏幕断开后保留已选条目，相同身份重连后恢复适用。所选屏幕为空时暂停自动展开。
 
-需要 macOS 13 或更新版本，以及用户为 Codex Plus 单独授予的辅助功能权限。当前适配已在 Codex 26.1103.60933 的英文界面上核验。界面结构变化、未知模式或读取失败时跳过动作。
+需要 macOS 13 或更新版本，以及用户为 Codex Plus 单独授予的辅助功能权限。当前页面入口已在 Codex 26.1106.51428 的英文界面及浅深色主题核验。界面结构变化、未知模式或读取失败时跳过对应增强。
 
 ## 开发与安装
 
@@ -48,7 +52,7 @@ Project 活动排序的[设计与接缝记录](docs/designs/project-activity-ord
 node scripts/probe-project-order.mjs --mode fixture --scenario all --out "$HOME/Library/Logs/codex-plus/project-order/fixture.json"
 ```
 
-生产启动使用安装版入口。`probe-project-order.mjs` 的旧 host 模式是历史接缝诊断工具，不应与产品控制器同时运行。关闭 Codex Plus 不结束官方 Codex；已执行的内存增强保留到页面重载，重新打开 Plus 可对既有自有调试实例恢复连接。扩展仅保存自己的任务活动时间及路由所有权标记，原生项目手动顺序、聊天与草稿由 Codex 继续管理。
+生产启动使用安装版入口。`probe-project-order.mjs` 的旧 host 模式是历史接缝诊断工具，不应与产品控制器同时运行。关闭 Codex Plus 会移除自有页面按钮和游戏，官方 Codex 继续运行；已执行的排序适配保留到页面重载。重新打开 Plus 可对既有自有调试实例恢复连接。扩展仅保存自己的任务活动时间及路由所有权标记，原生项目手动顺序、聊天与草稿由 Codex 继续管理。
 
 核心逻辑源自 [dock-switch #49](https://github.com/felixlark/dock-switch/issues/49) 和 [PR #50](https://github.com/felixlark/dock-switch/pull/50)，保留 MIT 许可。Codex Plus 独立维护源码、配置、权限、启动与运行状态。Codex 提供原生的同等自动展开设置后，可停用此适配器。
 

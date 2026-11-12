@@ -136,7 +136,11 @@ async function page(instance, selectedTarget) {
   const target = selectedTarget ?? (await eventually(async () => { const list = await targets(instance); return list.length ? list : null; }, 'main frame'))[0];
   const cdp = await CDP.connect(target.webSocketDebuggerUrl);
   try {
-    const frame = await cdp.call('Page.getFrameTree');
+    const frame = await eventually(async () => {
+      const value = await cdp.call('Page.getFrameTree');
+      const url = value.frameTree.frame.url;
+      return url && url !== 'about:blank' ? value : null;
+    }, 'main frame navigation');
     if (frame.frameTree.frame.url !== 'app://-/index.html') {
       const actual = new URL(frame.frameTree.frame.url);
       throw new Error(`Untrusted main frame (${actual.protocol}//${actual.hostname}${actual.pathname})`);

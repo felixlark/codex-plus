@@ -3,6 +3,13 @@ import AppKit
 /// The accessory app owns one external controller. It never terminates Codex.
 final class CodexLauncher: ObservableObject {
     @Published private(set) var summary = "F6 打开 Codex"
+    @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
+    @Published private(set) var orderSummary = "等待连接"
+    var onOpenSettings: (() -> Void)?
+    private var controllerOutput: Pipe?
+    private var controllerInput: FileHandle?
+    private var outputBuffer = Data()
+    private var settingsRequests = 0
     private var controller: Process?
     private var timer: Timer?
     private var stopping = false
@@ -74,7 +81,10 @@ final class CodexLauncher: ObservableObject {
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
          "entryRequests": entryRequests, "lastEntrySource": lastEntrySource, "placement": placementStatus,
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
-         "summary": summary, "acceptanceProfile": profile != nil]
+         "summary": summary, "acceptanceProfile": profile != nil,
+         "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
+         "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],
+         "settingsRequests": settingsRequests]
     }
 
     private func ownedHost() -> NSRunningApplication? {
@@ -89,10 +99,17 @@ final class CodexLauncher: ObservableObject {
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
         }
+        let entries = snapshot["pageEntries"] as? [String: Any]
+        let order = snapshot["projectOrder"] as? [String: Any]
+        let connected = controller?.isRunning == true
+        pageSummary = connected && entries?["phase"] as? String == "active"
+            ? "已接入 · 左下角 Codex Plus 与贪吃蛇"
+            : (entries?["supported"] as? Bool == false ? "当前 Codex 版本待适配；菜单栏设置可用" : "等待页面连接；普通启动后需正常退出，再按 F6")
+        orderSummary = connected && order?["phase"] as? String == "active" ? "已启用 · 按任务活动排序" : "尚未接入"
         if controller?.isRunning == true {
             switch snapshot["phase"] as? String {
             case "active":
-                summary = "F6 打开 Codex · 项目按任务活动自动排序"; recovering = false
+                summary = "F6 打开 Codex · Codex Plus 页面增强已连接"; recovering = false
                 if needsPlacement, let host = ownedHost() { place(host) }
             case "failed", "disconnected": summary = "连接正在恢复；Codex 中的任务继续运行"
             default: summary = "正在连接 Codex…"
@@ -138,10 +155,27 @@ final class CodexLauncher: ObservableObject {
         if let profile { arguments += ["--profile", profile] }
         if attach { arguments.append("--attach") }
         process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
+        let output = Pipe(), input = Pipe()
+        process.standardOutput = output
+        process.standardInput = input
+        controllerOutput = output
+        controllerInput = input.fileHandleForWriting
+        outputBuffer.removeAll()
+        output.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            DispatchQueue.main.async { [weak self, weak process] in
+                guard let self, let process, self.controller === process else { return }
+                self.receive(data)
+            }
+        }
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] exited in DispatchQueue.main.async {
             guard let self, self.controller === exited else { return }
+            self.controllerOutput?.fileHandleForReading.readabilityHandler = nil
+            self.controllerOutput = nil
+            self.controllerInput = nil
+            self.outputBuffer.removeAll()
             self.controller = nil; self.refresh()
             if self.stopping { self.stopped?(); self.stopped = nil; return }
             guard !self.stopping else { return }
@@ -157,6 +191,24 @@ final class CodexLauncher: ObservableObject {
         }}
         do { try process.run(); controller = process; if !attach { recovering = false }; summary = "正在启动 Codex…" }
         catch { summary = "Codex 启动失败：\(error.localizedDescription)" }
+    }
+
+    private func receive(_ data: Data) {
+        outputBuffer.append(data)
+        while let newline = outputBuffer.firstIndex(of: 10) {
+            let line = outputBuffer.prefix(upTo: newline)
+            outputBuffer.removeSubrange(...newline)
+            guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  value["type"] as? String == "ui-action", value["version"] as? Int == 1,
+                  value["action"] as? String == "open-settings",
+                  let requestID = value["requestId"] as? String, UUID(uuidString: requestID) != nil else { continue }
+            guard !stopping else { continue }
+            settingsRequests += 1
+            onOpenSettings?()
+            if let reply = try? JSONSerialization.data(withJSONObject: ["type": "ui-result", "requestId": requestID, "ok": onOpenSettings != nil]) {
+                try? controllerInput?.write(contentsOf: reply + Data([10]))
+            }
+        }
     }
 
     private func openNormally() {

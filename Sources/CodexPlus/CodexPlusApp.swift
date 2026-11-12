@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.3.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.4.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -48,6 +48,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
+        launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -78,7 +79,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.3.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.4.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -228,6 +229,10 @@ struct SettingsView: View {
             Text("按 F6 打开 Codex，项目随任务活动自动置顶。Codex Plus 在菜单栏运行。")
             Text(launcher.summary).font(.callout).foregroundColor(.secondary)
             Button("打开 Codex（F6）") { launcher.open() }
+            Divider()
+            Text("页面增强").font(.headline)
+            Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
+            Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
             Divider()
             Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
                 .foregroundColor(.secondary)

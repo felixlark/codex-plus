@@ -9,12 +9,12 @@ import { createHash } from 'node:crypto';
 
 export const toolRoot = path.join(os.homedir(), 'Library/Caches/codex-plus/project-order-probe');
 export const reviewedHostResource = Object.freeze({
-  path: 'webview/assets/async/182735.7f13786b92.js',
-  sha256: '119afcc814fe83e733d5b494d3201afe203c51b8d059998b2a8dbf3ed03ccd85',
+  path: 'webview/assets/async/739301.37a39f26d6.js',
+  sha256: 'acc2174e4ed3d2068af26c1731f08e8978c853864aea9c0a917ae9d246885058',
 });
 export const reviewedRouteResource = Object.freeze({
-  path: 'webview/assets/async/366057.08ca21677c.js',
-  sha256: '40a7a2cabfc767584f268a10a4201ccb0655ec3b87bd1e934195a83a3194994c',
+  path: 'webview/assets/async/92243.7ae2a0b971.js',
+  sha256: '2090b888705be8a3fac914f21b672f27a2c3ce6f854ca1312449c53fbad244d9',
 });
 
 export async function adaptReloadRoute(source) {
@@ -42,13 +42,14 @@ export async function adaptReloadRoute(source) {
   });
   if(matches.length!==1)return {supported:false,reason:'route-match-count'};
   const match=matches[0];
-  const hook=`(0,${match.react}.useEffect)(()=>(${restoreChatRoute.toString()})(${match.name}),[${match.name}.pathname,${match.name}.search,${match.name}.hash]);`;
+  const hook=`(0,${match.react}.useEffect)(()=>(${restoreChatRoute.toString()})(${match.name}),[${match.name}]);`;
   const adapted=source.slice(0,match.at)+hook+source.slice(match.at);
   parse(adapted,{ecmaVersion:'latest',sourceType:'module'});
   return {supported:true,source:adapted,match};
 }
 
 export function restoreChatRoute(location) {
+  globalThis.__codexPlusFeatures?.routeChanged(location);
   const key='codex-plus.last-chat-route.v1';
   try {
     const url=new URL(window.location.href);

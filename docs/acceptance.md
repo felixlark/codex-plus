@@ -87,3 +87,25 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 
 共享宿主协调收尾：已正常退出测试Plus84332及controller99173，先回读确认官方测试宿主仍运行，再正常退出84870及其backend85608，59068监听不再可达。生产2355/2425保留原启动时间，未启动生产CDP控制器或重载生产；未修改其他任务的全局并发设置。由于既有“调查cloudd卡顿原因”任务正在核验生产宿主，本任务保存安全点并不再激活/启动生产App。已安装正式候选和F6配置保留，下一次F6冷启动不带验收参数，将使用正式资料；不把独立测试实例写作生产重开或全局配置生效证据。
+
+## 0.4.0 统一入口与贪吃蛇（2026-11-12）
+
+用户批准修正后的 GSE 方案：左下角按钮区第一项为 Codex Plus，末项为贪吃蛇；菜单栏程序保留。执行电脑 Sol，官方宿主 26.1106.51428，安装版 `/Applications/Codex Plus.app` 0.4.0 build 6。Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 13:34:48；构建与安装 Mach-O UUID 同为 `81F8BBC9-82AF-3626-9D0F-84613E6A0D56`。官方宿主前后验签通过，Team 2DC432GLL2，供应商安装包保持原样。
+
+- [x] 真实导航条底部为 Plus、Usage、Profile、贪吃蛇；Plus 第一、蛇最后，原有操作顺序保持。
+- [x] 页面 Plus 打开原生设置，`settingsRequests` 增加；菜单栏“设置…”打开同一窗口；窗口清单只有一个 Plus 设置窗口。
+- [x] 设置显示页面接入与项目排序的独立状态。登录启动、原有开关、屏幕选择及辅助功能授权保持。
+- [x] 游戏在当前页以原生 dialog 居中显示，标题、棋盘、状态及按钮可读；浅色、深色主题均保留截图，临时主题恢复 System。
+- [x] 实际空格键开始／暂停，Esc 关闭；同页新建聊天的 ⌘N 关闭游戏，原草稿 `jk` 保留；重开从待开始进入。移动、增长、碰撞、暂停、重置、填满胜利用确定性逻辑检查补充验证。
+- [x] 收起项目侧栏后两个入口继续在左下角可见，恢复展开后仍各一份；Settings 往返后入口恢复。
+- [x] 从安装版入口冷启动官方宿主；两个已审核资源装入，`adaptedScripts=4`、页面入口和项目排序均 active。File → New Window 创建第二真实主窗口，两个窗口入口各一份。
+- [x] 终止自有 controller 86463 后，Swift 恢复为 88182；Plus 86141、官方验收宿主 86486 保持，旧游戏销毁、入口各一份、草稿保留。未结束日常宿主 46366。
+- [x] 正常退出 Plus 后控制器记录 stopped；先前真实卸载检查显示按钮／游戏移除，官方窗口和草稿保留。重新打开 Plus 可恢复既有自有实例。
+- [x] 10 项 Node、33 项 Swift 检查通过。4 类隔离 Electron fixture 分别通过：late-attach、response-disconnect、source-mismatch、window-recreate；退出后调试监听清理由 fixture 检查。
+- [ ] 日常普通启动实例的首次 F6 冷启动接入。该实例正在执行其他任务，保留至用户正常退出后再从 F6 启动。
+- [ ] 更新版上的直接主页面重载，以及真实后台任务完成后排序的完整场景；结构检查、纯逻辑、fixture 与前版未变行为证据分别保留。Cmd+R 实际调用“Reload Browser Page”，本次未记作主页面重载通过。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+界面工具：官方 Computer Use 用于 Plus 设置与菜单退出。它按 bundle ID 选中日常实例，独立实例选择受限；按用户对原生控制的既有授权，使用 agent-desktop 1.2.0 的窗口编号 `w-8692`／`w-8750` 做验收，必要按键走 `--headed press --window-id`。公开 CoreGraphics 窗口清单与只读 CDP 状态作辅助证据。GUI 操作由主 Agent 单 writer 执行。独立资料沿用现有 acceptance-20261110，保留已有测试项目与草稿。
+
+证据位于 `~/Library/Logs/codex-plus/unified-entry-20261112/`：tests-final.log、build.log、install.log、installed-acceptance-status.json、fixture-*.json、installed-snake-final.png、installed-snake-light.png；早期不通过记录保留。正式现场恢复到默认启动参数的菜单栏 Plus，日常 Codex 与任务保留；独立测试实例正常退出，独立验收与日常首次冷启动分别报告。

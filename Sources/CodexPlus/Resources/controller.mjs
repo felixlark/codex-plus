@@ -3,7 +3,10 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawn,execFileSync} from 'node:child_process';
 import {parseArgs} from 'node:util';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import readline from 'node:readline';
+import {featureBinding,installFeatureEntry,validateNativeAction} from './feature-entry.mjs';
+import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
@@ -19,6 +22,22 @@ let cdp,child;
 const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
+const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
+let featureSupported=false;
+const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
+const replies=readline.createInterface({input:process.stdin});
+replies.on('line',line=>{try{const reply=JSON.parse(line),request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
+async function nativeAction(message){
+  const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
+  if(stopping||event.name!==featureBinding||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame||!session.main)return;
+  let action;try{action=JSON.parse(event.payload);}catch{return;}
+  if(!validateNativeAction(action))return;
+  if([...requests.values()].some(r=>r.session===message.sessionId&&r.context===event.executionContextId&&r.pageID===action.requestId))return;
+  const requestId=randomUUID();requests.set(requestId,{session:message.sessionId,context:event.executionContextId,pageID:action.requestId});
+  process.stdout.write(JSON.stringify({type:'ui-action',version:1,action:'open-settings',requestId})+'\n');
+}
+
 const resources=[reviewedHostResource,reviewedRouteResource].map(resource=>({...resource,url:'app://-/'+resource.path.replace(/^webview\//,'')}));
 function mainURL(value){const url=new URL(value);return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&!/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(url.searchParams.get('initialRoute')??'');}
 function command(session,method,params={}){return cdp.call(method,params,session);}
@@ -33,16 +52,25 @@ function assertOwner(pid,endpoint){
 async function main(){
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict','-R=anchor apple generic and identifier "com.openai.codex" and certificate leaf[subject.OU] = "2DC432GLL2"',values.app],{stdio:'pipe'});
   const archive=await openAsar(values.app);
-  try{for(const resource of resources){
-    const entry=archive.entries.find(e=>e.path===resource.path);if(!entry)throw new Error('Unsupported resource');
-    const source=await archive.read(entry);
-    const adaptation=resource===resources[0]?await adaptSidebar(source,{host:true,resourcePath:resource.path}):await adaptReloadRoute(source);
-    if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
-    resource.replacement=Buffer.from(adaptation.source).toString('base64');
-  }}finally{await archive.close();}
+  try{
+    const footer=archive.entries.find(e=>e.path==='webview/assets/async/885910.79b4f4977c.js');
+    featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')==='1011c180e813ef95373b33f53ec234baa941d748dd1110f4de4538a42a550feb';
+    state.pageEntries={supported:featureSupported,phase:featureSupported?'waiting':'unsupported-host'};
+    state.projectOrder={supported:true,phase:'waiting'};
+    for(const resource of resources){
+      try{
+        const entry=archive.entries.find(e=>e.path===resource.path);if(!entry)throw new Error('Unsupported resource');
+        const source=await archive.read(entry);
+        const adaptation=resource===resources[0]?await adaptSidebar(source,{host:true,resourcePath:resource.path}):await adaptReloadRoute(source);
+        if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
+        resource.replacement=Buffer.from(adaptation.source).toString('base64');
+      }catch(error){state.projectOrder={supported:false,phase:'unsupported-host',reason:error.message};}
+    }
+    if(!state.projectOrder.supported)resources.length=0;
+  }finally{await archive.close();}
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
-    state={...saved,protocol:6,controllerPID:process.pid,phase:'reconnecting',adapted:0,errors:[]};cdp=await CDP.connect(saved.endpoint);
+    state={...state,pid:saved.pid,endpoint:saved.endpoint,phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     const args=['--remote-debugging-address=127.0.0.1','--remote-debugging-port=0'];
@@ -64,7 +92,12 @@ async function main(){
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
-    if(message.method==='Target.detachedFromTarget')sessions.delete(message.params.sessionId);
+    if(message.method==='Target.detachedFromTarget'){forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
+    if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
+    if(message.method==='Runtime.executionContextDestroyed'){sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextsCleared'){sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
+    if(message.method==='Runtime.bindingCalled')void nativeAction(message).catch(fail);
+    if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
       inFlight.add(work);void work.finally(()=>inFlight.delete(work));
@@ -72,21 +105,22 @@ async function main(){
     if(message.method==='connectionClosed'){state.phase='disconnected';void publish().then(()=>process.exit(1));}
   });
   async function attach({sessionId,targetInfo,waitingForDebugger}){
-    sessions.set(sessionId,{target:targetInfo.targetId});state.attached++;
+    const session={target:targetInfo.targetId,contexts:new Map(),main:false};
+    sessions.set(sessionId,session);state.attached++;
     try{
       if(targetInfo.type==='page'&&!stopping){
-        // Queue Fetch before releasing startup. Awaiting a page-domain reply first
-        // deadlocks targets whose renderer has not started yet.
-        const fetchReady=command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))});
-        const networkReady=command(sessionId,'Network.enable');
-        const cacheReady=command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true});
+        const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
+        if(resources.length){work.push(command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
+        if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
         await command(sessionId,'Runtime.runIfWaitingForDebugger');
-        await Promise.all([fetchReady,networkReady,cacheReady]);
-        state.lastAttach={waitingForDebugger,fetchBeforeResume:true};
-        if(targetInfo.url&&mainURL(targetInfo.url)){
-          const executed=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
-          if(executed.result.value===6)state.phase='active';
+        await Promise.all(work);
+        const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
+        if(session.main){
+          if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
+          const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
+          if(runtime.result.value===6)state.projectOrder.phase='active';
         }
+        state.lastAttach={waitingForDebugger,fetchBeforeResume:true};state.phase='active';
       }
     }finally{
       await command(sessionId,'Runtime.runIfWaitingForDebugger').catch(()=>{});state.resumed++;await publish();
@@ -104,14 +138,23 @@ async function main(){
       if(stopping){await original();return;}
       const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
       if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
-      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';
+      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';state.projectOrder.phase='active';
     }catch(error){state.errors.push('Response adaptation failed');try{await original();}catch{await cdp.call('Target.detachFromTarget',{sessionId}).catch(()=>{});}}
     finally{await publish();}
   }
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();
-  const monitor=setInterval(()=>{try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));}},1000);
+  let inspecting=false;
+  const monitor=setInterval(async()=>{
+    if(process.ppid!==parentPID){clearInterval(monitor);void shutdown();return;}
+    try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
+    if(inspecting||stopping||!featureSupported)return;inspecting=true;
+    try{const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.status()',returnByValue:true});if(r.result.value)pages.push(r.result.value);}
+      const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
+      if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}
+    }catch{}finally{inspecting=false;}
+  },1000);
 }
 function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
 function fail(error){state.errors.push(error.message);void publish();}
@@ -120,7 +163,11 @@ async function shutdown(){
   if(cdp?.open){
     for(const session of sessions.keys())await command(session,'Runtime.runIfWaitingForDebugger').catch(()=>{});
     while(inFlight.size)await Promise.allSettled([...inFlight]);
-    for(const session of sessions.keys())await command(session,'Fetch.disable').catch(()=>{});
+    for(const [id,session]of sessions){
+      if(featureSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
+      await command(id,'Fetch.disable').catch(()=>{});
+    }
+    requests.clear();
     await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});cdp.close();
   }
   state.phase='stopped';await publish();process.exit(0);
