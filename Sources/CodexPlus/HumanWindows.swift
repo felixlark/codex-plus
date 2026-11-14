@@ -138,11 +138,7 @@ final class HumanWindows {
         while index < queue.count {
             let (element, depth) = queue[index]; index += 1
             if value(element, kAXRoleAttribute) as? String == "AXWebArea" {
-                guard let url = value(element, kAXURLAttribute) as? URL, url.scheme == "app", url.host == "-", url.path == "/index.html" else { return nil }
-                let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                if items.contains(where: { $0.name == "codexPlusMobileAnchor" }) { return nil }
-                let route = items.first(where: { $0.name == "initialRoute" })?.value ?? "/"
-                guard !["/avatar-overlay", "/spotlight", "/global-dictation", "/hotkey-window"].contains(where: { route == $0 || route.hasPrefix($0 + "/") }) else { return nil }
+                guard let url = value(element, kAXURLAttribute) as? URL, HumanWindowRoute.isMain(url) else { return nil }
                 return url
             }
             // Native shell only; never traverse webpage content after finding the WebArea.

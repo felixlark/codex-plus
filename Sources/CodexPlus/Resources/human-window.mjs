@@ -1,5 +1,14 @@
 export const reviewedHumanRuntime=Object.freeze({path:'webview/assets/348410.374a9b8f98.js',sha256:'0524ee891262587e2605b573f75ebb1cce4df2b3db154a8f14a2f24a9e80dc0b'});
 
+export function isHumanWindowURL(value) {
+  try {
+    const url=new URL(value),route=new URL(url.searchParams.get('initialRoute')??'/','https://codex.invalid');
+    return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&
+      !url.searchParams.has('codexPlusMobileAnchor')&&!route.searchParams.has('codexPlusMobileAnchor')&&
+      !/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(route.pathname);
+  }catch{return false;}
+}
+
 // The entry is already loaded by the host. ESM import returns its cached runtime,
 // so existing windows gain native-state access without a reload or source patch.
 export async function nativeWindowDefaults(operation,bounds) {

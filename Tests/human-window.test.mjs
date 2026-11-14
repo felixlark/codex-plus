@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {preferredHumanNumbers,preserveNativeBounds,reviewedHumanRuntime,nativeWindowDefaults} from '../Sources/CodexPlus/Resources/human-window.mjs';
+import {preferredHumanNumbers,preserveNativeBounds,reviewedHumanRuntime,nativeWindowDefaults,isHumanWindowURL} from '../Sources/CodexPlus/Resources/human-window.mjs';
 import {allocateWindowNumbers} from '../Sources/CodexPlus/Resources/window-number.mjs';
 import {openAsar,parser} from '../scripts/inspect-sidebar-model.mjs';
 const external={x:-392,y:-1266,width:2304,height:1266},right={x:1912,y:-1122,width:2048,height:1122},hidden={x:1512,y:30,width:1920,height:1050};
@@ -41,4 +41,12 @@ test('installed entry exports cached runtime and native helper is standalone',as
     assert.equal(createHash('sha256').update(source).digest('hex'),reviewedHumanRuntime.sha256);
     assert.match(source,/export\{h as __webpack_require__\}/);
   }finally{await archive.close();}
+});
+
+test('native initialRoute mobile anchor stays outside human features and numbers',()=>{
+  for(const route of ['/?codexPlusMobileAnchor=agent','/local/thread?codexPlusMobileAnchor=agent','/local/thread?x=1&codexPlusMobileAnchor=agent']){
+    const url=new URL('app://-/index.html');url.searchParams.set('initialRoute',route);assert.equal(isHumanWindowURL(url.href),false);
+  }
+  assert.equal(isHumanWindowURL('app://-/index.html?codexPlusMobileAnchor=agent'),false);
+  assert.equal(isHumanWindowURL('app://-/index.html?initialRoute=%2Flocal%2Fthread%3FcodexPlusHumanWindow%3Dhuman'),true);
 });
