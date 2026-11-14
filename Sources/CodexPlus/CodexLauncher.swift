@@ -7,6 +7,7 @@ final class CodexLauncher: ObservableObject {
     @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
     @Published private(set) var suggestionSummary = "已关闭"
     @Published private(set) var reconnectResult: String?
+    @Published private(set) var sidebarSummary = "等待页面接入"
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
     private var controllerOutput: Pipe?
@@ -109,6 +110,7 @@ final class CodexLauncher: ObservableObject {
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
          "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],
+         "sidebarLayout": snapshot["sidebarLayout"] ?? ["phase": "unavailable"],
          "settingsRequests": settingsRequests,
          "suggestionAcceptanceScoped": SuggestionAcceptance.threadID != nil,
          "suggestionAutoSend": snapshot["suggestionAutoSend"] ?? ["enabled": false, "phase": "unavailable"]]
@@ -122,13 +124,32 @@ final class CodexLauncher: ObservableObject {
         return app
     }
 
+    private func publishDisplays() {
+        guard let input = controllerInput else { return }
+        let displays: [[String: Any]] = CodexWorkspaceDisplayCatalog.capture().map { display in
+            ["uuid": display.identityUsable ? (display.uuid as Any? ?? NSNull()) : NSNull(),
+             "name": display.name, "x": display.bounds.minX, "y": display.bounds.minY,
+             "width": display.bounds.width, "height": display.bounds.height]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: ["type": "sidebar-displays", "version": 1, "displays": displays]) {
+            try? input.write(contentsOf: data + Data([10]))
+        }
+    }
+
     private func refresh() {
+        publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
         }
         let entries = snapshot["pageEntries"] as? [String: Any]
         let order = snapshot["projectOrder"] as? [String: Any]
         let connected = controller?.isRunning == true
+        let sidebar = snapshot["sidebarLayout"] as? [String: Any]
+        if !connected { sidebarSummary = "等待连接" }
+        else if sidebar?["supported"] as? Bool == false { sidebarSummary = "当前 Codex 版本待适配" }
+        else if sidebar?["storageReady"] as? Bool == false { sidebarSummary = "窗口独立已启用；屏幕记忆暂不可写" }
+        else if sidebar?["phase"] as? String == "active" { sidebarSummary = "已启用 · 每窗口独立，按屏幕记忆" }
+        else { sidebarSummary = "等待页面或屏幕接入" }
         let suggestion = snapshot["suggestionAutoSend"] as? [String: Any]
         if !autoSendEnabled { suggestionSummary = "已关闭" }
         else if !connected { suggestionSummary = "等待连接" }

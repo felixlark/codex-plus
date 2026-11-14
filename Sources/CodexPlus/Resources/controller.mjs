@@ -10,6 +10,7 @@ import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction,reviewedFeatureResource,removeFeatureEntries} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
+import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
 
@@ -28,7 +29,10 @@ const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
-let featureSupported=false,suggestionSupported=false;
+let featureSupported=false,suggestionSupported=false,sidebarSupported=false;
+let displays=[];
+const sidebarProfiles=new SidebarProfiles(path.join(path.dirname(stateFile),'sidebar-layouts.json'),fs);
+await sidebarProfiles.load();
 let reviewDigest='';const reviewRequests=new Map();
 const attemptFile=path.join(path.dirname(stateFile),'suggestion-attempts.json');
 let attempts=[],attemptStoreReady=true;
@@ -82,7 +86,7 @@ async function reconnectEnhancements(){
   };
   try{
     if(!allIds.length)throw Error('unavailable');
-    for(const id of allIds){const state=await evaluate(id,'globalThis.__codexPlusBackgroundSuggestions?.inspect()');if(state?.protocol!==5)ids.push(id);}
+    for(const id of allIds){const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot()})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported))ids.push(id);}
     for(const id of allIds)await evaluate(id,`(()=>{globalThis.__codexPlusReconnectGuard?.dispose();globalThis.__codexPlusReconnectGuard=(${createReconnectGuard.toString()})(${JSON.stringify(operation)},${inspectReconnectSafety.toString()},${canReconnectPage.toString()});return true;})()`);
     for(const id of ids){
       if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
@@ -98,7 +102,7 @@ async function reconnectEnhancements(){
     while(Date.now()<deadline){
       if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
       let ready=true;
-      for(const id of allIds){try{const state=await evaluate(id,'globalThis.__codexPlusBackgroundSuggestions?.inspect()');if(state?.protocol!==5||!(state.registered>0))ready=false;}catch{ready=false;}}
+      for(const id of allIds){try{const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot()})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported))ready=false;}catch{ready=false;}}
       if(ready){ok=true;reason='reconnected';break;}
       await new Promise(resolve=>setTimeout(resolve,100));
     }
@@ -115,7 +119,40 @@ function suggestionSettings(line){try{const message=JSON.parse(line);if(message.
 const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+function queueSidebar(id,event){
+  const session=sessions.get(id);if(!session)return Promise.resolve();
+  const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
+  session.sidebarQueue=task;return task;
+}
+async function syncSidebar(id,event){
+  const session=sessions.get(id);if(!sidebarSupported||stopping||!session?.main)return;
+  if(event&&(!session.contexts.has(event.context)||session.contexts.get(event.context)?.auxData?.frameId!==session.frame))return;
+  const result=await command(id,'Runtime.evaluate',{expression:'(()=>{const s=globalThis.__codexPlusSidebarLayout?.snapshot();return {sidebar:s,frame:{x:screenX,y:screenY,width:outerWidth,height:outerHeight}};})()',returnByValue:true});
+  const current=result.result.value?.sidebar;
+  if(current?.protocol!==1||!current.bound){session.sidebarStatus={phase:'page-reload-required'};return;}
+  let change;
+  if(event){
+    if(current.pageId!==event.pageId)return;
+    if(session.sidebarPage!==current.pageId){session.sidebarPage=current.pageId;session.sidebarSequence=0;}
+    if(event.sequence<=session.sidebarSequence)return;
+    session.sidebarSequence=event.sequence;change=event.change;
+  }
+  const display=resolveSidebarDisplay(result.result.value.frame,displays);
+  const config={pageId:current.pageId,windowId:session.target,displayKey:display?.uuid??null,profile:display?sidebarProfiles.get(display.uuid):null,...change?{change}:{}};
+  const response=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusSidebarLayout?.configure(${JSON.stringify(config)})`,returnByValue:true});
+  const applied=response.result.value;
+  if(!applied||sessions.get(id)!==session||stopping)return;
+  if(change&&display)await sidebarProfiles.save(display.uuid,applied.values);
+  session.sidebarStatus={phase:display?'active':'unknown-display',displayName:display?.name??null,windowStorageReady:applied.storageReady};
+}
+async function sidebarAction(message){
+  const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
+  if(stopping||event.name!==sidebarBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  let value;try{value=JSON.parse(event.payload);}catch{return;}
+  if(value.version!==1||typeof value.pageId!=='string'||!Number.isSafeInteger(value.sequence)||value.sequence<1||typeof value.change?.key!=='string'||!sanitizeSidebarValues({[value.change.key]:value.change.value}))return;
+  await queueSidebar(message.sessionId,{...value,context:event.executionContextId});
+}
 function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
 async function nativeAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -163,10 +200,11 @@ async function main(){
           if(dependency&&createHash('sha256').update(await archive.read(dependency)).digest('hex')===reviewedBackgroundDependency.sha256&&await samplingSupported(archive)){const background=adaptBackgroundSuggestions(source,adaptation.source);suggestionSupported=background.supported;if(background.supported)adaptation=background;}
         }
         if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
+        if(resource.path===reviewedHostResource.path){const sidebar=adaptSidebarLayout(source,adaptation.source);sidebarSupported=sidebar.supported;if(sidebar.supported)adaptation=sidebar;else state.sidebarLayout={supported:false,phase:'unsupported-host',reason:sidebar.reason};}
         resource.replacement=Buffer.from(adaptation.source).toString('base64');
       }catch(error){state.projectOrder={supported:false,phase:'unsupported-host',reason:error.message};}
     }
-    if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;}
+    if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;sidebarSupported=false;state.sidebarLayout={supported:false,phase:'unsupported-host'};}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
   if(stopping)return;
@@ -191,7 +229,7 @@ async function main(){
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
     if(message.method==='Runtime.executionContextDestroyed'){sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
     if(message.method==='Runtime.executionContextsCleared'){sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
-    if(message.method==='Runtime.bindingCalled'){void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});}
+    if(message.method==='Runtime.bindingCalled'){void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
@@ -207,6 +245,7 @@ async function main(){
         const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
         if(resources.length){work.push(command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
         if(suggestionSupported)work.push(command(sessionId,'Runtime.addBinding',{name:backgroundGuardBinding}));
+        if(sidebarSupported)work.push(command(sessionId,'Runtime.addBinding',{name:sidebarBinding}));
         if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
         await command(sessionId,'Runtime.runIfWaitingForDebugger');
         await Promise.all(work);
@@ -250,6 +289,12 @@ async function main(){
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping)return;inspecting=true;
     try{
+      if(sidebarSupported){
+        for(const [id,s]of sessions)if(s.main)await queueSidebar(id);
+        const pages=[...sessions.values()].filter(s=>s.main).map(s=>s.sidebarStatus??{phase:'waiting'});
+        const status={supported:true,phase:pages.length&&pages.every(p=>p.phase==='active')?'active':'waiting',storageReady:sidebarProfiles.storageReady,profiles:Object.keys(sidebarProfiles.profiles).length,pages};
+        if(JSON.stringify(status)!==JSON.stringify(state.sidebarLayout)){state.sidebarLayout=status;await publish();}
+      }
       if(featureSupported){const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.status()',returnByValue:true});if(r.result.value)pages.push(r.result.value);}
         const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
         if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}}
@@ -287,11 +332,13 @@ async function shutdown(){
     if(inFlight.size)await Promise.allSettled([...inFlight]);
     await Promise.allSettled([...sessions].map(async([id,session])=>{
       if(suggestionSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
+      if(sidebarSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSidebarLayout?.suspend()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:sidebarBinding}).catch(()=>{});}
       await command(id,'Fetch.disable').catch(()=>{});
     }));
     await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});
   })();
   await Promise.race([cleanup,new Promise(resolve=>{timer=setTimeout(resolve,10000);})]);
+  await sidebarProfiles.writes;
   clearTimeout(timer);requests.clear();cdp?.close();
   state.phase='stopped';
   await publish().catch(()=>{});process.exit(0);
