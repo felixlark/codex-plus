@@ -16,6 +16,10 @@
 
 按钮名称保留“Codex Plus”和“贪吃蛇”；SVG隐藏于辅助技术，按钮提供名称。每个入口的可见位置、设置和行为不随图标变化。
 
+## 窗口编号
+
+0.9.1 起，页面的 Codex Plus 圆环中心以窗口编号代替加号；App 和菜单栏继续使用加号。页面沿用现有页脚圆形按钮的尺寸（随账号头像缩放）、颜色、焦点和设置动作。数字采用居中的系统字体、600字重，单数字为12.5/20比例，多数字缩小以留在圆环内。按钮名称仍为“Codex Plus”，悬停与辅助描述显示“窗口 N”。
+
 ## 资产生成
 
 图标由 `scripts/render-icons.swift` 使用 AppKit/CoreGraphics 几何绘制，构建时生成完整 iconset、AppIcon.png 和 MenuBarIcon.pdf，再用 iconutil 生成 ICNS。缓存和输出保留在 `~/Library/Caches/codex-plus/`，`scripts/build` 复制资源后再签名；源代码不依赖设计工具、字体或远程图片。页面图形在 `Sources/CodexPlus/Resources/feature-entry.mjs` 中以同一坐标绘制；原生应用从 Bundle 读取 PDF 并标为模板。

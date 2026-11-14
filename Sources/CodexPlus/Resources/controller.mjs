@@ -9,6 +9,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction,reviewedFeatureResource,removeFeatureEntries} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
+import {allocateWindowNumbers} from './window-number.mjs';
 import {CDP} from './cdp.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
@@ -21,7 +22,7 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[]};
+let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
@@ -173,6 +174,12 @@ async function samplingSupported(archive){
   return hash.digest('hex')===reviewedSamplingResource.binarySHA256;
 }
 function mainURL(value){const url=new URL(value);return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&!/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(url.searchParams.get('initialRoute')??'');}
+async function refreshWindowNumbers(){
+  const {targetInfos}=await cdp.call('Target.getTargets');
+  const targets=targetInfos.filter(t=>t.type==='page'&&t.url.startsWith('app://-/index.html')&&mainURL(t.url)).map(t=>t.targetId);
+  const numbers=allocateWindowNumbers(targets,state.windowNumbers);
+  if(Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
+}
 function command(session,method,params={}){return cdp.call(method,params,session);}
 function assertOwner(pid,endpoint){
   const command=execFileSync('/bin/ps',['-p',String(pid),'-o','args='],{encoding:'utf8'});
@@ -210,7 +217,7 @@ async function main(){
   if(stopping)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
-    state={...state,pid:saved.pid,endpoint:saved.endpoint,phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
+    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     state.phase='launching';state.launchMethod='launch-services';await publish();
@@ -302,7 +309,7 @@ async function main(){
         const status={supported:true,phase:pages.length&&pages.every(p=>p.phase==='active')?'active':'waiting',storageReady:sidebarProfiles.storageReady,profiles:Object.keys(sidebarProfiles.profiles).length,pages};
         if(JSON.stringify(status)!==JSON.stringify(state.sidebarLayout)){state.sidebarLayout=status;await publish();}
       }
-      if(featureSupported){const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.status()',returnByValue:true});if(r.result.value)pages.push(r.result.value);}
+      if(featureSupported){await refreshWindowNumbers();const pages=[];for(const [id,session]of sessions)if(session.main){const number=state.windowNumbers[session.target];const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.setWindowNumber(${JSON.stringify(number)??'null'});globalThis.__codexPlusFeatures?.status()`,returnByValue:true});if(r.result.value)pages.push(r.result.value);}
         const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
         if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}}
       if(suggestionSupported){
