@@ -3,7 +3,7 @@
 ## Scope
 
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
-Codex Web App enhancements, workspace observation, settings, and the status CLI.
+Codex Web App enhancements, workspace observation, settings, the status CLI, and quiet tool-window routing.
 
 All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
 The page's Codex Plus button is the first item in the lower-left navigation footer;

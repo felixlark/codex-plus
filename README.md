@@ -1,5 +1,14 @@
 # Codex Plus
 
+0.9.0 接管 Codex 独立工具窗口：Codex 保留中间外屏，明确认领的工具窗口尽量放到最右外屏，后台打开时保留当前输入焦点。菜单栏可暂停归集、保留当前窗口或找回屏外工具窗。普通浏览器和编辑器按具体窗口或文件认领，已有人工窗口不会变成整进程管理。原 Dock Switch 实现已移除，详见[工具窗口方案](docs/designs/quiet-tool-windows.md)。
+
+```sh
+"/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-status
+"/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-open --app-path /System/Applications/TextEdit.app --url file:///absolute/path/preview.txt
+```
+
+命令要求 Plus 已运行；连接失败不会启动或重放工具。`requested` 仅表示接收打开请求，定位结果须看 `--tool-status`。仅对独立专用工具使用 `--dedicated`；浏览器窗口由其工具提供准确 PID 和窗口 ID 后，通过 `--tool-place --pid PID --window-id ID` 定位。
+
 0.8.0 为每个 Codex 窗口独立保存侧栏展开与折叠状态，覆盖自定义分区、Projects 等内置分区和项目内聊天列表。一个窗口收起 Smart Shadow，不会影响另一个窗口；原生项目与聊天内容仍然共享。
 
 布局按屏幕自动记忆：把窗口移到另一块屏幕或新开窗口时，采用该屏幕最近保存的布局；同屏已有窗口保持各自状态。窗口在同一屏幕重载时恢复自身布局。首次使用的新屏幕延续当前窗口布局，显示器断开后保留记忆；屏幕不可识别时继续窗口独立状态、暂停屏幕保存。布局只存在本机，设置页可查看接入状态。升级后在 Plus 设置中关闭自动发送、点击“重新接入页面增强”，接入完成后按原偏好恢复自动发送。设计与审查见 [窗口布局方案](docs/designs/window-sidebar-layout.md)和[审查记录](docs/reviews/window-sidebar-layout.md)。
