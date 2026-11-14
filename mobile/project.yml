@@ -17,9 +17,10 @@ targets:
     platform: iOS
     sources:
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/iOS
-    resources:
+      - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Shared/MobileAddress.swift
       - path: ${CODEX_PLUS_MOBILE_CACHE}/frontend
         type: folder
+        buildPhase: resources
       - path: ${CODEX_PLUS_MOBILE_CACHE}/mobile-preload.js
       - path: ${CODEX_PLUS_MOBILE_CACHE}/connection.json
     settings:

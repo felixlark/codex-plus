@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
 import CryptoKit
+import Network
 
 @main struct CodexMobileApp: App {
     var body: some Scene { WindowGroup { MobileView().ignoresSafeArea(.keyboard) } }
@@ -13,14 +14,14 @@ struct MobileView: UIViewControllerRepresentable {
 }
 
 // Only the connection status belongs to the shell. All working UI is original.
-final class MobileController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate, URLSessionDelegate {
+final class MobileController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private var web: WKWebView?
-    private var socket: URLSessionWebSocketTask?
-    private var session: URLSession?
+    private var socket: NWConnection?
+    private let networkQueue = DispatchQueue(label: "codex-mobile.connection")
     private var pending = [String]()
     private var ready = false
     private var pin = ""
-    private var outgoing: Task<Void, Never>?
+    private var didNavigate = false
     private let status = UILabel()
     private var configuration: [String: Any] = [:]
     override func viewDidLoad() {
@@ -32,34 +33,53 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
             let url = Bundle.main.url(forResource: "connection", withExtension: "json")!
             configuration = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
             pin = configuration["fingerprint"] as! String
-            guard let url = URL(string: configuration["url"] as! String), url.scheme == "wss", let host = url.host, host.hasPrefix("100.") else { throw NSError(domain: "Mobile", code: 1) }
-            let config = URLSessionConfiguration.ephemeral
-            config.connectionProxyDictionary = [:]
-            session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
-            socket = session!.webSocketTask(with: url); socket!.resume()
-            receive()
+            guard let url = URL(string: configuration["url"] as! String), url.scheme == "wss", let host = url.host, mobileIPv4(host) != nil,
+                  url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, pin.count == 64 else { throw NSError(domain: "Mobile", code: 1) }
+            let expectedPin = pin
+            let tls = NWProtocolTLS.Options()
+            sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+            sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, securityTrust, complete in
+                let trust = sec_trust_copy_ref(securityTrust).takeRetainedValue()
+                _ = SecTrustEvaluateWithError(trust, nil)
+                guard let cert = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else { complete(false); return }
+                let hash = SHA256.hash(data: SecCertificateCopyData(cert) as Data).map { String(format: "%02x", $0) }.joined()
+                guard hash == expectedPin else { complete(false); return }
+                // Pin a dedicated self-signed leaf only for this connection. The
+                // normal validity, signature, server usage and IP SAN still apply.
+                SecTrustSetAnchorCertificates(trust, [cert] as CFArray)
+                SecTrustSetAnchorCertificatesOnly(trust, true)
+                SecTrustSetPolicies(trust, SecPolicyCreateSSL(true, host as CFString))
+                complete(SecTrustEvaluateWithError(trust, nil))
+            }, networkQueue)
+            let params = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+            params.defaultProtocolStack.applicationProtocols.insert(NWProtocolWebSocket.Options(), at: 0)
+            let connection = NWConnection(to: .url(url), using: params); socket = connection
+            connection.stateUpdateHandler = { [weak self, weak connection] state in
+                switch state {
+                case .ready: self?.receive()
+                case .failed, .waiting: connection?.cancel(); DispatchQueue.main.async { self?.disconnect("与 Mac 的连接不可用。已提交操作不会自动重发，请在原会话核对结果。") }
+                default: break
+                }
+            }
+            connection.start(queue: networkQueue)
         } catch { disconnect("连接配置无效，未启动原界面。") }
-    }
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust,
-              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let cert = chain.first else { completionHandler(.cancelAuthenticationChallenge, nil); return }
-        let hash = SHA256.hash(data: SecCertificateCopyData(cert) as Data).map { String(format: "%02x", $0) }.joined()
-        guard hash == pin else { completionHandler(.cancelAuthenticationChallenge, nil); return }
-        completionHandler(.useCredential, URLCredential(trust: trust))
     }
     private func receive() {
         guard let socket else { return }
-        Task { @MainActor in
-            do {
-                let message = try await socket.receive()
-                let text: String
-                switch message { case .string(let value): text = value; case .data(let value): guard let value = String(data: value, encoding: .utf8) else { throw NSError(domain: "Mobile", code: 2) }; text = value; @unknown default: throw NSError(domain: "Mobile", code: 3) }
-                guard let data = text.data(using: .utf8), let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NSError(domain: "Mobile", code: 4) }
-                if envelope["kind"] as? String == "bootstrap" { try loadOriginal(envelope) }
-                else if ready { deliver(text) } else { pending.append(text) }
-                receive()
-            } catch { disconnect("与 Mac 的连接已断开。已提交操作不会自动重发；重连前请在原会话核对结果。") }
+        socket.receiveMessage { [weak self] data, context, _, error in
+            let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata)?.opcode
+            guard error == nil, opcode != .close else { DispatchQueue.main.async { self?.disconnect("与 Mac 的连接已断开。已提交操作不会自动重发，请在原会话核对。") }; return }
+            if opcode == .text, let data, let text = String(data: data, encoding: .utf8) {
+                DispatchQueue.main.async {
+                    guard let self, self.socket === socket else { return }
+                    do {
+                        guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NSError(domain: "Mobile", code: 4) }
+                        if envelope["kind"] as? String == "bootstrap" { try self.loadOriginal(envelope) }
+                        else if self.ready { self.deliver(text) } else { self.pending.append(text) }
+                    } catch { self.disconnect("原界面连接初始化失败，未重试操作。") }
+                }
+            }
+            self?.receive()
         }
     }
     private func loadOriginal(_ bootstrap: [String: Any]) throws {
@@ -89,11 +109,12 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         }
         guard let text = message.body as? String else { return }
         if text == "page-ready" { ready = true; status.isHidden = true; for value in pending { deliver(value) }; pending.removeAll(); return }
-        let previous = outgoing
-        outgoing = Task { @MainActor in
-            await previous?.value
-            do { guard let socket else { return }; try await socket.send(.string(text)) }
-            catch { disconnect("发送链路断开。请先在原会话核对结果，勿重复提交。") }
+        guard let socket else { return }
+        networkQueue.async { [weak self] in
+            let context = NWConnection.ContentContext(identifier: "frame", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
+            socket.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { error in
+                if error != nil { DispatchQueue.main.async { self?.disconnect("发送链路断开。请先在原会话核对结果，勿重复提交。") } }
+            })
         }
     }
     private func deliver(_ text: String) {
@@ -101,14 +122,20 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         web?.evaluateJavaScript("globalThis.__codexPlusMobileEndpoint.receive(\(literal)[0])") { [weak self] _, error in if error != nil { self?.disconnect("原界面通信失败，连接已停止。") } }
     }
     private func disconnect(_ message: String) {
-        socket?.cancel(with: .goingAway, reason: nil); socket = nil; ready = false
+        socket?.cancel(); socket = nil; ready = false
         web?.evaluateJavaScript("globalThis.__codexPlusMobileEndpoint?.close()")
         web?.isUserInteractionEnabled = false; status.text = message; status.isHidden = false
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = navigationAction.request.url
-        decisionHandler(url?.scheme == "app" && url?.host == "-" ? .allow : .cancel)
+        guard navigationAction.targetFrame?.isMainFrame == true, url?.scheme == "app", url?.host == "-", !didNavigate else {
+            decisionHandler(.cancel)
+            if navigationAction.targetFrame?.isMainFrame == true, didNavigate { disconnect("页面已离开原连接。请重新打开并核对原会话，勿重发未知操作。") }
+            return
+        }
+        didNavigate = true; decisionHandler(.allow)
     }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { disconnect("原界面进程已结束，连接已关闭。") }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { disconnect("原前端本地资源未能装载。") }
 }
 

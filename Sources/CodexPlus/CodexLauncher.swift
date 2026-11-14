@@ -107,6 +107,7 @@ final class CodexLauncher: ObservableObject {
          "entryRequests": entryRequests, "lastEntrySource": lastEntrySource, "placement": placementStatus,
          "placementSource": "dock-switch", "placementRule": placementRule as Any? ?? NSNull(),
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
+         "mobile": snapshot["mobile"] ?? NSNull(),
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
          "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],

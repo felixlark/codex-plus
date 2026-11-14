@@ -5,5 +5,5 @@ export CODEX_PLUS_MOBILE_CACHE="$HOME/Library/Caches/codex-plus/mobile"
 node "$CODEX_PLUS_SOURCE_ROOT/scripts/build-mobile-preload.mjs"
 test -f "$CODEX_PLUS_MOBILE_CACHE/connection.json"
 mkdir -p "$CODEX_PLUS_MOBILE_CACHE/project"
-xcodegen generate --spec "$CODEX_PLUS_SOURCE_ROOT/mobile/project.yml" --project "$CODEX_PLUS_MOBILE_CACHE/project"
-xcodebuild -project "$CODEX_PLUS_MOBILE_CACHE/project/CodexMobile.xcodeproj" -scheme CodexMobile -configuration Debug -sdk iphonesimulator -derivedDataPath "$CODEX_PLUS_MOBILE_CACHE/derived-data" CODE_SIGNING_ALLOWED=NO build
+xcodegen generate --spec "$CODEX_PLUS_SOURCE_ROOT/mobile/project.yml" --project "$CODEX_PLUS_MOBILE_CACHE/project" --project-root "$CODEX_PLUS_MOBILE_CACHE/project"
+xcodebuild -project "$CODEX_PLUS_MOBILE_CACHE/project/CodexMobile.xcodeproj" -scheme CodexMobile -configuration Debug -destination "platform=iOS Simulator,id=${CODEX_PLUS_SIMULATOR_ID:-568F0CEF-5CE8-4364-8CBC-012051611980}" -derivedDataPath "$CODEX_PLUS_MOBILE_CACHE/derived-data" CODE_SIGNING_ALLOWED=NO build

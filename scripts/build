@@ -20,6 +20,8 @@ rm -f "$APP/Contents/LICENSE"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 cp "$ROOT/third_party/OpenComputerUse-LICENSE" "$APP/Contents/Resources/OpenComputerUse-LICENSE"
 cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$APP/Contents/Resources/"
+"$ROOT/scripts/build-mobile-gateway"
+cp "$HOME/Library/Caches/codex-plus/mobile/bin/MobileGateway" "$APP/Contents/Resources/MobileGateway"
 cp "$ROOT/scripts/inspect-sidebar-model.mjs" "$APP/Contents/Resources/"
 ACORN="$HOME/Library/Caches/codex-plus/project-order-probe/node_modules/acorn"
 if [[ ! -f "$ACORN/dist/acorn.mjs" ]]; then

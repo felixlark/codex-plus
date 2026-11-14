@@ -4,7 +4,7 @@ export function installMobileEndpoint(config, encode, decode) {
   if (globalThis.__codexPlusMobileEndpoint) throw Error('Mobile endpoint already installed');
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
   const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map();
-  let sequence = 0, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
+  let sequence = 0, appPort, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
     if (closed) return;
@@ -22,7 +22,11 @@ export function installMobileEndpoint(config, encode, decode) {
   function attachPort(port, id) {
     if (ports.has(id)) throw Error('Duplicate mobile port');
     ports.set(id, port);
-    port.onmessage = event => sendValue({kind: 'port-frame', id}, event.data);
+    port.onmessage = event => {
+      sendValue({kind: 'port-frame', id}, event.data);
+      if (event.data === null && appPort === id) { send({kind: 'fatal'}); close(); }
+    };
+    port.addEventListener('close', () => { if (appPort === id) { send({kind: 'fatal'}); close(); } });
     port.onmessageerror = () => close();
     port.start();
   }
@@ -54,7 +58,8 @@ export function installMobileEndpoint(config, encode, decode) {
         break;
       }
       case 'port-open': {
-        if (phone || typeof message.id !== 'string' || ports.has(message.id)) throw Error('Invalid app-host port');
+        if (phone || appPort || typeof message.id !== 'string' || ports.has(message.id)) throw Error('Invalid app-host port');
+        appPort = message.id;
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
         window.postMessage({type: 'connect-app-host', port: channel.port2}, location.origin, [channel.port2]);
         break;
@@ -133,6 +138,8 @@ export function installMobileEndpoint(config, encode, decode) {
         const transfers = typeof target === 'object' ? target.transfer : transfer;
         if (targetOrigin !== location.origin || !(message.port instanceof MessagePort) || transfers?.length !== 1 || transfers[0] !== message.port) throw Error('Invalid local app-host handoff');
         const id = `${config.connection}:app:${++sequence}`;
+        if (appPort) { send({kind: 'fatal'}); close(); throw Error('App-host already connected'); }
+        appPort = id;
         send({kind: 'port-open', id}); attachPort(message.port, id); return;
       }
       return post(message, target, transfer);
@@ -154,4 +161,5 @@ export function installMobileEndpoint(config, encode, decode) {
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
   globalThis.__codexPlusMobileEndpoint = {receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(() => { close(); globalThis[binding](JSON.stringify({kind: 'fatal'})); }); }, close, inspect: () => ({closed, ports: ports.size, pendingCalls: calls.size})};
+  window.addEventListener('pagehide', () => { send({kind: 'fatal'}); close(); }, {once: true});
 }
