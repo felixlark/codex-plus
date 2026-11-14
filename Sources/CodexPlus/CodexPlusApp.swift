@@ -139,7 +139,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard toolWindows.stop() else {
-            settings.error = "Agent 窗口尚未安全恢复，已保留虚拟屏。请通过工具状态核对后重试退出。"
+            settings.error = "Agent 窗口正在归还或尚未安全恢复，请通过工具状态核对。"
             return .terminateCancel
         }
         return launcher.stop { NSApp.reply(toApplicationShouldTerminate: true) } ? .terminateLater : .terminateNow
@@ -193,6 +193,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard let window = agentSettingsWindow, toolWindows.prepareAgentWindow(window) else { return }
         window.orderFront(nil)
+        toolWindows.registerAgentWindow(window)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }

@@ -16,6 +16,7 @@ final class ToolWindowRouter {
         }
     }
     private struct Managed {
+        let claimID = UUID()
         let pid: pid_t
         let element: AXUIElement
         let windowID: UInt32
@@ -28,6 +29,12 @@ final class ToolWindowRouter {
     var openOwnSettings: (() -> Void)?
     var ownAgentWindow: NSWindow?
     private let display = AgentDisplay()
+    private let ocu = OpenComputerUseWindowClient()
+    private var agentSettingsRegistration: UInt32?
+    private var registeredAgentSettings: UInt32?
+    private var agentReleaseUnconfirmed = false
+    private var ownershipTimer: Timer?
+
     private var stopping = false
     private var lastError: String?
     private var watches: [pid_t: Watch] = [:]
@@ -43,6 +50,7 @@ final class ToolWindowRouter {
 
     func start() {
         guard tokens.isEmpty else { return }
+        ownershipTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.reconcileOwnership() }
         for key in ["quietToolDisplayUUID", "quietToolWindowsEnabled"] { UserDefaults.standard.removeObject(forKey: key) }
         let center = NSWorkspace.shared.notificationCenter
         tokens.append(center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] n in
@@ -57,22 +65,26 @@ final class ToolWindowRouter {
             }
     }
 
-    /// A failed restore retains the display and lets the caller cancel quit.
+    /// A failed restore retains exact records and lets the caller cancel quit.
     @discardableResult
     func stop() -> Bool {
         stopping = true
+        ownershipTimer?.invalidate(); ownershipTimer = nil
         observationEpoch = UUID()
         tokens.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         tokens.removeAll()
         if let screenToken { NotificationCenter.default.removeObserver(screenToken) }
         screenToken = nil
         for pid in Array(watches.keys) { removeWatch(pid) }
-        if let window = ownAgentWindow, ownAgentWindowIsParked(window) { window.close() }
-        ownAgentWindow = nil
+        if let window = ownAgentWindow {
+            if !window.isVisible { ownAgentWindow = nil; registeredAgentSettings = nil }
+            else if ownAgentWindowIsParked(window) { window.close(); ownAgentWindow = nil; registeredAgentSettings = nil }
+            else { forgetAgentSettings() }
+        }
         let keys = managed.map { ($0.pid, $0.windowID) }
         var restored = true
         for (pid, id) in keys { if !restore(pid: pid, id: id) { restored = false } }
-        guard restored else { return false }
+        guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil else { return false }
         return display.release()
     }
 
@@ -187,47 +199,100 @@ final class ToolWindowRouter {
         if let i = managed.firstIndex(where: { $0.pid == pid && $0.windowID == id }) {
             guard live(managed[i]) else { lastError = "window-identity-unavailable"; return false }
             if let last = managed[i].lastKnownFrame, ToolWindowPolicy.sameFrame(original, last) { return managed[i].result == "parked" }
-            managed.remove(at: i) // Explicit new claim after a user move.
+            release(managed[i]); lastError = "previous-claim-release-pending"; return false
         }
         let origin = AgentDisplay.displays().filter { $0.key != display.id && $0.value.contains(CGPoint(x: original.midX, y: original.midY)) }
         // New documents can inherit the previous Agent window's virtual location.
         // They are still exact file claims; never invent a physical restore target.
         let bornOnAgentDisplay = display.bounds.map { ToolWindowPolicy.contained(original, in: $0) } ?? false
         guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.currentBounds() else { lastError = display.error ?? "original-display-unavailable"; return false }
-        let area = bounds.insetBy(dx: 20, dy: 20)
-        let target = ToolWindowPolicy.destination(frame: original, area: area)
-        managed.append(Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
-                               originalFrame: original, originalDisplays: origin, lastKnownFrame: original, result: "parking"))
-        let i = managed.count - 1
-        let outcome = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { rect in
-            if self.live(self.managed[i]) { _ = self.writeFrame(window, to: rect) }
-        }, read: { self.live(self.managed[i]) ? self.frame(window) : nil })
-        switch outcome {
-        case .parked(let actual):
-            managed[i].lastKnownFrame = actual; managed[i].result = "parked"
-            if lastOpen["pid"] as? Int == Int(pid),
-               (ToolWindowPolicy.canReportParked(requestID: currentOpenID, resource: currentOpenDocument,
-                   latestRequestID: lastOpen["id"] as? String, actualDocument: document(window)) || lastOpen["windowID"] as? UInt32 == id) {
-                lastOpen["state"] = "parked"
-            }
-            return true
-        case .rolledBack: managed.remove(at: i)
-        case .recoveryRequired(let actual): managed[i].lastKnownFrame = actual; managed[i].result = "rollback-failed"
+        // OCU owns the move and records its real original position. Do not
+        // resize here: the official restore contract currently restores position.
+        guard original.width <= bounds.width, original.height <= bounds.height else {
+            lastError = "agent-window-larger-than-ocu-display"; return false
         }
-        lastError = "parking-failed"
-        return false
+        let record = Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
+                             originalFrame: original, originalDisplays: origin, lastKnownFrame: original, result: "parking")
+        managed.append(record)
+        let epoch = observationEpoch
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "agent_display")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            guard self.live(record), let actual = self.frame(window) else {
+                if self.definitelyGone(record) { self.managed.remove(at: i); self.finishStopIfReady() }
+                else { self.managed[i].result = "parking-identity-unavailable" }
+                return
+            }
+            guard case .accepted = outcome, let current = self.display.currentBounds(),
+                  ToolWindowPolicy.contained(actual, in: current) else {
+                self.managed[i].result = "parking-unconfirmed"; self.lastError = "ocu-parking-unconfirmed"
+                if case .accepted = outcome, let bounds = self.display.currentBounds(),
+                   !ToolWindowPolicy.contained(actual, in: bounds), !ToolWindowPolicy.sameFrame(actual, original) {
+                    self.release(self.managed[i]) // Verified completion followed by user takeover; never restore it.
+                }
+                return
+            }
+            self.managed[i].lastKnownFrame = actual
+            self.managed[i].result = "parked"; self.lastError = nil
+            if self.stopping || self.observationEpoch != epoch {
+                _ = self.restore(pid: pid, id: id)
+                return
+            }
+            if self.lastOpen["pid"] as? Int == Int(pid),
+               (ToolWindowPolicy.canReportParked(requestID: self.currentOpenID, resource: self.currentOpenDocument,
+                    latestRequestID: self.lastOpen["id"] as? String, actualDocument: self.document(window))
+                || self.lastOpen["windowID"] as? UInt32 == id) {
+                self.lastOpen["state"] = "parked"
+            }
+        }
+        return true // Claimed, not yet reported parked; no duplicate observer call.
     }
 
-    private func writeFrame(_ window: AXUIElement, to rect: CGRect) -> Bool {
-        var point = rect.origin; var size = rect.size
-        guard let position = AXValueCreate(.cgPoint, &point), let dimensions = AXValueCreate(.cgSize, &size),
-              let current = frame(window) else { return false }
-        if abs(current.width - rect.width) > 1 || abs(current.height - rect.height) > 1 {
-            guard AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, dimensions) == .success else { return false }
+    private func ocuArguments(pid: pid_t, id: UInt32, placement: String) -> [String: Any] {
+        ["app": String(pid), "window_id": Int(id), "window_placement": placement,
+         "allow_activation": false, "include_ax": false, "include_screenshot": false]
+    }
+
+    private func finishStopIfReady() {
+        if stopping && managed.isEmpty && agentSettingsRegistration == nil && ownAgentWindow == nil { NSApp.terminate(nil) }
+    }
+
+    private func reconcileOwnership() {
+        for record in managed where record.result == "parked" {
+            if definitelyGone(record) { managed.removeAll { $0.claimID == record.claimID }; continue }
+            guard live(record), let actual = frame(record.element), let last = record.lastKnownFrame else { continue }
+            if !ToolWindowPolicy.sameFrame(actual, last) { release(record) }
         }
-        guard AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position) == .success,
-              let actual = frame(window) else { return false }
-        return ToolWindowPolicy.sameFrame(actual, rect)
+        if let window = ownAgentWindow, !window.isVisible, agentSettingsRegistration == nil {
+            ownAgentWindow = nil; registeredAgentSettings = nil
+        }
+        if let window = ownAgentWindow, registeredAgentSettings == UInt32(window.windowNumber),
+           agentSettingsRegistration == nil, !agentReleaseUnconfirmed, !ownAgentWindowIsParked(window) { forgetAgentSettings() }
+    }
+
+    private func forgetAgentSettings() {
+        guard let window = ownAgentWindow, agentSettingsRegistration == nil, !agentReleaseUnconfirmed else { return }
+        let id = UInt32(window.windowNumber)
+        agentSettingsRegistration = id
+        ocu.call(arguments: ocuArguments(pid: ProcessInfo.processInfo.processIdentifier, id: id, placement: "release")) { [weak self, weak window] outcome in
+            guard let self else { return }
+            self.agentSettingsRegistration = nil
+            if case .accepted = outcome {
+                self.registeredAgentSettings = nil; self.agentReleaseUnconfirmed = false
+                if window === self.ownAgentWindow { self.ownAgentWindow = nil }
+                self.finishStopIfReady()
+            } else { self.agentReleaseUnconfirmed = true; self.lastError = "ocu-agent-settings-release-unconfirmed" }
+        }
+    }
+
+    private func release(_ record: Managed) {
+        guard let i = managed.firstIndex(where: { $0.claimID == record.claimID }),
+              !["releasing", "release-unconfirmed", "restore-unconfirmed"].contains(managed[i].result) else { return }
+        managed[i].result = "releasing"
+        ocu.call(arguments: ocuArguments(pid: record.pid, id: record.windowID, placement: "release")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            if case .accepted = outcome { self.managed.remove(at: i); self.finishStopIfReady() }
+            else { self.managed[i].result = "release-unconfirmed" }
+        }
     }
 
     private func liveIdentity(_ window: AXUIElement, pid: pid_t, id: UInt32, launchDate: Date) -> Bool {
@@ -242,15 +307,28 @@ final class ToolWindowRouter {
         liveIdentity(record.element, pid: record.pid, id: record.windowID, launchDate: record.launchDate)
     }
 
+    private func definitelyGone(_ record: Managed) -> Bool {
+        guard let inventory = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else { return false }
+        guard let info = inventory.first(where: { $0[kCGWindowNumber as String] as? UInt32 == record.windowID }) else { return true }
+        if let owner = info[kCGWindowOwnerPID as String] as? Int32, owner != record.pid { return true }
+        if let date = NSRunningApplication(processIdentifier: record.pid)?.launchDate, date != record.launchDate { return true }
+        return false
+    }
+
     private func restore(pid: pid_t, id: UInt32) -> Bool {
         if pid == ProcessInfo.processInfo.processIdentifier, ownAgentWindow?.windowNumber == Int(id) {
-            if let window = ownAgentWindow, ownAgentWindowIsParked(window) { window.close() }
-            ownAgentWindow = nil; return true
+            if ownAgentWindow?.isVisible == false { ownAgentWindow = nil; registeredAgentSettings = nil; return agentSettingsRegistration == nil }
+            if let window = ownAgentWindow, ownAgentWindowIsParked(window) {
+                window.close(); ownAgentWindow = nil; registeredAgentSettings = nil; return agentSettingsRegistration == nil
+            }
+            forgetAgentSettings(); return false
         }
         guard let i = managed.firstIndex(where: { $0.pid == pid && $0.windowID == id }) else { return false }
         let record = managed[i]
+        let protectedOperation = ["parking", "restoring", "releasing", "parking-unconfirmed", "release-unconfirmed", "restore-unconfirmed"].contains(record.result)
         guard let inventory = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else {
-            managed[i].result = "restore-window-query-unavailable"; return false
+            if !protectedOperation { managed[i].result = "restore-window-query-unavailable" }
+            return false
         }
         let info = inventory.first { ($0[kCGWindowNumber as String] as? UInt32) == id }
         if info == nil || (info?[kCGWindowOwnerPID as String] as? Int32) != pid {
@@ -259,20 +337,27 @@ final class ToolWindowRouter {
         if let launch = NSRunningApplication(processIdentifier: pid)?.launchDate, launch != record.launchDate {
             managed.remove(at: i); return true
         }
+        if protectedOperation { return false }
         guard live(record), let actual = frame(record.element), let last = record.lastKnownFrame else {
             managed[i].result = "restore-identity-unavailable"; return false
         }
         guard ToolWindowPolicy.sameFrame(actual, last) else {
-            managed.remove(at: i); return true // The user took over; leave it alone.
+            release(record); return false // User took over: forget the OCU record without moving.
         }
         let displays = AgentDisplay.displays()
         guard record.originalDisplays.contains(where: { displays[$0.key] == $0.value }) else {
             managed[i].result = record.originalDisplays.isEmpty ? "restore-close-native-agent-window" : "restore-original-display-unavailable"; return false
         }
-        let restored = writeFrame(record.element, to: record.originalFrame)
-        if restored { managed.remove(at: i) }
-        else { managed[i].lastKnownFrame = frame(record.element); managed[i].result = "restore-failed" }
-        return restored
+        managed[i].result = "restoring"
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "restore")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            if self.definitelyGone(record) { self.managed.remove(at: i); self.finishStopIfReady(); return }
+            if case .accepted = outcome, self.live(record), let actual = self.frame(record.element),
+               ToolWindowPolicy.sameFrame(actual, record.originalFrame) {
+                self.managed.remove(at: i); self.finishStopIfReady()
+            } else { self.managed[i].result = "restore-unconfirmed" }
+        }
+        return false // Asynchronous; status is authoritative, a quit retries after completion.
     }
 
     func command(_ request: [String: Any]) -> [String: Any] {
@@ -285,7 +370,10 @@ final class ToolWindowRouter {
             guard let pid = request["pid"] as? Int, let id = request["windowID"] as? Int,
                   let identity = ToolCommand.windowIdentity(pid: pid, windowID: id) else { return error("Valid PID/window ID required") }
             if request["command"] as? String == "tool-restore" {
-                return ["ok": restore(pid: identity.pid, id: identity.windowID), "status": status()]
+                let restored = restore(pid: identity.pid, id: identity.windowID)
+                let pending = managed.contains { $0.pid == identity.pid && $0.windowID == identity.windowID && ["restoring", "releasing"].contains($0.result) }
+                    || (identity.pid == ProcessInfo.processInfo.processIdentifier && agentSettingsRegistration == identity.windowID)
+                return ["ok": restored || pending, "state": restored ? "restored" : pending ? "requested" : "requires-recovery", "status": status()]
             }
             guard let app = NSRunningApplication(processIdentifier: identity.pid),
                   let window = exactWindow(app, id: identity.windowID) else { return error("No exact live AX window for this PID/window ID") }
@@ -302,7 +390,7 @@ final class ToolWindowRouter {
                     return
                 }
                 let parked = self.place(exact, pid: identity.pid)
-                if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = parked ? "parked" : "failed" }
+                if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = parked ? "parking" : "failed" }
             }
             return ["ok": true, "requestID": requestID, "state": "requested"]
         case "tool-open": return open(request)
@@ -313,7 +401,7 @@ final class ToolWindowRouter {
     func setEnabled(_ flag: Bool) {
         if !flag {
             observationEpoch = UUID(); currentOpenDocument = nil; currentOpenID = nil
-            if ["preparing-display", "requested", "waiting-for-window", "waiting-for-accessibility"].contains(lastOpen["state"] as? String ?? "") {
+            if ["preparing-display", "requested", "waiting-for-window", "waiting-for-accessibility", "parking", "registering-agent-settings"].contains(lastOpen["state"] as? String ?? "") {
                 lastOpen["state"] = "routing-cancelled"
             }
         }
@@ -337,12 +425,12 @@ final class ToolWindowRouter {
             let observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 })
             let placed = self.windows(app).contains { w in
                 !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
-                    && self.managed.contains(where: { CFEqual($0.element, w) })
+                    && self.managed.contains(where: { CFEqual($0.element, w) && $0.result == "parked" })
             }
             let retry = !observed && !placed && pending?.isEmpty != true && remaining > 1
                 && self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue)
             if self.lastOpen["id"] as? String == id {
-                self.lastOpen["state"] = placed ? "parked" : pending?.isEmpty == true ? "opened-in-existing-window" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
+                self.lastOpen["state"] = placed ? "parked" : self.managed.contains(where: { $0.pid == app.processIdentifier && $0.result == "parking" }) ? "parking" : pending?.isEmpty == true ? "opened-in-existing-window" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
                 self.lastOpen["observing"] = self.watches[app.processIdentifier] != nil
             }
             if retry { self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: epoch, remaining: remaining - 1) }
@@ -360,7 +448,19 @@ final class ToolWindowRouter {
                 if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed"; self.lastOpen["error"] = self.display.error ?? "display-unavailable" }
                 return
             }
-            operation()
+            self.ocu.call { [weak self] outcome in
+                guard let self else { return }
+                guard self.enabled, !self.stopping, self.observationEpoch == epoch else {
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
+                    return
+                }
+                guard case .accepted = outcome, self.display.currentBounds() != nil else {
+                    self.lastError = "ocu-exact-window-lifecycle-unavailable"
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed"; self.lastOpen["error"] = self.lastError }
+                    return
+                }
+                operation()
+            }
         }
     }
 
@@ -378,7 +478,7 @@ final class ToolWindowRouter {
                 guard let self else { return }
                 openOwnSettings()
                 if self.lastOpen["id"] as? String == id {
-                    self.lastOpen = ["id": id, "state": self.ownAgentWindow?.isVisible == true ? "opened-agent-settings" : "failed", "windowID": self.ownAgentWindow?.windowNumber ?? 0]
+                    self.lastOpen = ["id": id, "state": self.ownAgentWindow?.isVisible == true ? "registering-agent-settings" : "failed", "windowID": self.ownAgentWindow?.windowNumber ?? 0]
                 }
             }
             return ["ok": true, "requestID": id, "state": "requested"]
@@ -455,10 +555,10 @@ final class ToolWindowRouter {
                 }
                 let placed = self.windows(app).contains { w in
                     !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
-                    && self.managed.contains(where: { CFEqual($0.element, w) })
+                    && self.managed.contains(where: { CFEqual($0.element, w) && $0.result == "parked" })
                 }
                 let reused = baseline.compactMap(self.document).contains(resource.standardizedFileURL.resolvingSymlinksInPath())
-                let state = placed ? "parked" : reused ? "opened-in-existing-window" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
+                let state = placed ? "parked" : self.managed.contains(where: { $0.pid == app.processIdentifier && $0.result == "parking" }) ? "parking" : reused ? "opened-in-existing-window" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
                 if self.lastOpen["id"] as? String == id {
                     self.lastOpen = ["id": id, "state": state, "pid": Int(app.processIdentifier), "observing": observed, "newProcess": existing == nil]
                 }
@@ -484,7 +584,7 @@ final class ToolWindowRouter {
     }
 
     private func status() -> [String: Any] {
-        var target: [String: Any] = ["type": "agent-virtual-display", "supported": display.supported, "preparing": display.isPreparing]
+        var target: [String: Any] = ["type": "agent-virtual-display", "owner": "OCU persistent-display", "supported": display.supported, "preparing": display.isPreparing]
         if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
         if let bounds = display.bounds {
             target["id"] = display.id; target["name"] = "Open Computer Use"; target["owner"] = "OCU persistent-display"
@@ -517,13 +617,37 @@ final class ToolWindowRouter {
         let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
         let current = CGRect(x: window.frame.minX, y: primaryHeight - window.frame.maxY, width: window.frame.width, height: window.frame.height)
         if window.isVisible && !ToolWindowPolicy.contained(current, in: bounds) {
-            ownAgentWindow = nil; lastError = "agent-settings-handed-to-user"; return false
+            forgetAgentSettings(); lastError = "agent-settings-handed-to-user"; return false
         }
         let original = CGRect(x: 0, y: 0, width: window.frame.width, height: window.frame.height)
         let target = ToolWindowPolicy.destination(frame: original, area: bounds.insetBy(dx: 20, dy: 20))
         window.setFrame(NSRect(x: target.minX, y: primaryHeight - target.maxY, width: target.width, height: target.height), display: false)
         ownAgentWindow = window
         return true
+    }
+
+    func registerAgentWindow(_ window: NSWindow) {
+        let id = UInt32(window.windowNumber), pid = ProcessInfo.processInfo.processIdentifier
+        guard window === ownAgentWindow, ownAgentWindowIsParked(window), agentSettingsRegistration == nil else { return }
+        agentSettingsRegistration = id; agentReleaseUnconfirmed = false
+        let epoch = observationEpoch
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "agent_display")) { [weak self, weak window] outcome in
+            guard let self else { return }
+            self.agentSettingsRegistration = nil
+            guard let window, window === self.ownAgentWindow, window.isVisible else { self.finishStopIfReady(); return }
+            if self.stopping || self.observationEpoch != epoch { window.close(); self.ownAgentWindow = nil; self.finishStopIfReady(); return }
+            if case .accepted = outcome, self.ownAgentWindowIsParked(window) {
+                self.registeredAgentSettings = id; self.lastError = nil
+                if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "opened-agent-settings" }
+            } else {
+                // If a user took over, release any OCU record without moving it.
+                // Otherwise this is still our hidden Settings window; close it.
+                if self.ownAgentWindowIsParked(window) { window.close(); self.ownAgentWindow = nil }
+                else { self.registeredAgentSettings = id; self.forgetAgentSettings() }
+                self.lastError = "ocu-agent-settings-registration-unconfirmed"
+                if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "failed" }
+            }
+        }
     }
 
     private func jsonFrame(_ f: CGRect) -> [String: CGFloat] {

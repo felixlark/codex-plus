@@ -62,22 +62,6 @@ final class ToolWindowPolicyTests: XCTestCase {
             XCTAssertFalse(ToolWindowPolicy.eligible(role: role, subrole: subrole, minimized: minimized, fullscreen: fullscreen))
         }
     }
-    func testPartialAXMoveRollsBackAndFailedRollbackRetainsRecovery() {
-        let original = CGRect(x: 50, y: 60, width: 800, height: 600)
-        let target = CGRect(x: 4000, y: 20, width: 500, height: 400)
-        var frame = original
-        let rolledBack = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { rect in
-            if rect == target { frame.size = rect.size } // Resize succeeded, position failed.
-            else { frame = rect }
-        }, read: { frame })
-        XCTAssertEqual(rolledBack, .rolledBack)
-        XCTAssertEqual(frame, original)
-        let failed = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { _ in frame.size = target.size }, read: { frame })
-        XCTAssertEqual(failed, .recoveryRequired(frame))
-        XCTAssertNotEqual(frame, original)
-        let unverified = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { _ in }, read: { nil })
-        XCTAssertEqual(unverified, .recoveryRequired(nil))
-    }
     func testLateDocumentCannotMarkReusedManualRequestAsParked() {
         let a = URL(fileURLWithPath: "/tmp/a.txt")
         XCTAssertTrue(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "A", actualDocument: a))
