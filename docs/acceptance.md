@@ -2,6 +2,19 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.7.0 build 19 工作区展开适配（2026-11-14）
+
+宿主 `/Applications/ChatGPT.app` 26.1111.21308 (27194) 将收起时的入口改为 `AXCheckBox`「Show tabs」。旧适配仅识别「New tab」，使收起状态变成未知，任务切换无法触发展开。本版识别新版入口并保留旧版按钮／弹出按钮；沿用任务身份、屏幕范围及手动收起保护。
+
+- [x] 47 项 Node、40 项 Swift 检查通过；新增回归覆盖新版收起结构，以及不把 Hide tabs、菜单或文本当作展开入口。
+- [x] Developer ID 签名构建、正式安装及严格验签通过；构建与安装可执行文件 SHA256 均为 `74f8e8ddb19e46d5f06df6109a3f47a7a94751d7b97d151239ecd324ebceed0c`。
+- [x] 在真实安装版收起本案工作区，切到已有验收聊天再返回，右侧工作区可见恢复；动作计数 0→1。
+- [x] 当前任务手动收起后保持收起；通过 OCU 的应用内 ⌘N 新建 Codex 页，工作区展开，动作计数 1→2。此项验证应用快捷键，不声称硬件 HID 路径。
+- [x] 切到 ChatGPT 模式，收起后应用内 ⌘N，保持收起，动作计数仍为 2。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/workspace-fix-20261114/`。既有用户偏好及未发送草稿保留，宿主进程未重启。旧安装包由安装脚本保存在 Library/Caches 下供回退。
+
 ## 0.6.0 后台原生建议（2026-11-12）
 
 Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `443A8B04-FEA3-35EF-92E8-7F44FB205A9B`，安装版与构建缓存的可执行文件SHA256同为`c889c83e556d5c5d7b46a81cd43d961162d06a9a3aa00187cdbc72268d1a2055`，安装版严格验签通过。build12的UUID为`CAA6708B-4AC6-3DA6-AB6C-98449F774272`；build13因嵌入的Info.plist版本号变化重新链接。原记录误将build12 UUID沿用于13，发布前已按安装包、缓存及保留备份核正。官方宿主 `26.1106.51428` 的包未修改。JS资源安装与源码SHA256一致。开关通过原UserDefaults保留true，原生设置窗实际显示“无需打开会话”“已开启 · 前后台聊天的新建议将自动发送”。

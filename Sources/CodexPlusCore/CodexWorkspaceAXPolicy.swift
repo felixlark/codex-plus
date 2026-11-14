@@ -150,8 +150,11 @@ enum CodexWorkspaceHeaderState<Element> {
 }
 
 enum CodexWorkspaceHeaderSearch {
-    static func isNewTabControl(role: String, label: String) -> Bool {
-        label == "New tab" && ["AXButton", "AXPopUpButton"].contains(role)
+    static func isExpandControl(role: String, label: String) -> Bool {
+        // Codex 26.1111 exposes the collapsed pane as a toggle; older hosts
+        // expose New tab. Both open the existing workspace from the header.
+        (label == "Show tabs" && role == "AXCheckBox") ||
+            (label == "New tab" && ["AXButton", "AXPopUpButton"].contains(role))
     }
 
     static func nearest<Element: Hashable>(
