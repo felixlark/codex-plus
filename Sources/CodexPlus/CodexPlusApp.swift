@@ -90,7 +90,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.button?.toolTip = "Codex Plus"
         let menu = NSMenu()
         menu.delegate = self
-        let openItem = NSMenuItem(title: "打开 Codex（F6）", action: #selector(openCodex), keyEquivalent: "")
+        let openItem = NSMenuItem(title: "打开双屏 Codex（F6）", action: #selector(openCodex), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
@@ -116,7 +116,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.9.1",
+                return ["ok": true, "app": "Codex Plus", "version": "0.10.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -300,9 +300,9 @@ struct SettingsView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
             Text("Codex Plus").font(.title2.bold())
-            Text("按 F6 打开 Codex，项目随任务活动自动置顶。Codex Plus 在菜单栏运行。")
+            Text("按 F6 打开双屏 Codex，项目随任务活动自动置顶。Codex Plus 在菜单栏运行。")
             Text(launcher.summary).font(.callout).foregroundColor(.secondary)
-            Button("打开 Codex（F6）") { launcher.open() }
+            Button("打开双屏 Codex（F6）") { launcher.open() }
             Divider()
             Text("页面增强").font(.headline)
             Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
