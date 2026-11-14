@@ -33,3 +33,8 @@ CSS 隐藏会留下错误的导航/可访问性状态；共享偏好后再补偿
 运行时 bootstrap 创建随机 pageId，每个文档内修改序号递增。绑定请求 {version:1,pageId,sequence,change:{key,value}}（builtin 的 value 只含实际变动字段；页面保留完整 builtin，configure 在目标 profile 上合并字段）；controller 必须核默认主 context、当前 pageId 及严格递增 sequence。每页同步队列串行，执行时再次核 context/pageId，丢弃旧文档事件。configure({pageId,windowId,displayKey,profile,change?}) 仅对匹配 pageId 生效，返回状态快照；配置不触发修改事件。windowId 取 CDP targetId，防新窗口复制 opener 的 sessionStorage；同 target 同屏重载优先本窗口快照，其次屏幕快照，其次初始化原生基线。新 target 或切屏采用目标屏幕快照；无快照保留当前布局。显示器断开/未知时 displayKey=null，保留快照 values，但不能向先前屏幕保存；重连按屏幕恢复。新文档尚未绑定时的变化留在本窗口，首轮绑定后由明确后续变化保存，不拿初始化过程污染屏幕模板。
 
 文件边界：新增 Sources/CodexPlus/Resources/sidebar-layout.mjs（可序列化页面 runtime、固定源适配和几何/持久化工具），controller.mjs 接入响应适配、binding、同步/保存、readiness；CodexLauncher.swift 发显示器目录并暴露状态；CodexPlusApp.swift 展示状态和存储说明；Tests/sidebar-layout.test.mjs 定向回归；AppInfo.plist 升版本；README.md/docs/acceptance.md 记录用户行为与候选实证。先以 runtime/seam 测试验证隔离和恢复，再集成完整 scripts/test，最后签名安装并实际交互；不另设人工阶段审批。
+
+
+## 实施后的实际接入与验收
+
+已交付0.8.0 build23。窗口移动使用 Codex Plus 已集成的安装版 Dock Switch 窗口定位CLI临时移动，不改保存规则；可见操作/原生菜单与设置沿官方 OCU，读取窗口元数据和 CDP 只作补充证据。guarded recovery 是产品已有恢复动作，经完整空编辑器/无附件/无对话框/无新输入检查后才重载；不使用无保护的Page.reload。实际结果、候选签名与边界见 ../acceptance.md 本版本段。新原生窗口被已有项目登记任务复用后按共享现场交接保留。
