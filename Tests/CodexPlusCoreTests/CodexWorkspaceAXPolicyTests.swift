@@ -166,8 +166,35 @@ final class CodexWorkspaceAXPolicyTests: XCTestCase {
             1: CodexWorkspaceScanNode(role: "AXToolbar", label: "Chat toolbar", children: []),
             2: CodexWorkspaceScanNode(role: "AXGroup", label: "Rename chat", children: [], subrole: "AXApplicationDialog")
         ]
-        let result = CodexWorkspaceTreeSearch.findNode(root: 0, read: { modalTree[$0] }, matching: { $0.subrole == "AXApplicationDialog" })
+        let result = CodexWorkspaceTreeSearch.findNode(root: 0, read: { modalTree[$0] }, matching: { $0.isBlockingDialog })
         guard case .found(2) = result else { return XCTFail("background toolbar must not hide the active Chromium dialog") }
+    }
+
+    func testProjectHoverCardDoesNotHideNewChatOrResetSwitchBaseline() {
+        let nodes = [
+            0: CodexWorkspaceScanNode(role: "AXGroup", label: "", children: [1, 2]),
+            1: CodexWorkspaceScanNode(role: "AXToolbar", label: "Chat toolbar", children: []),
+            2: CodexWorkspaceScanNode(role: "AXGroup", label: "", children: [],
+                                      subrole: "AXApplicationDialog", isModal: false)
+        ]
+        let result = CodexWorkspaceTreeSearch.findNode(root: 0, read: { nodes[$0] }, matching: { $0.isBlockingDialog })
+        guard case .absent = result else { return XCTFail("A project hover card is not a blocking dialog") }
+        var tracker = CodexWorkspaceSwitchTracker<Int>()
+        _ = tracker.observe(window: 0, chat: 1, workspaceOpen: false)
+        tracker.observeStructuralContext(.clear)
+        XCTAssertTrue(tracker.observe(window: 0, chat: 2, workspaceOpen: false))
+        XCTAssertFalse(tracker.observe(window: 0, chat: 2, workspaceOpen: false))
+    }
+
+    func testModalOrUnreadableDialogStillProtectsRename() {
+        for role in ["AXGroup", "AXDialog", "AXSheet"] {
+            for modal in [true, nil] as [Bool?] {
+                let node = CodexWorkspaceScanNode<Int>(role: role, label: "Rename chat", children: [],
+                                                      subrole: "AXApplicationDialog", isModal: modal)
+                XCTAssertTrue(node.isBlockingDialog)
+            }
+        }
+        XCTAssertFalse(CodexWorkspaceScanNode<Int>(role: "AXGroup", label: "", children: []).isBlockingDialog)
     }
 
     func testTransientSubscriptionFailureRecoversWithoutRestart() {
