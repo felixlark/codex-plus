@@ -188,7 +188,10 @@ final class ToolWindowRouter {
             managed.remove(at: i) // Explicit new claim after a user move.
         }
         let origin = AgentDisplay.displays().filter { $0.key != display.id && $0.value.contains(CGPoint(x: original.midX, y: original.midY)) }
-        guard !origin.isEmpty, let bounds = display.ensure() else { lastError = display.error ?? "original-display-unavailable"; return false }
+        // New documents can inherit the previous Agent window's virtual location.
+        // They are still exact file claims; never invent a physical restore target.
+        let bornOnAgentDisplay = display.bounds.map { ToolWindowPolicy.contained(original, in: $0) } ?? false
+        guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.ensure() else { lastError = display.error ?? "original-display-unavailable"; return false }
         let area = bounds.insetBy(dx: 20, dy: 20)
         let target = ToolWindowPolicy.destination(frame: original, area: area)
         managed.append(Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
@@ -258,7 +261,7 @@ final class ToolWindowRouter {
         }
         let displays = AgentDisplay.displays()
         guard record.originalDisplays.contains(where: { displays[$0.key] == $0.value }) else {
-            managed[i].result = "restore-original-display-unavailable"; return false
+            managed[i].result = record.originalDisplays.isEmpty ? "restore-close-native-agent-window" : "restore-original-display-unavailable"; return false
         }
         let restored = writeFrame(record.element, to: record.originalFrame)
         if restored { managed.remove(at: i) }
@@ -435,7 +438,8 @@ final class ToolWindowRouter {
             target["frame"] = jsonFrame(bounds)
         }
         var windows = managed.map { record -> [String: Any] in
-            var result: [String: Any] = ["pid": record.pid, "windowID": record.windowID, "result": record.result]
+            var result: [String: Any] = ["pid": record.pid, "windowID": record.windowID, "result": record.result,
+                "restoreMode": record.originalDisplays.isEmpty ? "close-agent-window" : "original-frame"]
             if let f = frame(record.element) { result["frame"] = jsonFrame(f) }
             return result
         }
