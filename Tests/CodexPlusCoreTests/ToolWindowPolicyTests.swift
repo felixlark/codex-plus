@@ -21,19 +21,23 @@ final class ToolWindowPolicyTests: XCTestCase {
         XCTAssertTrue(consumed.isEmpty)
         XCTAssertTrue(ToolWindowPolicy.remainingClaims(consumed, knownDocuments: []).isEmpty)
     }
-    func testOnlyOwnedIsolatedVirtualDisplayQualifies() {
-        let existing: [UInt32: CGRect] = [1: CGRect(x: 0, y: 0, width: 1500, height: 980), 2: CGRect(x: 1500, y: -1100, width: 2000, height: 1100)]
-        var after = existing; after[30] = CGRect(x: 3500, y: 0, width: 1920, height: 1080)
-        func valid(_ map: [UInt32: CGRect], id: UInt32 = 30, primary: UInt32 = 1, mirrored: Bool = false) -> Bool {
-            ToolWindowPolicy.isIsolatedDisplay(id: id, before: existing, after: map, primaryBefore: 1, primaryAfter: primary, mirrored: mirrored)
+    func testOnlyExactPersistentOCUDisplayQualifies() {
+        let map: [UInt32: CGRect] = [1: CGRect(x: 0, y: 0, width: 1512, height: 982),
+            28: CGRect(x: 1512, y: 0, width: 1920, height: 1080)]
+        func valid(id: UInt32 = 28, primary: UInt32 = 1, vendor: UInt32 = 0x0CAC,
+            model: UInt32 = 0x0CAC, serial: UInt32 = 3250512631, builtin: Bool = false,
+            mirrored: Bool = false, online: [UInt32: CGRect]? = nil) -> Bool {
+            ToolWindowPolicy.isPersistentAgentDisplay(id: id, primary: primary,
+                vendor: vendor, model: model, serial: serial, expectedSerial: 3250512631,
+                builtin: builtin, mirrored: mirrored, online: online ?? map)
         }
-        XCTAssertTrue(valid(after))
-        XCTAssertFalse(valid(after, id: 2)) // Physical right screen is never a fallback.
-        XCTAssertFalse(valid(after, primary: 30))
-        XCTAssertFalse(valid(after, mirrored: true))
-        var overlap = after; overlap[30] = existing[2]; XCTAssertFalse(valid(overlap))
-        var moved = after; moved[1] = CGRect(x: 10, y: 0, width: 1500, height: 980); XCTAssertFalse(valid(moved))
-        XCTAssertFalse(valid(existing))
+        XCTAssertTrue(valid())
+        XCTAssertFalse(valid(id: 1)); XCTAssertFalse(valid(primary: 28))
+        XCTAssertFalse(valid(vendor: 0)); XCTAssertFalse(valid(model: 0xC0D1))
+        XCTAssertFalse(valid(serial: 1)); XCTAssertFalse(valid(builtin: true))
+        XCTAssertFalse(valid(mirrored: true)); XCTAssertFalse(valid(online: [:]))
+        var overlap = map; overlap[28] = map[1]; XCTAssertFalse(valid(online: overlap))
+        XCTAssertFalse(valid(online: [1: map[1]!]))
     }
     func testWindowIdentityNeverUsesOverlappingGeometry() {
         let launch = Date(timeIntervalSince1970: 10)
@@ -73,5 +77,12 @@ final class ToolWindowPolicyTests: XCTestCase {
         XCTAssertNotEqual(frame, original)
         let unverified = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { _ in }, read: { nil })
         XCTAssertEqual(unverified, .recoveryRequired(nil))
+    }
+    func testLateDocumentCannotMarkReusedManualRequestAsParked() {
+        let a = URL(fileURLWithPath: "/tmp/a.txt")
+        XCTAssertTrue(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "A", actualDocument: a))
+        // A is pending; B returns early as already open; A then appears.
+        XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "B", actualDocument: a))
+        XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: nil, resource: nil, latestRequestID: "B", actualDocument: a))
     }
 }
