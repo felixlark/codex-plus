@@ -20,11 +20,11 @@ test('background completion beats a later foreground message despite unchanged n
   const reloaded=createProjectActivityRuntime(disk,()=>50,sortProjectGroups);
   assert.deepEqual(ids(reloaded.sort(groups,key=>times[key],key=>times[key],key=>states[key])),['B','C','A']);
 });
-test('attention, active and unread projects precede newer idle projects on first render',()=>{
+test('attention, unread and active projects precede newer idle projects on first render',()=>{
   const runtime=createProjectActivityRuntime(storage(),()=>999,sortProjectGroups);
   const input=['idle','unread','active','input','approval','error'].map((state,index)=>({projectId:state,threadKeys:[state],timestamp:100-index}));
   const times=Object.fromEntries(input.map(g=>[g.projectId,g.timestamp]));
-  assert.deepEqual(ids(runtime.sort(input,key=>times[key],key=>times[key],key=>key)),['input','approval','error','active','unread','idle']);
+  assert.deepEqual(ids(runtime.sort(input,key=>times[key],key=>times[key],key=>key)),['input','approval','error','unread','active','idle']);
   assert.ok(runtime.stats.groups.every(g=>g.activity[0]===0),'initial status sampling must not fabricate activity');
 });
 test('complete thread model promotes old work before previews and keyboard navigation are derived',()=>{
@@ -33,8 +33,8 @@ test('complete thread model promotes old work before previews and keyboard navig
   const input=[{projectId:'mixed',threadKeys:keys}];
   const state=key=>key.split('-')[0];
   const result=runtime.sort(input,()=>1,()=>1,state);
-  assert.deepEqual(result[0].threadKeys,['approval-old','error-old','input-old','active-old','unread-old',...keys.slice(0,5)]);
-  assert.deepEqual(result[0].threadKeys.slice(0,5),['approval-old','error-old','input-old','active-old','unread-old']);
+  assert.deepEqual(result[0].threadKeys,['approval-old','error-old','input-old','unread-old','active-old',...keys.slice(0,5)]);
+  assert.deepEqual(result[0].threadKeys.slice(0,5),['approval-old','error-old','input-old','unread-old','active-old']);
   assert.strictEqual(input[0].threadKeys,keys);assert.equal(keys[0],'idle-new');
   assert.deepEqual(runtime.stats.order,[0]);
   assert.strictEqual(runtime.sort(result,()=>1,()=>1,state),result,'unchanged order keeps model identity');
@@ -51,7 +51,7 @@ test('finishing and reading a task removes its priority; unknown status does not
   const input=[{projectId:'A',threadKeys:['idle','task']},{projectId:'B',threadKeys:['active']}];
   let task='approval';
   const render=()=>runtime.sort(input,()=>1,()=>1,key=>key==='task'?task:key==='active'?'active':undefined);
-  assert.deepEqual(ids(render()),['A','B']);task='unread';assert.deepEqual(ids(render()),['B','A']);
+  assert.deepEqual(ids(render()),['A','B']);task='unread';assert.deepEqual(ids(render()),['A','B']);
   task='idle';assert.deepEqual(render()[1].threadKeys,['idle','task']);
   task=undefined;assert.deepEqual(ids(render()),['B','A']);
 });
