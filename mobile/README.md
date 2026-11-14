@@ -13,6 +13,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - iOS 在原页面启动前注入兼容 preload；同步 getter 来自已取得的原宿主快照。
 - 原 app-host RPC 的结构化帧由有类型的 carrier 搬运，保持端口、回调、二进制、关闭和顺序。
 - 独立原生宿主窗口作为手机锚点；不能在人工窗口第二次注册 AppView。
+- 从原 nonce 路由捕获后固定该原生 target ID，仅导航同一个已登记窗口到原后台明确接受的准确 `about:blank`。等待新主帧 context，并在同次检查中确认原 preload、加载完成、无 script 后追加隔离标记和 CSP；失去原 ID 就关闭接入，不认领其他空白窗口。本地端口交接仅在该 host 空白页 origin 为 `null` 时向同一个 window 使用 `*`，仍由原 preload 校验 `event.source === window`。空白页的 preload 和原会话读、发、流须由安装版另行证明，不推定全部 host services 可用。
 - Plus 既有 controller 是唯一 CDP owner，移动接入模块不另起 App Server、不公开 CDP。
 - 原生 WSS gateway 是该 controller 的子进程，只处理传输。专用 TLS 私钥留 Keychain；模拟器固定证书摘要，Tailscale 身份绑定指定 node/user。
 - 本机 Network.framework 直接接收 utun TCP 的隔离对照失败；gateway 内用固定 BSD 入口承载原始 TLS 字节，再接同进程的 loopback TLS 层，按独占四元组、一次领取和连接代际保持原 peer。它不提供通用代理，也不终止第二次 TLS。iOS 用 Network 的连接级固定证书校验，保留证书有效期、签名、serverAuth 和准确 IP SAN 校验，不改变系统信任库或全局 ATS。

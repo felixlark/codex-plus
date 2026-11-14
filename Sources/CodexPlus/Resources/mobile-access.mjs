@@ -32,6 +32,19 @@ export async function mobileHostSupported(archive) {
   return true;
 }
 
+// Executed only in the current default context of the captured native target.
+export function prepareMobileAnchor(nonce) {
+  const probe = {blank: location.href === 'about:blank', preload: !!window.electronBridge, complete: document.readyState === 'complete', ui: !!document.querySelector('script'), isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce};
+  if (!probe.blank || !probe.preload || !probe.complete || probe.ui) return probe;
+  if (!probe.isolated) {
+    const policy = document.createElement('meta'); policy.httpEquiv = 'Content-Security-Policy'; policy.content = "default-src 'none'";
+    const marker = document.createElement('meta'); marker.name = 'codex-plus-mobile-anchor'; marker.content = nonce;
+    document.head.append(policy, marker); document.title = 'Codex Plus Mobile';
+    document.body.textContent = 'Codex Plus 移动接入专用窗口';
+  }
+  return {...probe, isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce};
+}
+
 export class MobileAccess {
   static async create(options) {
     let config;
@@ -51,47 +64,47 @@ export class MobileAccess {
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, stage: this.stage ?? null, failure: this.failure ?? null, probe: this.lastProbe ?? null}; }
+  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, probe: this.lastProbe ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
-  async interceptDocument(id, event) {
-    if (this.stopped || !this.isAnchorURL(event.request.url) || event.resourceType !== 'Document') return false;
-    await this.command(id, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200, responseHeaders: [{name: 'Content-Type', value: 'text/html; charset=utf-8'}, {name: 'Content-Security-Policy', value: "default-src 'none'"}], body: Buffer.from(`<!doctype html><html><head><title>Codex Plus Mobile</title><meta name="codex-plus-mobile-anchor" content="${this.config.anchor}"></head><body>Codex Plus 移动接入专用窗口</body></html>`).toString('base64')});
-    this.anchorSession = id; this.phase = 'anchor-loading'; return true;
-  }
   async tick() {
     if (this.busy || this.stopped) return;
     this.busy = true;
     try {
       this.stage = 'targets';
       const {targetInfos} = await this.cdp.call('Target.getTargets');
-      const anchors = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
-      if (anchors.length > 1) throw Error('Ambiguous mobile anchor');
+      const candidates = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
+      if (candidates.length > 1 || this.anchorTarget && candidates.some(t => t.targetId !== this.anchorTarget)) throw Error('Ambiguous mobile anchor');
+      // Ownership is sticky after the original nonce URL identifies the native
+      // registered window. Never adopt a replacement or an unrelated blank page.
+      if (!this.anchorTarget && candidates.length) this.anchorTarget = candidates[0].targetId;
+      const anchors = targetInfos.filter(t => t.type === 'page' && t.targetId === this.anchorTarget);
+      if (this.anchorTarget && !anchors.length) throw Error('Mobile anchor lost');
+      if (anchors.length && !this.isAnchorURL(anchors[0].url) && anchors[0].url !== 'about:blank') throw Error('Mobile anchor lost');
       if (anchors.length) {
         const session = [...this.sessions].find(([, s]) => s.target === anchors[0].targetId);
         if (!session) return;
-        this.anchorTarget = anchors[0].targetId; this.anchorSession = session[0];
+        this.anchorSession = session[0];
         if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
         this.stage = 'frame-tree';
         const {frameTree} = await this.command(session[0], 'Page.getFrameTree');
         if (this.preparationAttempted && frameTree.frame.loaderId === this.preparingFromLoader) { this.phase = 'anchor-loading'; return; }
-        const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
-        if (!context) { this.phase = 'anchor-loading'; return; }
-        this.stage = 'probe';
-        const result = await this.evaluate(`({preload:!!window.electronBridge,complete:document.readyState==='complete',isolated:document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content===${JSON.stringify(this.config.anchor)},ui:!!document.querySelector('script[src]')})`, false, context.id);
-        this.lastProbe = Object.fromEntries(['preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
-        this.stage = 'isolation-check';
-        if (!result.complete) { this.phase = 'anchor-loading'; return; }
-        if (!result.preload) throw Error('Mobile anchor preload unavailable');
-        if (!result.isolated || result.ui) {
-          // Prepare only the nonce-owned page. Navigation closes its old native
-          // app-host port before any phone port is installed; never replace a live view.
-          if (this.preparationAttempted) throw Error('Mobile anchor isolation unavailable');
-          this.preparationAttempted = true; this.preparingFromLoader = frameTree.frame.loaderId; this.phase = 'preparing-anchor';
-          this.stage = 'navigate';
-          const navigation = await this.command(session[0], 'Page.navigate', {url: anchors[0].url});
+        if (!this.preparationAttempted) {
+          // The native sender stays registered; main-frame navigation tears down
+          // any old app-host before the phone can register its sole port.
+          this.preparationAttempted = true; this.preparingFromLoader = frameTree.frame.loaderId; this.phase = 'preparing-anchor'; this.stage = 'navigate';
+          const navigation = await this.command(session[0], 'Page.navigate', {url: 'about:blank'});
           if (navigation.errorText) throw Error('Mobile anchor navigation failed');
           return;
         }
+        const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
+        if (!context) { this.phase = 'anchor-loading'; return; }
+        this.stage = 'probe';
+        const result = await this.evaluate(`(${prepareMobileAnchor.toString()})(${JSON.stringify(this.config.anchor)})`, false, context.id);
+        this.lastProbe = Object.fromEntries(['blank', 'preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
+        this.stage = 'isolation-check';
+        if (!result.complete) { this.phase = 'anchor-loading'; return; }
+        if (!result.preload) throw Error('Mobile anchor preload unavailable');
+        if (frameTree.frame.url !== 'about:blank' || !result.blank || !result.isolated || result.ui) throw Error('Mobile anchor isolation unavailable');
         this.anchorPrepared = true;
         this.stage = 'gateway';
         if (!this.gateway) await this.startGateway();

@@ -324,7 +324,7 @@ async function main(){
     try{
       if(targetInfo.type==='page'&&!stopping){
         session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
-          patterns:[...resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),...mobile?[{urlPattern:'app://-/index.html*',resourceType:'Document',requestStage:'Response'}]:[]],
+          patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
           bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
           source:featureSupported?featureSource:undefined,
         });
@@ -346,7 +346,6 @@ async function main(){
     let body,finished=false;
     const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await command(sessionId,'Fetch.continueRequest',{requestId:event.requestId});finished=true;};
     try{
-      if(!stopping&&await mobile?.interceptDocument(sessionId,event))return;
       if(stopping){await original();return;}
       const {frameTree}=await command(sessionId,'Page.getFrameTree');
       const resource=resources.find(resource=>resource.url===event.request.url);
