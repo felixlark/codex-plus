@@ -5,7 +5,7 @@
 本模块把当前安装版的原网页资源装进 iOS App，在 WKWebView 本地运行。
 Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台与既有会话。
 不创建另一执行器，不重做聊天界面。当前资源适配准确绑定 26.1111.21308。
-资源、构建、运行证据各自登记；此文件不表示已经接通或验收通过。
+资源、构建和实际交互的证据见 [安装版验收](../docs/acceptance.md#codex-原前端移动原型2026-11-15)。
 
 ## 接入边界
 
@@ -30,4 +30,21 @@ bash scripts/build-mobile-simulator
 ```
 
 本模块源码归 Codex Plus；产品模块与最终验收记录回写 #578。
-当前源码检查和隔离传输证据不代替安装版原会话的读取、发送、流式与断线验收。
+
+启动原型前，在 Mac 配置已有验收会话，下一次 Plus 启动才创建专用原生窗口：
+
+```sh
+node scripts/configure-mobile.mjs --thread <existing-thread-uuid>
+```
+
+窗口创建可能短暂置前；本次已获许可，创建后由 OCU 按准确窗口身份停放到 Agent 隐藏屏并最小化。
+网关启动后写入本机 `connection.json`，再构建、安装模拟器 App；每次网关端口变化都需重新打包此连接配置。
+断线时保留未知结果并到原会话核对；明确终止并重新启动 iOS App 可重新连接，普通切后台／回前台不会刷新已断开的页面。
+结束一次原型运行后可关闭下一次自动创建，当前已建立的会话在本次 Plus 进程退出前继续有效：
+
+```sh
+node scripts/configure-mobile.mjs --disable
+```
+
+当前验收只覆盖原会话读取、单次发送、文本流式、Mac 同会话对账和断线不重发。
+原前端的其他宿主功能与物理 iPhone 跨节点访问尚未验收；更换原 Codex 版本时须重新核对准确版本和资源摘要。
