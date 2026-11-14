@@ -3,6 +3,17 @@
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
 
+## 0.9.1 build 29 窗口编号（2026-11-14）
+
+实现候选 b98896d，最终签名候选 7aa8028（同步状态/帮助版本号），安装到 `/Applications/Codex Plus.app`。Developer ID、Hardened Runtime、安全时间戳及严格验签通过；安装可执行文件 SHA256 `0b6c44b507cd0f30786fbdc62fb2f42a048faf2d3512b8f2ccddd0cd678957be`，构建/安装包及三项变更资源逐文件一致。
+
+- [x] 68 项 Node、51 项 Swift 检查通过；新分配器覆盖乱序、保存/恢复、关闭/新增、异常/重复编号。独立 EGM readiness 复核未发现阻断，提醒的失败查询保留映射和宿主身份验证后恢复均已采用。Impeccable 局部检测无发现。
+- [x] 正式两个真实主窗口的现有 Plus 圆环中央分别可见 1、2；沿用24px图形、36px点击区和原生页脚位置。官方 OCU 截图与只读 target/DOM 互证，两个页面 feature protocol2、排序 protocol8；点击数字2后的原生设置页可见，settingsRequests 0→1。
+- [x] 正常退出并从正式路径重启 Plus，controller 77809→79163，宿主 PID64999 保持；同一两个 target/pageId 编号不变，无页面重载。验收期间窗口交换了屏幕，编号仍随原 target 保持，两个布局值与各自目的屏幕先前模板逐项一致，符合窗口标识与屏幕布局两套既有语义。
+- [x] 最终状态 0.9.1/build29，页面入口、排序、侧栏布局均 active，自动发送 true；原所选 DELL 屏幕设置保留。正式 Plus 保持运行，没有发送验收聊天或改写原生分区数据。
+
+本机证据 `~/Library/Logs/codex-plus/window-number-20261114/`：readiness.md、tests29.log、build29-final.log、install29-final.log、identity29.json、signing29.txt、number1-final29.png、number2-final29.png、settings-final29.png、final-installed29.json、after-click29.json、restarted29.json、final-status29.json、verification29.txt。最初按“同窗口布局完全不变”的比较因现场跨屏而失败；随后按目的屏幕模板核对，两屏逐项一致，原失败未当作通过。窗口关闭后数字可复用；宿主重开后的新窗口重新分配。
+
 ## 0.8.0 build 23 窗口独立侧栏与屏幕记忆（2026-11-14）
 
 安装版 `/Applications/Codex Plus.app`，官方宿主 26.1111.21308 (27194)，宿主 PID64999 全程保持。实现候选 4006a80；Developer ID、Hardened Runtime、安全时间戳及严格验签通过，安装 Mach-O UUID `CB728328-B9F6-3F55-98E9-A4142E152B78`。安装的 controller、sidebar-layout 与其依赖资源摘要逐文件匹配实现候选。

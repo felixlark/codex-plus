@@ -40,7 +40,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.9.0\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] [--dedicated] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-exempt | --tool-recover]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.9.1\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] [--dedicated] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-exempt | --tool-recover]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         guard SuggestionAcceptance.isValidOrAbsent else {
@@ -117,7 +117,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.9.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.9.1",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
