@@ -51,7 +51,7 @@ export class MobileAccess {
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null}; }
+  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, stage: this.stage ?? null, failure: this.failure ?? null, probe: this.lastProbe ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async interceptDocument(id, event) {
     if (this.stopped || !this.isAnchorURL(event.request.url) || event.resourceType !== 'Document') return false;
@@ -62,6 +62,7 @@ export class MobileAccess {
     if (this.busy || this.stopped) return;
     this.busy = true;
     try {
+      this.stage = 'targets';
       const {targetInfos} = await this.cdp.call('Target.getTargets');
       const anchors = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
       if (anchors.length > 1) throw Error('Ambiguous mobile anchor');
@@ -70,11 +71,15 @@ export class MobileAccess {
         if (!session) return;
         this.anchorTarget = anchors[0].targetId; this.anchorSession = session[0];
         if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
+        this.stage = 'frame-tree';
         const {frameTree} = await this.command(session[0], 'Page.getFrameTree');
         if (this.preparationAttempted && frameTree.frame.loaderId === this.preparingFromLoader) { this.phase = 'anchor-loading'; return; }
         const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
         if (!context) { this.phase = 'anchor-loading'; return; }
+        this.stage = 'probe';
         const result = await this.evaluate(`({preload:!!window.electronBridge,complete:document.readyState==='complete',isolated:document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content===${JSON.stringify(this.config.anchor)},ui:!!document.querySelector('script[src]')})`, false, context.id);
+        this.lastProbe = Object.fromEntries(['preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
+        this.stage = 'isolation-check';
         if (!result.complete) { this.phase = 'anchor-loading'; return; }
         if (!result.preload) throw Error('Mobile anchor preload unavailable');
         if (!result.isolated || result.ui) {
@@ -82,21 +87,28 @@ export class MobileAccess {
           // app-host port before any phone port is installed; never replace a live view.
           if (this.preparationAttempted) throw Error('Mobile anchor isolation unavailable');
           this.preparationAttempted = true; this.preparingFromLoader = frameTree.frame.loaderId; this.phase = 'preparing-anchor';
+          this.stage = 'navigate';
           const navigation = await this.command(session[0], 'Page.navigate', {url: anchors[0].url});
           if (navigation.errorText) throw Error('Mobile anchor navigation failed');
           return;
         }
         this.anchorPrepared = true;
+        this.stage = 'gateway';
         if (!this.gateway) await this.startGateway();
       } else if (!this.creationAttempted) {
         const source = [...this.sessions].find(([, s]) => s.main);
         if (!source) return;
         this.creationAttempted = true; this.phase = 'creating-anchor';
         const route = `/local/${this.config.threadId}?codexPlusMobileAnchor=${this.config.anchor}`;
+        this.stage = 'create';
         const creation = await this.command(source[0], 'Runtime.evaluate', {expression: `window.electronBridge.sendMessageFromView(${JSON.stringify({type: 'open-in-new-window', path: route})})`, awaitPromise: true});
         if (creation.exceptionDetails) throw Error('Native anchor creation failed');
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
-    } catch { this.phase = 'unavailable'; await this.close(); }
+    } catch (error) {
+      const message = String(error?.message ?? '');
+      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor creation failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
+      this.phase = 'unavailable'; await this.close();
+    }
     finally { this.busy = false; }
   }
   async evaluate(expression, awaitPromise = false, contextId) {
