@@ -2,6 +2,23 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+
+## 0.8.0 build 23 窗口独立侧栏与屏幕记忆（2026-11-14）
+
+安装版 `/Applications/Codex Plus.app`，官方宿主 26.1111.21308 (27194)，宿主 PID64999 全程保持。实现候选 4006a80；Developer ID、Hardened Runtime、安全时间戳及严格验签通过，安装 Mach-O UUID `CB728328-B9F6-3F55-98E9-A4142E152B78`。安装的 controller、sidebar-layout 与其依赖资源摘要逐文件匹配实现候选。
+
+- [x] 59 项 Node、42 项 Swift 全部通过；push 与 PR CI 均通过。独立设计/代码审查及两项实质修订复核见 [审查记录](reviews/window-sidebar-layout.md)。
+- [x] 安装版 Plus 设置显示“每窗口独立，按屏幕记忆”；原生设置按钮触发重新接入，两个已有后台 protocol5 窗口都实际重载并加载 sidebar protocol1/bound/configured。既有开发任务继续运行。
+- [x] 官方 OCU 操作两个真实窗口，读回外屏 Smart Shadow 展开、Projects 折叠，右屏反向；原生 `aria-expanded` 与各自快照吻合，没有跨窗口同步。页面内容和原生账号分区元数据继续共用。
+- [x] 用既有安装版 Dock Switch `move --pid` 窗口定位控制面，把右屏同一个窗口移至 DELL，再移回 Mi Monitor (2)，其 Projects 状态依次采用目的屏幕模板、恢复右屏模板；另一已有窗口保持自身状态。未修改保存的定位规则。OCU 可见截图及只读几何/UUID/原生 aria 补充取证。
+- [x] OCU 在原生聊天标题菜单选择“Open in new window”，新增真实窗口15317及主 target。其页面独立 sidebar protocol1，自动采用 DELL 已保存模板，原窗口状态保留。
+- [x] 在新增主 target 上调用安装版既有 guarded recovery helper：document ready、11个编辑器长度均0、无附件/对话框、inputRevision=0 才触发重载。新 pageId、同 target、同路由、相同分区布局、configured=true 均读回；没有强制 Page.reload 绕过保护。先前被输入变化拒绝的恢复尝试保留并清理本轮监听器，不当作成功。
+- [x] 自动发送建议的原开启偏好已通过原生设置恢复，并读回 enabled=true；两个屏幕模板文件可写且状态 active。新增原生窗口随后交已有项目登记 owner 复用，未关闭他人现场；窗口/安装/源码 writer 按实际安全点释放。
+
+证据留在本机 `~/Library/Logs/codex-plus/window-sidebar-20261114/`：tests23.log、build23-final.log、installed23.json、signing23.txt、opposite-layouts23.json、right-layout23.png、moved-to-external23.json、moved-external23.png、moved-back-right23.json、new-window-ready23.json、guarded-reload23.json、guard-refusal23.json、final-status23.json。只有实际观察的截图用于可见证明；默认 focused-window 的 OCU 返回不冒充指定窗口证据。新窗口身份另由原生窗口列表差量与 CDP target 差量共同核对。
+
+当前主张覆盖本机现行英文 Codex UI 的分区、项目列表与物理双屏；未来宿主资源变更沿源码守卫降级。原 F6 硬件路径与未改的右侧工作区 Cmd+N/模式行为复用既有候选有效证据，本项没有重做硬件发键或发送验收消息。
+
 ## 0.7.0 build 21 项目行新建任务展开（2026-11-14）
 
 项目悬浮信息卡也可暴露为 `AXApplicationDialog`。此前观察器不区分模态状态，会将信息卡视为阻塞对话框并清空任务基线，使项目行新建页跳过展开。现在读取公开 `AXModal` 属性：明确非模态的卡片不再阻塞；真正模态及模态状态不可读取的对话框沿用原保护。

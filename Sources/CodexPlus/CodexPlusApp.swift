@@ -25,7 +25,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.7.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.8.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         guard SuggestionAcceptance.isValidOrAbsent else {
@@ -93,7 +93,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.7.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.8.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -254,6 +254,9 @@ struct SettingsView: View {
             Text("页面增强").font(.headline)
             Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
             Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
+            Text("侧栏布局：\(launcher.sidebarSummary)").font(.callout).foregroundColor(.secondary)
+            Text("展开与折叠只影响当前窗口。移动到其他屏幕或新开窗口时，恢复该屏幕上次的布局；同屏已有窗口保持各自状态。布局仅保存在本机。")
+                .font(.caption).foregroundColor(.secondary)
             Button("重新接入页面增强") { launcher.reconnectEnhancements() }
                 .disabled(model.autoSendSuggestions)
             Text("更新后可在此重新接入；先关闭自动发送。有未提交输入、附件或对话框时不执行。")
