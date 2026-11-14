@@ -3,7 +3,7 @@
 ## Scope
 
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
-Codex Web App enhancements, workspace observation, settings, the status CLI, and quiet tool-window routing.
+Codex Web App enhancements, workspace observation, settings, the status CLI, and isolation of Agent-owned windows on an invisible virtual display.
 
 All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
 The page's Codex Plus button is the first item in the lower-left navigation footer;
@@ -33,9 +33,12 @@ affected data, lifecycle, recovery, and acceptance in the feature design. The
 workspace auto-expand feature expands a known closed workspace. Permission grants
 use the user's explicit authorization and official System Settings controls.
 
-One runtime owns the feature. Dock Switch must have its observer removed before
-Codex Plus receives Accessibility permission. Preserve the old installation for
-rollback. The result owner completes installed interaction acceptance and closes the delivery issue with evidence; wait for personal acceptance only when the user explicitly requires it.
+One Plus runtime owns Agent-window isolation. Never route tools to a physical monitor,
+move either human Codex window, or claim every window of a utility process. File and
+explicit-window claims use exact system window identity. User Settings and Agent
+Settings are separate windows. Preserve the previous installation for rollback.
+The result owner completes installed interaction acceptance and closes the delivery
+issue with evidence; wait for personal acceptance only when explicitly required.
 
 ## 自动交付
 
