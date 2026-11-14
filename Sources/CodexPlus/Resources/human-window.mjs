@@ -33,12 +33,14 @@ export async function preserveNativeBounds(file,current,io) {
   return saved;
 }
 
-export function preferredHumanNumbers(pages,frames) {
+export function preferredHumanNumbers(pages,frames,previous={}) {
   const preferred={};
   for(const frame of frames) {
     if(![1,2].includes(frame.number))continue;
     const matches=pages.filter(page=>page.frame&&['x','y','width','height'].every(k=>Number.isFinite(frame[k])&&Math.abs(frame[k]-page.frame[k])<3));
-    if(matches.length===1)preferred[matches[0].target]=frame.number;
+    const retained=matches.filter(page=>previous[page.target]===frame.number);
+    const matched=matches.length===1?matches[0]:retained.length===1?retained[0]:null;
+    if(matched)preferred[matched.target]=frame.number;
   }
   return preferred;
 }

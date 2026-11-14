@@ -50,3 +50,11 @@ test('native initialRoute mobile anchor stays outside human features and numbers
   assert.equal(isHumanWindowURL('app://-/index.html?codexPlusMobileAnchor=agent'),false);
   assert.equal(isHumanWindowURL('app://-/index.html?initialRoute=%2Flocal%2Fthread%3FcodexPlusHumanWindow%3Dhuman'),true);
 });
+
+test('a native New Window at the same frame retains the established human target',()=>{
+  const pages=[{target:'external',frame:external},{target:'native-new',frame:external},{target:'right',frame:right}];
+  const frames=[{...external,number:1},{...right,number:2}],previous={external:1,right:2};
+  const preferred=preferredHumanNumbers(pages,frames,JSON.parse(JSON.stringify(previous)));
+  assert.deepEqual(preferred,previous);
+  assert.deepEqual(allocateWindowNumbers(pages.map(p=>p.target),{external:1,'native-new':3,right:2},preferred,[1,2]),{external:1,right:2,'native-new':3});
+});

@@ -23,7 +23,7 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{}};
+let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
@@ -237,9 +237,11 @@ async function refreshWindowNumbers(){
   for(const [id,s]of sessions)if(s.main&&targets.includes(s.target)){
     const r=await command(id,'Runtime.evaluate',{expression:'({x:screenX,y:screenY,width:outerWidth,height:outerHeight})',returnByValue:true});pages.push({target:s.target,frame:r.result.value});
   }
-  const preferred=preferredHumanNumbers(pages,humanFrames);
+  const preferred=preferredHumanNumbers(pages,humanFrames,state.humanTargets);
+  const bindingChanged=JSON.stringify(preferred)!==JSON.stringify(state.humanTargets);
+  state.humanTargets=preferred;
   const numbers=allocateWindowNumbers(targets,state.windowNumbers,preferred,humanFrames.length?[1,2]:[]);
-  if(Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
+  if(bindingChanged||Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
 }
 function command(session,method,params={}){return cdp.call(method,params,session);}
 function assertOwner(pid,endpoint){
@@ -279,7 +281,7 @@ async function main(){
   if(stopping)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
-    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
+    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},humanTargets:saved.humanTargets??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     state.phase='launching';state.launchMethod='launch-services';await publish();
