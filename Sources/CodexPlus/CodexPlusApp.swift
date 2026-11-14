@@ -260,14 +260,13 @@ struct SettingsView: View {
                 .font(.caption).foregroundColor(.secondary)
             if let result = launcher.reconnectResult { Text(result).font(.callout).foregroundColor(.secondary) }
             Toggle("自动发送建议提示词", isOn: $model.autoSendSuggestions)
-            Text("无需打开任务。普通建议经审查后在后台发送；微信、邮件、对外操作及财务等敏感事项逐条待审。审查失败不自动发送；关闭后停止尚未提交的动作。")
+            Text("无需打开任务。普通建议经审查后在后台发送；敏感或无法确认范围的建议不自动发送。关闭后停止尚未提交的动作。")
                 .font(.callout).foregroundColor(.secondary)
             Text("建议提示词：\(launcher.suggestionSummary)").font(.callout).foregroundColor(.secondary)
             if SuggestionAcceptance.threadID != nil {
                 Text("验收模式：仅处理指定测试任务；自动发送开关不保存到日常偏好。")
                     .font(.caption).foregroundColor(.secondary)
             }
-            SuggestionReviewList(launcher: launcher)
             Divider()
             Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
                 .foregroundColor(.secondary)

@@ -6,9 +6,6 @@ final class CodexLauncher: ObservableObject {
     @Published private(set) var summary = "F6 打开 Codex"
     @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
     @Published private(set) var suggestionSummary = "已关闭"
-    @Published private(set) var suggestionReviews: [SuggestionReview] = []
-    @Published private(set) var reviewDecisions: Set<String> = []
-    @Published private(set) var reviewResult: String?
     @Published private(set) var reconnectResult: String?
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
@@ -93,21 +90,6 @@ final class CodexLauncher: ObservableObject {
         refresh()
     }
 
-    func decideSuggestion(_ review: SuggestionReview, action: String) {
-        guard !reviewDecisions.contains(review.id), suggestionReviews.contains(where: { $0.id == review.id }),
-              action != "approve" || review.canApprove else { return }
-        let message: [String: Any] = ["type": "suggestion-review", "version": 1,
-                                     "id": review.id, "snapshotId": review.snapshotId, "action": action]
-        guard let data = try? JSONSerialization.data(withJSONObject: message), let input = controllerInput else {
-            reviewResult = "连接暂不可用，未发送。"; return
-        }
-        do {
-            try input.write(contentsOf: data + Data([10]))
-            reviewDecisions.insert(review.id)
-            reviewResult = "正在核对当前任务状态…"
-        } catch { reviewResult = "连接暂不可用，未发送。" }
-    }
-
     func reconnectEnhancements() {
         guard !autoSendEnabled, let input = controllerInput else { return }
         let message: [String: Any] = ["type": "reconnect-enhancements", "version": 1]
@@ -155,7 +137,7 @@ final class CodexLauncher: ObservableObject {
         else if suggestion?["enabled"] as? Bool == false { suggestionSummary = "自动发送已暂停，请重新启用" }
         else if suggestion?["pageReady"] as? Bool != true { suggestionSummary = "当前页面需重载后接入" }
         else if let review = suggestion?["review"] as? [String: Any], let count = review["pending"] as? Int, count > 0 {
-            suggestionSummary = "已开启 · \(count) 条建议待审"
+            suggestionSummary = "已开启 · 部分建议未自动发送"
         }
         else if let review = suggestion?["review"] as? [String: Any], let count = review["reviewing"] as? Int, count > 0 {
             suggestionSummary = "已开启 · 正在审查后台建议"
@@ -240,7 +222,7 @@ final class CodexLauncher: ObservableObject {
             self.controllerOutput = nil
             self.controllerInput = nil
             self.outputBuffer.removeAll()
-            self.controller = nil; self.suggestionReviews = []; self.reviewDecisions = []; self.refresh()
+            self.controller = nil; self.refresh()
             if self.stopping { self.stopped?(); self.stopped = nil; return }
             guard !self.stopping else { return }
             if self.ownedHost() != nil && !self.recovering {
@@ -268,18 +250,6 @@ final class CodexLauncher: ObservableObject {
                 else if let count = value["reloaded"] as? Int, count > 0 { reconnectResult = "部分页面已重连，其余尚未接入；自动发送保持关闭。" }
                 else if value["reason"] as? String == "unsubmitted-content" { reconnectResult = "页面有未提交内容或对话框，未重新接入。" }
                 else { reconnectResult = "页面状态已变化或连接不可用，未完成重新接入。" }
-                continue
-            }
-            if value["type"] as? String == "suggestion-reviews", value["version"] as? Int == 1,
-               let items = value["items"], let data = try? JSONSerialization.data(withJSONObject: items),
-               let reviews = try? JSONDecoder().decode([SuggestionReview].self, from: data) {
-                suggestionReviews = reviews
-                reviewDecisions.formIntersection(Set(reviews.map(\.id)))
-                continue
-            }
-            if value["type"] as? String == "suggestion-review-result", let id = value["id"] as? String {
-                reviewDecisions.remove(id)
-                reviewResult = value["ok"] as? Bool == true ? "已处理；发送前仍会核对当前状态。" : "建议或任务状态已变化，未发送；请重新审查。"
                 continue
             }
             guard value["type"] as? String == "ui-action", value["version"] as? Int == 1,

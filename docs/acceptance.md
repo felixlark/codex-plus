@@ -2,6 +2,15 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.7.0 build 20 设置页移除待审建议（2026-11-14）
+
+- [x] 移除设置页待审列表、空状态、批准／拒绝／重审按钮及对应原生界面数据处理；提示文案不再引导到待审列表。后台审查规则保持，敏感或范围不明的建议不自动发送。
+- [x] 47 项 Node、40 项 Swift 检查通过；Developer ID 签名构建、正式安装及严格验签通过。构建与安装可执行文件 SHA256 均为 `fe9ff6ba40a9ad33b1ac5382621adedc862b9348e0fc4ca3ab1514e0ccf9c7ba`。
+- [x] 从 `/Applications/Codex Plus.app` 启动设置页，OCU 截图及完整控件树确认建议开关之后直接进入工作区设置，无待审区块或审批按钮。自动发送保留开启，宿主 PID 64999 未重启；页面入口、项目排序及连接均 active。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/settings-cleanup-20261114/`，含 tests.log、build.log、install.log、signing.log、settings-ocu.txt 及 final.json。安装脚本保留旧安装包供回退。本次只验收设置页变化，未重复后台发送或硬件快捷键验收。
+
 ## 0.7.0 build 19 工作区展开适配（2026-11-14）
 
 宿主 `/Applications/ChatGPT.app` 26.1111.21308 (27194) 将收起时的入口改为 `AXCheckBox`「Show tabs」。旧适配仅识别「New tab」，使收起状态变成未知，任务切换无法触发展开。本版识别新版入口并保留旧版按钮／弹出按钮；沿用任务身份、屏幕范围及手动收起保护。
