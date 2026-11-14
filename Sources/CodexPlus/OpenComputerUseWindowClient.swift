@@ -27,24 +27,15 @@ final class OpenComputerUseWindowClient {
             do { try process.run() } catch {
                 DispatchQueue.main.async { completion(.unavailable) }; return
             }
-            var buffer = Data()
+            let reader = JSONLinePipeReader(input: output.fileHandleForReading)
             func request(_ id: Int, _ method: String, _ params: [String: Any]) -> [String: Any]? {
-                guard var bytes = try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "method": method, "params": params]) else { return nil }
-                bytes.append(10)
-                do { try input.fileHandleForWriting.write(contentsOf: bytes) } catch { return nil }
-                while true {
-                    while let newline = buffer.firstIndex(of: 10) {
-                        let line = buffer.prefix(upTo: newline); buffer.removeSubrange(...newline)
-                        if let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], object["id"] as? Int == id { return object }
-                    }
-                    guard let bytes = try? output.fileHandleForReading.read(upToCount: 4096), !bytes.isEmpty else { return nil }
-                    buffer.append(bytes)
-                }
+                guard JSONLinePipeWriter.write(["jsonrpc": "2.0", "id": id, "method": method, "params": params], to: input.fileHandleForWriting) else { return nil }
+                return reader.response(matchingID: id)
             }
             var outcome: Outcome = .unsupported
             let initialized = request(1, "initialize", ["protocolVersion": "2025-03-26", "capabilities": [:], "clientInfo": ["name": "Codex Plus", "version": "0.10.0"]])?["result"] != nil
-            if initialized, var notification = try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "method": "notifications/initialized"]) {
-                notification.append(10); try? input.fileHandleForWriting.write(contentsOf: notification)
+            if initialized {
+                _ = JSONLinePipeWriter.write(["jsonrpc": "2.0", "method": "notifications/initialized"], to: input.fileHandleForWriting)
             }
             if initialized, let listed = request(2, "tools/list", [:])?["result"] as? [String: Any],
                let tools = listed["tools"] as? [[String: Any]],
