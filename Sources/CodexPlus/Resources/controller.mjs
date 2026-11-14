@@ -62,6 +62,10 @@ async function settleHumanCreations(){
     const target=matching[0];
     const session=[...sessions].find(([,s])=>s.target===target.targetId);
     if(!session)continue;
+    // Do not cancel the native window's initial intercepted module requests.
+    // The nonce-bound page must finish bootstrapping before normalization.
+    const ready=await command(session[0],'Runtime.evaluate',{expression:'({complete:document.readyState==="complete",enhanced:globalThis.__codexPlusFeatures?.status()?.phase==="active"})',returnByValue:true});
+    if(!ready.result.value?.complete||featureSupported&&!ready.result.value.enhanced)continue;
     // Navigate only the nonce-bound, newly-created human window. Existing pages,
     // drafts and navigation are never used as a reload surface.
     const url=new URL('app://-/index.html');url.searchParams.set('initialRoute','/');url.searchParams.set('codexPlusHumanWindow',nonce);
