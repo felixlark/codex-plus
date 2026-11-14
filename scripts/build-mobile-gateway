@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CACHE="$HOME/Library/Caches/codex-plus/mobile"
+mkdir -p "$CACHE/bin" "$CACHE/swift-cache"
+swiftc -module-cache-path "$CACHE/swift-cache" "$ROOT/mobile/Shared/MobileIdentity.swift" "$ROOT/mobile/Gateway/main.swift" -o "$CACHE/bin/MobileGateway"
+printf '%s\n' "$CACHE/bin/MobileGateway"
