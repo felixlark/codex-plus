@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CodexPlusCore
+import AgentDisplayShim
 
 /// The existing Codex Plus process is the sole owner of quiet tool placement.
 /// No activation restoration loop: prevent activation at launch instead.
@@ -15,41 +16,47 @@ final class ToolWindowRouter {
         }
     }
     private struct Managed {
+        let claimID = UUID()
         let pid: pid_t
         let element: AXUIElement
+        let windowID: UInt32
+        let launchDate: Date
+        let originalFrame: CGRect
+        let originalDisplays: [UInt32: CGRect]
+        var lastKnownFrame: CGRect?
         var result: String
     }
     var openOwnSettings: (() -> Void)?
+    var ownAgentWindow: NSWindow?
+    private let display = AgentDisplay()
+    private let ocu = OpenComputerUseWindowClient()
+    private var agentSettingsRegistration: UInt32?
+    private var registeredAgentSettings: UInt32?
+    private var agentReleaseUnconfirmed = false
+    private var ownershipTimer: Timer?
+
+    private var stopping = false
+    private var lastError: String?
     private var watches: [pid_t: Watch] = [:]
-    private var pausedWatches: [Watch] = []
     private var managed: [Managed] = []
     private var tokens: [NSObjectProtocol] = []
     private var lastOpen: [String: Any] = [:]
+    private var currentOpenDocument: URL?
+    private var currentOpenID: String?
     private var observationErrors: [pid_t: Int] = [:]
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
-    private var targetUUID: String? = UserDefaults.standard.string(forKey: "quietToolDisplayUUID")
     private(set) var enabled = UserDefaults.standard.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
 
     func start() {
         guard tokens.isEmpty else { return }
+        ownershipTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.reconcileOwnership() }
+        for key in ["quietToolDisplayUUID", "quietToolWindowsEnabled"] { UserDefaults.standard.removeObject(forKey: key) }
         let center = NSWorkspace.shared.notificationCenter
-        tokens.append(center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] n in
-            guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-            self?.watchUtility(app)
-        })
         tokens.append(center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             self?.remove(app.processIdentifier)
         })
-        for event in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
-            tokens.append(center.addObserver(forName: event, object: nil, queue: .main) { [weak self] n in
-                guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-                self?.watchUtility(app)
-            })
-        }
-        if enabled { NSWorkspace.shared.runningApplications.forEach(watchUtility) }
-        _ = targetDisplay()
         screenToken = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
@@ -58,13 +65,27 @@ final class ToolWindowRouter {
             }
     }
 
-    func stop() {
+    /// A failed restore retains exact records and lets the caller cancel quit.
+    @discardableResult
+    func stop() -> Bool {
+        stopping = true
+        ownershipTimer?.invalidate(); ownershipTimer = nil
         observationEpoch = UUID()
         tokens.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         tokens.removeAll()
         if let screenToken { NotificationCenter.default.removeObserver(screenToken) }
         screenToken = nil
         for pid in Array(watches.keys) { removeWatch(pid) }
+        if let window = ownAgentWindow {
+            if !window.isVisible { ownAgentWindow = nil; registeredAgentSettings = nil }
+            else if ownAgentWindowIsParked(window) { window.close(); ownAgentWindow = nil; registeredAgentSettings = nil }
+            else { forgetAgentSettings() }
+        }
+        let keys = managed.map { ($0.pid, $0.windowID) }
+        var restored = true
+        for (pid, id) in keys { if !restore(pid: pid, id: id) { restored = false } }
+        guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil else { return false }
+        return display.release()
     }
 
     private func removeWatch(_ pid: pid_t) {
@@ -75,13 +96,7 @@ final class ToolWindowRouter {
     private func remove(_ pid: pid_t) {
         removeWatch(pid)
         managed.removeAll { $0.pid == pid }
-        pausedWatches.removeAll { $0.app.processIdentifier == pid }
         observationErrors.removeValue(forKey: pid)
-    }
-
-    private func watchUtility(_ app: NSRunningApplication) {
-        guard enabled, ToolWindowPolicy.utilityBundles.contains(app.bundleIdentifier ?? "") else { return }
-        _ = watch(app, baseline: [], documents: nil)
     }
 
     private func windows(_ app: NSRunningApplication) -> [AXUIElement] {
@@ -94,7 +109,7 @@ final class ToolWindowRouter {
         func reportRemainder(_ watch: Watch) {
             remainder?(documents.map { $0.intersection(watch.documents ?? []) })
         }
-        guard enabled, AXIsProcessTrusted(), app.processIdentifier > 0,
+        guard enabled, !stopping, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
         if let existing = watches[app.processIdentifier] {
             // Each request contributes its own manual-window baseline. Reusing
@@ -171,39 +186,178 @@ final class ToolWindowRouter {
 
     @discardableResult
     private func place(_ window: AXUIElement, pid: pid_t) -> Bool {
-        guard enabled else { return false }
-        if managed.contains(where: { $0.pid == pid && CFEqual($0.element, window) }) { return true }
-        guard let app = NSRunningApplication(processIdentifier: pid),
+        guard enabled, !stopping, let app = NSRunningApplication(processIdentifier: pid),
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? ""),
+              let launchDate = app.launchDate,
               ToolWindowPolicy.eligible(role: value(window, kAXRoleAttribute) as? String ?? "",
                                        subrole: value(window, kAXSubroleAttribute) as? String ?? "",
                                        minimized: value(window, kAXMinimizedAttribute) as? Bool ?? false,
                                        fullscreen: value(window, "AXFullScreen") as? Bool ?? false),
-              let frame = frame(window), let target = targetDisplay(), let area = workArea(target) else { return false }
-        // A visible window already on the target is owned, but never raised.
-        let inTarget = ToolWindowPolicy.contained(frame, in: area)
-        let placed = inTarget || move(window, to: ToolWindowPolicy.destination(frame: frame, area: area))
-        if placed {
-            managed.append(Managed(pid: pid, element: window, result: inTarget ? "already-on-target" : "placed"))
-            if (lastOpen["pid"] as? Int) == Int(pid) { lastOpen["state"] = "placed" }
+              let original = frame(window) else { return false }
+        let id = cp_window_id(window)
+        guard id != 0, liveIdentity(window, pid: pid, id: id, launchDate: launchDate) else { return false }
+        if let i = managed.firstIndex(where: { $0.pid == pid && $0.windowID == id }) {
+            guard live(managed[i]) else { lastError = "window-identity-unavailable"; return false }
+            if let last = managed[i].lastKnownFrame, ToolWindowPolicy.sameFrame(original, last) { return managed[i].result == "parked" }
+            release(managed[i]); lastError = "previous-claim-release-pending"; return false
         }
-        return placed
+        let origin = AgentDisplay.displays().filter { $0.key != display.id && $0.value.contains(CGPoint(x: original.midX, y: original.midY)) }
+        // New documents can inherit the previous Agent window's virtual location.
+        // They are still exact file claims; never invent a physical restore target.
+        let bornOnAgentDisplay = display.bounds.map { ToolWindowPolicy.contained(original, in: $0) } ?? false
+        guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.currentBounds() else { lastError = display.error ?? "original-display-unavailable"; return false }
+        // OCU owns the move and records its real original position. Do not
+        // resize here: the official restore contract currently restores position.
+        guard original.width <= bounds.width, original.height <= bounds.height else {
+            lastError = "agent-window-larger-than-ocu-display"; return false
+        }
+        let record = Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
+                             originalFrame: original, originalDisplays: origin, lastKnownFrame: original, result: "parking")
+        managed.append(record)
+        let epoch = observationEpoch
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "agent_display")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            guard self.live(record), let actual = self.frame(window) else {
+                if self.definitelyGone(record) { self.managed.remove(at: i); self.finishStopIfReady() }
+                else { self.managed[i].result = "parking-identity-unavailable" }
+                return
+            }
+            guard case .accepted = outcome, let current = self.display.currentBounds(),
+                  ToolWindowPolicy.contained(actual, in: current) else {
+                self.managed[i].result = "parking-unconfirmed"; self.lastError = "ocu-parking-unconfirmed"
+                if case .accepted = outcome, let bounds = self.display.currentBounds(),
+                   !ToolWindowPolicy.contained(actual, in: bounds), !ToolWindowPolicy.sameFrame(actual, original) {
+                    self.release(self.managed[i]) // Verified completion followed by user takeover; never restore it.
+                }
+                return
+            }
+            self.managed[i].lastKnownFrame = actual
+            self.managed[i].result = "parked"; self.lastError = nil
+            if self.stopping || self.observationEpoch != epoch {
+                _ = self.restore(pid: pid, id: id)
+                return
+            }
+            if self.lastOpen["pid"] as? Int == Int(pid),
+               (ToolWindowPolicy.canReportParked(requestID: self.currentOpenID, resource: self.currentOpenDocument,
+                    latestRequestID: self.lastOpen["id"] as? String, actualDocument: self.document(window))
+                || self.lastOpen["windowID"] as? UInt32 == id) {
+                self.lastOpen["state"] = "parked"
+            }
+        }
+        return true // Claimed, not yet reported parked; no duplicate observer call.
     }
 
-    private func move(_ window: AXUIElement, to rect: CGRect) -> Bool {
-        var point = CGPoint(x: rect.minX, y: rect.minY)
-        var size = CGSize(width: rect.width, height: rect.height)
-        guard let position = AXValueCreate(.cgPoint, &point), let dimensions = AXValueCreate(.cgSize, &size),
-              let current = frame(window) else { return false }
-        if abs(current.width - rect.width) > 1 || abs(current.height - rect.height) > 1 {
-            guard AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, dimensions) == .success else { return false }
+    private func ocuArguments(pid: pid_t, id: UInt32, placement: String) -> [String: Any] {
+        ["app": String(pid), "window_id": Int(id), "window_placement": placement,
+         "allow_activation": false, "include_ax": false, "include_screenshot": true]
+    }
+
+    private func finishStopIfReady() {
+        if stopping && managed.isEmpty && agentSettingsRegistration == nil && ownAgentWindow == nil { NSApp.terminate(nil) }
+    }
+
+    private func reconcileOwnership() {
+        for record in managed where record.result == "parked" {
+            if definitelyGone(record) { managed.removeAll { $0.claimID == record.claimID }; continue }
+            guard live(record), let actual = frame(record.element), let last = record.lastKnownFrame else { continue }
+            if !ToolWindowPolicy.sameFrame(actual, last) { release(record) }
         }
-        guard AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position) == .success,
-              let actual = frame(window) else { return false }
-        guard let target = targetDisplay(), let area = workArea(target) else { return false }
-        return abs(actual.minX - rect.minX) < 3 && abs(actual.minY - rect.minY) < 3
-            && abs(actual.width - rect.width) < 3 && abs(actual.height - rect.height) < 3
-            && ToolWindowPolicy.contained(actual, in: area)
+        if let window = ownAgentWindow, !window.isVisible, agentSettingsRegistration == nil {
+            ownAgentWindow = nil; registeredAgentSettings = nil
+        }
+        if let window = ownAgentWindow, registeredAgentSettings == UInt32(window.windowNumber),
+           agentSettingsRegistration == nil, !agentReleaseUnconfirmed, !ownAgentWindowIsParked(window) { forgetAgentSettings() }
+    }
+
+    private func forgetAgentSettings() {
+        guard let window = ownAgentWindow, agentSettingsRegistration == nil, !agentReleaseUnconfirmed else { return }
+        let id = UInt32(window.windowNumber)
+        agentSettingsRegistration = id
+        ocu.call(arguments: ocuArguments(pid: ProcessInfo.processInfo.processIdentifier, id: id, placement: "release")) { [weak self, weak window] outcome in
+            guard let self else { return }
+            self.agentSettingsRegistration = nil
+            if case .accepted = outcome {
+                self.registeredAgentSettings = nil; self.agentReleaseUnconfirmed = false
+                if window === self.ownAgentWindow { self.ownAgentWindow = nil }
+                self.finishStopIfReady()
+            } else { self.agentReleaseUnconfirmed = true; self.lastError = "ocu-agent-settings-release-unconfirmed" }
+        }
+    }
+
+    private func release(_ record: Managed) {
+        guard let i = managed.firstIndex(where: { $0.claimID == record.claimID }),
+              !["releasing", "release-unconfirmed", "restore-unconfirmed"].contains(managed[i].result) else { return }
+        managed[i].result = "releasing"
+        ocu.call(arguments: ocuArguments(pid: record.pid, id: record.windowID, placement: "release")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            if case .accepted = outcome { self.managed.remove(at: i); self.finishStopIfReady() }
+            else { self.managed[i].result = "release-unconfirmed" }
+        }
+    }
+
+    private func liveIdentity(_ window: AXUIElement, pid: pid_t, id: UInt32, launchDate: Date) -> Bool {
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(window, &owner) == .success,
+              let app = NSRunningApplication(processIdentifier: pid),
+              let info = windowInfo(id), let cgPID = info[kCGWindowOwnerPID as String] as? Int32 else { return false }
+        return owner == pid && cgPID == pid && ToolWindowPolicy.matchesIdentity(pid: pid, windowID: id, launchDate: launchDate,
+                     livePID: app.processIdentifier, liveWindowID: cp_window_id(window), liveLaunchDate: app.launchDate)
+    }
+    private func live(_ record: Managed) -> Bool {
+        liveIdentity(record.element, pid: record.pid, id: record.windowID, launchDate: record.launchDate)
+    }
+
+    private func definitelyGone(_ record: Managed) -> Bool {
+        guard let inventory = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else { return false }
+        guard let info = inventory.first(where: { $0[kCGWindowNumber as String] as? UInt32 == record.windowID }) else { return true }
+        if let owner = info[kCGWindowOwnerPID as String] as? Int32, owner != record.pid { return true }
+        if let date = NSRunningApplication(processIdentifier: record.pid)?.launchDate, date != record.launchDate { return true }
+        return false
+    }
+
+    private func restore(pid: pid_t, id: UInt32) -> Bool {
+        if pid == ProcessInfo.processInfo.processIdentifier, ownAgentWindow?.windowNumber == Int(id) {
+            if ownAgentWindow?.isVisible == false { ownAgentWindow = nil; registeredAgentSettings = nil; return agentSettingsRegistration == nil }
+            if let window = ownAgentWindow, ownAgentWindowIsParked(window) {
+                window.close(); ownAgentWindow = nil; registeredAgentSettings = nil; return agentSettingsRegistration == nil
+            }
+            forgetAgentSettings(); return false
+        }
+        guard let i = managed.firstIndex(where: { $0.pid == pid && $0.windowID == id }) else { return false }
+        let record = managed[i]
+        let protectedOperation = ["parking", "restoring", "releasing", "parking-unconfirmed", "release-unconfirmed", "restore-unconfirmed"].contains(record.result)
+        guard let inventory = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else {
+            if !protectedOperation { managed[i].result = "restore-window-query-unavailable" }
+            return false
+        }
+        let info = inventory.first { ($0[kCGWindowNumber as String] as? UInt32) == id }
+        if info == nil || (info?[kCGWindowOwnerPID as String] as? Int32) != pid {
+            managed.remove(at: i); return true
+        }
+        if let launch = NSRunningApplication(processIdentifier: pid)?.launchDate, launch != record.launchDate {
+            managed.remove(at: i); return true
+        }
+        if protectedOperation { return false }
+        guard live(record), let actual = frame(record.element), let last = record.lastKnownFrame else {
+            managed[i].result = "restore-identity-unavailable"; return false
+        }
+        guard ToolWindowPolicy.sameFrame(actual, last) else {
+            release(record); return false // User took over: forget the OCU record without moving.
+        }
+        let displays = AgentDisplay.displays()
+        guard record.originalDisplays.contains(where: { displays[$0.key] == $0.value }) else {
+            managed[i].result = record.originalDisplays.isEmpty ? "restore-close-native-agent-window" : "restore-original-display-unavailable"; return false
+        }
+        managed[i].result = "restoring"
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "restore")) { [weak self] outcome in
+            guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
+            if self.definitelyGone(record) { self.managed.remove(at: i); self.finishStopIfReady(); return }
+            if case .accepted = outcome, self.live(record), let actual = self.frame(record.element),
+               ToolWindowPolicy.sameFrame(actual, record.originalFrame) {
+                self.managed.remove(at: i); self.finishStopIfReady()
+            } else { self.managed[i].result = "restore-unconfirmed" }
+        }
+        return false // Asynchronous; status is authoritative, a quit retries after completion.
     }
 
     func command(_ request: [String: Any]) -> [String: Any] {
@@ -212,116 +366,166 @@ final class ToolWindowRouter {
         case "tool-routing":
             guard let flag = request["enabled"] as? Bool else { return error("enabled is required") }
             setEnabled(flag); return status()
-        case "tool-exempt": exemptFocused(); return status()
-        case "tool-recover": recover(); return status()
-        case "tool-place":
+        case "tool-place", "tool-restore":
             guard let pid = request["pid"] as? Int, let id = request["windowID"] as? Int,
-                  let identity = ToolCommand.windowIdentity(pid: pid, windowID: id),
-                  let app = NSRunningApplication(processIdentifier: identity.pid),
-                  let window = exactWindow(app, id: id) else { return error("No unique live window for this PID/window ID") }
-            return ["ok": place(window, pid: identity.pid), "status": status()]
+                  let identity = ToolCommand.windowIdentity(pid: pid, windowID: id) else { return error("Valid PID/window ID required") }
+            if request["command"] as? String == "tool-restore" {
+                let restored = restore(pid: identity.pid, id: identity.windowID)
+                let pending = managed.contains { $0.pid == identity.pid && $0.windowID == identity.windowID && ["restoring", "releasing"].contains($0.result) }
+                    || (identity.pid == ProcessInfo.processInfo.processIdentifier && agentSettingsRegistration == identity.windowID)
+                return ["ok": restored || pending, "state": restored ? "restored" : pending ? "requested" : "requires-recovery", "status": status()]
+            }
+            guard let app = NSRunningApplication(processIdentifier: identity.pid),
+                  let window = exactWindow(app, id: identity.windowID) else { return error("No exact live AX window for this PID/window ID") }
+            guard enabled, !stopping, let original = frame(window),
+                  !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return error("Protected or unavailable Agent window") }
+            let requestID = UUID().uuidString, epoch = observationEpoch
+            currentOpenDocument = nil; currentOpenID = nil
+            lastOpen = ["id": requestID, "pid": Int(identity.pid), "windowID": identity.windowID, "state": "preparing-display"]
+            prepareDisplay(id: requestID, epoch: epoch) { [weak self] in
+                guard let self else { return }
+                guard let exact = self.exactWindow(app, id: identity.windowID),
+                      let current = self.frame(exact), ToolWindowPolicy.sameFrame(current, original) else {
+                    if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = "window-changed-routing-cancelled" }
+                    return
+                }
+                let parked = self.place(exact, pid: identity.pid)
+                if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = parked ? "parking" : "failed" }
+            }
+            return ["ok": true, "requestID": requestID, "state": "requested"]
         case "tool-open": return open(request)
         default: return error("Unsupported tool command")
         }
     }
 
     func setEnabled(_ flag: Bool) {
-        if !flag { observationEpoch = UUID() }
+        if !flag {
+            observationEpoch = UUID(); currentOpenDocument = nil; currentOpenID = nil
+            if ["preparing-display", "requested", "waiting-for-window", "waiting-for-accessibility", "parking", "registering-agent-settings"].contains(lastOpen["state"] as? String ?? "") {
+                lastOpen["state"] = "routing-cancelled"
+            }
+        }
+        stopping = false
         enabled = flag
         UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
         if flag {
-            let previous = pausedWatches; pausedWatches.removeAll()
-            for w in previous where !w.app.isTerminated { watch(w.app, baseline: w.known, documents: w.documents) }
-            NSWorkspace.shared.runningApplications.forEach(watchUtility)
+            if tokens.isEmpty { start() }
         } else {
-            pausedWatches = Array(watches.values)
             for pid in Array(watches.keys) { removeWatch(pid) }
         }
     }
 
-    func exemptFocused() {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              let window = value(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute) else { return }
-        guard CFGetTypeID(window) == AXUIElementGetTypeID() else { return }
-        let element = window as! AXUIElement
-        if let i = managed.firstIndex(where: { CFEqual($0.element, element) }) { managed[i].result = "exempt" }
-        else { managed.append(Managed(pid: app.processIdentifier, element: element, result: "exempt")) }
-    }
-
-    func recover() {
-        let connected = CodexWorkspaceDisplayCatalog.capture()
-        guard enabled, let target = ToolWindowPolicy.target(connected), let area = workArea(target) else { return }
-        let areas = connected.compactMap(workArea)
-        for i in managed.indices where managed[i].result != "exempt" {
-            guard let f = frame(managed[i].element), !areas.contains(where: { ToolWindowPolicy.intersects(f, $0) }) else { continue }
-            if move(managed[i].element, to: ToolWindowPolicy.destination(frame: f, area: area)) { managed[i].result = "recovered" }
-        }
-    }
-
-    // Retry only AX readiness for the same explicit resource/dedicated scope.
+    // Retry only AX readiness for the same explicitly requested file.
     // This never opens the app again or infers ownership from elapsed time.
     private func retryObservation(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
                                   id: String, epoch: UUID, remaining: Int = 8) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, self.enabled, self.observationEpoch == epoch, !app.isTerminated else { return }
+            guard let self, self.enabled, !self.stopping, self.observationEpoch == epoch, !app.isTerminated else { return }
             var pending = documents
             let observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 })
             let placed = self.windows(app).contains { w in
-                !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
+                !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
+                    && self.managed.contains(where: { CFEqual($0.element, w) && $0.result == "parked" })
             }
             let retry = !observed && !placed && pending?.isEmpty != true && remaining > 1
                 && self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue)
             if self.lastOpen["id"] as? String == id {
-                self.lastOpen["state"] = placed ? "placed" : pending?.isEmpty == true ? "opened-in-existing-window" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
+                self.lastOpen["state"] = placed ? "parked" : self.managed.contains(where: { $0.pid == app.processIdentifier && $0.result == "parking" }) ? "parking" : pending?.isEmpty == true ? "opened-in-existing-window" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
                 self.lastOpen["observing"] = self.watches[app.processIdentifier] != nil
             }
             if retry { self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: epoch, remaining: remaining - 1) }
         }
     }
 
+    private func prepareDisplay(id: String, epoch: UUID, operation: @escaping () -> Void) {
+        display.prepare { [weak self] bounds in
+            guard let self else { return }
+            guard self.enabled, !self.stopping, self.observationEpoch == epoch else {
+                if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
+                return
+            }
+            guard bounds != nil else {
+                if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed"; self.lastOpen["error"] = self.display.error ?? "display-unavailable" }
+                return
+            }
+            self.ocu.call { [weak self] outcome in
+                guard let self else { return }
+                guard self.enabled, !self.stopping, self.observationEpoch == epoch else {
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
+                    return
+                }
+                guard case .accepted = outcome, self.display.currentBounds() != nil else {
+                    self.lastError = "ocu-exact-window-lifecycle-unavailable"
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed"; self.lastOpen["error"] = self.lastError }
+                    return
+                }
+                operation()
+            }
+        }
+    }
+
     private func open(_ request: [String: Any]) -> [String: Any] {
-        guard enabled else { return error("Tool routing is paused") }
+        guard enabled, !stopping else { return error("Agent window routing is paused") }
         guard AXIsProcessTrusted() else { return error("Codex Plus Accessibility permission is required") }
         guard let path = request["appPath"] as? String, path.hasPrefix("/"),
-              let bundle = Bundle(path: path), path.hasSuffix(".app"),
-              !ToolWindowPolicy.protectedBundles.contains(bundle.bundleIdentifier ?? "") else { return error("Use an absolute, non-protected app bundle path") }
+              let bundle = Bundle(path: path), path.hasSuffix(".app") else { return error("An absolute app bundle is required") }
+        let id = UUID().uuidString, epoch = observationEpoch
         if bundle.bundleIdentifier == CodexWorkspacePreference.domain {
-            guard let openOwnSettings else { return error("Settings entry unavailable") }
-            openOwnSettings()
-            return ["ok": true, "state": "opened-owned-settings"]
+            guard let openOwnSettings else { return error("Agent Settings entry unavailable") }
+            currentOpenDocument = nil; currentOpenID = nil
+            lastOpen = ["id": id, "state": "preparing-display"]
+            prepareDisplay(id: id, epoch: epoch) { [weak self] in
+                guard let self else { return }
+                openOwnSettings()
+                if self.lastOpen["id"] as? String == id {
+                    self.lastOpen = ["id": id, "state": self.ownAgentWindow?.isVisible == true ? "registering-agent-settings" : "failed", "windowID": self.ownAgentWindow?.windowNumber ?? 0]
+                }
+            }
+            return ["ok": true, "requestID": id, "state": "requested"]
         }
+        guard !ToolWindowPolicy.protectedBundles.contains(bundle.bundleIdentifier ?? "") else { return error("Protected user application") }
+        guard let raw = request["url"] as? String, let resource = URL(string: raw), resource.isFileURL,
+              FileManager.default.fileExists(atPath: resource.path) else { return error("A current local file URL is required; other tools need an exact window ID") }
         let appURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        currentOpenDocument = nil; currentOpenID = nil
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.resolvingSymlinksInPath() == appURL }),
+           windows(app).compactMap(document).contains(resource.standardizedFileURL.resolvingSymlinksInPath()) {
+            lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(app.processIdentifier)]
+            return ["ok": true, "state": "opened-in-existing-window"]
+        }
+        currentOpenDocument = resource.standardizedFileURL.resolvingSymlinksInPath(); currentOpenID = id
+        lastOpen = ["id": id, "state": "preparing-display"]
+        prepareDisplay(id: id, epoch: epoch) { [weak self] in self?.openFile(appURL: appURL, resource: resource, id: id, requestEpoch: epoch) }
+        return ["ok": true, "requestID": id, "state": "requested"]
+    }
+
+    private func openFile(appURL: URL, resource: URL, id: String, requestEpoch: UUID) {
         let existing = NSWorkspace.shared.runningApplications.first { $0.bundleURL?.resolvingSymlinksInPath() == appURL }
         let baseline = existing.map(windows) ?? []
-        let resource: URL?
-        if let raw = request["url"] as? String {
-            guard let url = URL(string: raw), ["file", "http", "https"].contains(url.scheme?.lowercased() ?? "") else { return error("url must be file/http/https") }
-            resource = url
-        } else { resource = nil }
         let existingDocuments = Set(baseline.compactMap { document($0) })
-        let scope = ToolWindowPolicy.scope(bundleID: bundle.bundleIdentifier ?? "",
-            dedicated: request["dedicated"] as? Bool ?? false, resource: resource, existingDocuments: existingDocuments)
+        let scope = ToolWindowPolicy.scope(bundleID: Bundle(url: appURL)?.bundleIdentifier ?? "", resource: resource, existingDocuments: existingDocuments)
         // File document identity is public AX metadata. Web/tab identity is left
         // to the official browser tool, followed by exact tool-place if needed.
         let documents: Set<URL>?
         switch scope {
-        case .dedicated: documents = nil
         case .document(let url): documents = [url]
         case .none: documents = []
+        }
+        if scope == .none {
+            if lastOpen["id"] as? String == id { lastOpen["state"] = "opened-in-existing-window" }
+            return
         }
         let preObserved: Bool
         if let existing, documents?.isEmpty == false { preObserved = watch(existing, baseline: baseline, documents: documents) }
         else { preObserved = false }
-        let id = UUID().uuidString
-        lastOpen = ["id": id, "state": "requested"]
+        if lastOpen["id"] as? String == id { lastOpen["state"] = "requested" }
         if let existing { lastOpen["pid"] = Int(existing.processIdentifier) }
-        let requestEpoch = observationEpoch
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
         let completion: (NSRunningApplication?, Error?) -> Void = { [weak self] app, failure in
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard self.enabled, self.observationEpoch == requestEpoch else {
+                guard self.enabled, !self.stopping, self.observationEpoch == requestEpoch else {
                     if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
                     return
                 }
@@ -330,9 +534,9 @@ final class ToolWindowRouter {
                         watch.documents?.subtract(documents)
                         if watch.documents?.isEmpty == true { self.removeWatch(existing.processIdentifier) }
                     }
-                    self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription]; return
+                    if self.lastOpen["id"] as? String == id { self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription] }; return
                 }
-                guard let app else { self.lastOpen = ["id": id, "state": "failed"]; return }
+                guard let app else { if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed" }; return }
                 if let watch = self.watches[app.processIdentifier] { self.scan(watch) }
                 var pending = documents
                 let observed: Bool
@@ -350,81 +554,115 @@ final class ToolWindowRouter {
                     observed = false
                 }
                 let placed = self.windows(app).contains { w in
-                    !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
+                    !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
+                    && self.managed.contains(where: { CFEqual($0.element, w) && $0.result == "parked" })
                 }
-                let reused = resource?.isFileURL == true && baseline.compactMap(self.document).contains(resource!.standardizedFileURL)
-                let alreadyManaged = scope == .dedicated && self.windows(app).contains { w in self.managed.contains(where: { CFEqual($0.element, w) }) }
-                let state = placed ? "placed" : reused ? "opened-in-existing-window" : alreadyManaged ? "already-managed" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
-                self.lastOpen = ["id": id, "state": state,
-                                 "pid": Int(app.processIdentifier), "observing": observed,
-                                 "newProcess": existing == nil]
+                let reused = baseline.compactMap(self.document).contains(resource.standardizedFileURL.resolvingSymlinksInPath())
+                let state = placed ? "parked" : self.managed.contains(where: { $0.pid == app.processIdentifier && $0.result == "parking" }) ? "parking" : reused ? "opened-in-existing-window" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
+                if self.lastOpen["id"] as? String == id {
+                    self.lastOpen = ["id": id, "state": state, "pid": Int(app.processIdentifier), "observing": observed, "newProcess": existing == nil]
+                }
                 if scope != .none && !observed && !placed && pending?.isEmpty != true,
                    self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue) {
-                    self.lastOpen["state"] = "waiting-for-accessibility"
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "waiting-for-accessibility" }
                     self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: requestEpoch)
                 }
             }
         }
-        if let url = resource {
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: completion)
-        } else {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: completion)
-        }
-        return ["ok": true, "requestID": id, "state": "requested"]
+        NSWorkspace.shared.open([resource], withApplicationAt: appURL, configuration: config, completionHandler: completion)
     }
 
-    private func exactWindow(_ app: NSRunningApplication, id: Int) -> AXUIElement? {
-        guard let entries = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]],
-              let info = entries.first(where: { ($0[kCGWindowNumber as String] as? Int) == id && ($0[kCGWindowOwnerPID as String] as? Int) == Int(app.processIdentifier) }),
-              let bounds = info[kCGWindowBounds as String] as? [String: Any],
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
-        let matching = windows(app).filter { w in
-            guard let f = frame(w) else { return false }
-            return abs(f.minX - rect.minX) < 2 && abs(f.minY - rect.minY) < 2 && abs(f.width - rect.width) < 2 && abs(f.height - rect.height) < 2
-        }
+    private func windowInfo(_ id: UInt32) -> [String: Any]? {
+        (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?
+            .first { ($0[kCGWindowNumber as String] as? UInt32) == id }
+    }
+
+    private func exactWindow(_ app: NSRunningApplication, id: UInt32) -> AXUIElement? {
+        guard let launch = app.launchDate else { return nil }
+        let matching = windows(app).filter { cp_window_id($0) == id && liveIdentity($0, pid: app.processIdentifier, id: id, launchDate: launch) }
         return matching.count == 1 ? matching[0] : nil
     }
 
     private func status() -> [String: Any] {
-        let target = targetDisplay()
-        return ["ok": true, "enabled": enabled, "accessibility": AXIsProcessTrusted(),
-                "target": target.map { ["id": $0.displayID, "name": $0.name] as [String: Any] } ?? [:],
-                "lastOpen": lastOpen, "watchedProcesses": watches.count,
+        var target: [String: Any] = ["type": "agent-virtual-display", "owner": "OCU persistent-display", "supported": display.supported, "preparing": display.isPreparing]
+        if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
+        if let bounds = display.bounds {
+            target["id"] = display.id; target["name"] = "Open Computer Use"; target["owner"] = "OCU persistent-display"
+            target["frame"] = jsonFrame(bounds)
+        }
+        var windows = managed.map { record -> [String: Any] in
+            var result: [String: Any] = ["pid": record.pid, "windowID": record.windowID, "result": record.result,
+                "restoreMode": record.originalDisplays.isEmpty ? "close-agent-window" : "original-frame"]
+            if let f = frame(record.element) { result["frame"] = jsonFrame(f) }
+            return result
+        }
+        if let ownAgentWindow, ownAgentWindow.isVisible {
+            windows.append(["pid": ProcessInfo.processInfo.processIdentifier, "windowID": ownAgentWindow.windowNumber, "result": "agent-settings"])
+        }
+        return ["ok": true, "enabled": enabled, "accessibility": AXIsProcessTrusted(), "target": target,
+                "lastOpen": lastOpen, "watchedProcesses": watches.count, "windows": windows,
                 "observationErrors": observationErrors.map { ["pid": Int($0.key), "code": $0.value] },
-                "windows": managed.compactMap { record -> [String: Any]? in
-                    guard let f = frame(record.element) else { return nil }
-                    return ["pid": record.pid, "result": record.result,
-                            "frame": ["x": f.minX, "y": f.minY, "width": f.width, "height": f.height]]
-                }]
+                "lastError": lastError ?? display.error ?? ""]
     }
 
-    func prepareOwnWindow(_ window: NSWindow) {
-        guard enabled, let target = targetDisplay(), let screen = NSScreen.screens.first(where: {
-            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == target.displayID
-        }) else { window.center(); return }
-        let area = screen.visibleFrame
-        window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2, y: area.midY - window.frame.height / 2))
+    private func ownAgentWindowIsParked(_ window: NSWindow) -> Bool {
+        guard window.isVisible, let bounds = display.bounds else { return false }
+        let height = CGDisplayBounds(CGMainDisplayID()).height
+        let rect = CGRect(x: window.frame.minX, y: height - window.frame.maxY, width: window.frame.width, height: window.frame.height)
+        return ToolWindowPolicy.contained(rect, in: bounds)
     }
 
-    private func workArea(_ display: CodexWorkspaceDisplay) -> CGRect? {
-        guard let screen = NSScreen.screens.first(where: {
-            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == display.displayID
-        }), let primary = NSScreen.screens.first else { return nil }
-        return ToolWindowPolicy.workArea(visibleFrame: screen.visibleFrame, primaryHeight: primary.frame.height)
+    func prepareAgentWindow(_ window: NSWindow) -> Bool {
+        guard enabled, !stopping, let bounds = display.currentBounds() else { return false }
+        let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
+        let current = CGRect(x: window.frame.minX, y: primaryHeight - window.frame.maxY, width: window.frame.width, height: window.frame.height)
+        if window.isVisible && !ToolWindowPolicy.contained(current, in: bounds) {
+            forgetAgentSettings(); lastError = "agent-settings-handed-to-user"; return false
+        }
+        let original = CGRect(x: 0, y: 0, width: window.frame.width, height: window.frame.height)
+        let target = ToolWindowPolicy.destination(frame: original, area: bounds.insetBy(dx: 20, dy: 20))
+        window.setFrame(NSRect(x: target.minX, y: primaryHeight - target.maxY, width: target.width, height: target.height), display: false)
+        ownAgentWindow = window
+        return true
     }
 
-    private func targetDisplay() -> CodexWorkspaceDisplay? {
-        let connected = CodexWorkspaceDisplayCatalog.capture()
-        if let targetUUID { return connected.first { !$0.isBuiltin && $0.uuid == targetUUID && $0.identityUsable } }
-        guard let target = ToolWindowPolicy.target(connected), target.identityUsable, let identity = target.uuid else { return nil }
-        targetUUID = identity
-        UserDefaults.standard.set(identity, forKey: "quietToolDisplayUUID")
-        return target
+    func registerAgentWindow(_ window: NSWindow) {
+        let id = UInt32(window.windowNumber), pid = ProcessInfo.processInfo.processIdentifier
+        guard window === ownAgentWindow, ownAgentWindowIsParked(window), agentSettingsRegistration == nil else { return }
+        agentSettingsRegistration = id; agentReleaseUnconfirmed = false
+        let epoch = observationEpoch
+        ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "agent_display")) { [weak self, weak window] outcome in
+            guard let self else { return }
+            self.agentSettingsRegistration = nil
+            guard let window, window === self.ownAgentWindow, window.isVisible else { self.finishStopIfReady(); return }
+            if self.stopping || self.observationEpoch != epoch { window.close(); self.ownAgentWindow = nil; self.finishStopIfReady(); return }
+            if case .accepted = outcome, self.ownAgentWindowIsParked(window) {
+                self.registeredAgentSettings = id; self.lastError = nil
+                if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "opened-agent-settings" }
+            } else {
+                if self.lastOpen["windowID"] as? Int == Int(id) {
+                    let frame = window.frame
+                    self.lastOpen["diagnostic"] = ["outcome": outcome.diagnostic,
+                        "windowID": id, "nativeFrame": self.jsonFrame(frame),
+                        "systemFrame": self.windowInfo(id)?[kCGWindowBounds as String] ?? NSNull()]
+                }
+                // If a user took over, release any OCU record without moving it.
+                // Otherwise this is still our hidden Settings window; close it.
+                if self.ownAgentWindowIsParked(window) { window.close(); self.ownAgentWindow = nil }
+                else { self.registeredAgentSettings = id; self.forgetAgentSettings() }
+                self.lastError = "ocu-agent-settings-registration-unconfirmed: " + outcome.diagnostic
+                if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "failed" }
+            }
+        }
+    }
+
+    private func jsonFrame(_ f: CGRect) -> [String: CGFloat] {
+        ["x": f.minX, "y": f.minY, "width": f.width, "height": f.height]
     }
 
     private func error(_ message: String) -> [String: Any] { ["ok": false, "error": message] }
     private func document(_ window: AXUIElement) -> URL? {
-        (value(window, kAXDocumentAttribute) as? String).flatMap(URL.init(string:))?.standardizedFileURL
+        (value(window, kAXDocumentAttribute) as? String).flatMap(URL.init(string:))?.standardizedFileURL.resolvingSymlinksInPath()
     }
     private func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var v: CFTypeRef?

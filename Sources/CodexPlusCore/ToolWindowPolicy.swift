@@ -2,30 +2,45 @@ import Foundation
 
 /// Geometry and ownership policy only; no activation, pointer or GUI operations.
 public enum ToolWindowPolicy {
-    public enum Scope: Equatable { case dedicated, document(URL), none }
-    public static let enabledKey = "quietToolWindowsEnabled"
+    public enum Scope: Equatable { case document(URL), none }
+    public static let enabledKey = "agentToolWindowsEnabled"
     public static let protectedBundles: Set<String> = [
-        "com.openai.codex", "com.webcatalog.juli.x-chat",
+        "com.openai.codex", "me.longbiaochen.codex-plus", "com.webcatalog.juli.x-chat",
         "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
         "com.google.Chrome.app.ehpoaimemjameeijlpblkfpomemadkke"
     ]
-    public static let utilityBundles: Set<String> = [
-        "me.longbiaochen.dock-switch.settings", "me.longbiaochen.codex-plus",
-        "com.deskvncviewer.desktop"
-    ]
-    public static func scope(bundleID: String, dedicated: Bool, resource: URL?, existingDocuments: Set<URL>) -> Scope {
+    public static func scope(bundleID: String, resource: URL?, existingDocuments: Set<URL>) -> Scope {
         guard !protectedBundles.contains(bundleID) else { return .none }
-        if utilityBundles.contains(bundleID) || dedicated { return .dedicated }
         guard let resource, resource.isFileURL else { return .none }
-        let normalized = resource.standardizedFileURL
+        let normalized = resource.standardizedFileURL.resolvingSymlinksInPath()
         return existingDocuments.contains(normalized) ? .none : .document(normalized)
+    }
+    public static func canReportParked(requestID: String?, resource: URL?, latestRequestID: String?, actualDocument: URL?) -> Bool {
+        guard let requestID, let resource else { return false }
+        return requestID == latestRequestID && resource == actualDocument
     }
     public static func remainingClaims(_ claims: Set<URL>, knownDocuments: Set<URL>) -> Set<URL> {
         claims.subtracting(knownDocuments)
     }
 
-    public static func target(_ displays: [CodexWorkspaceDisplay]) -> CodexWorkspaceDisplay? {
-        displays.filter { !$0.isBuiltin }.max { $0.bounds.midX < $1.bounds.midX }
+    /// Exact official OCU namespace identity; never choose a screen by position.
+    public static func isPersistentAgentDisplay(id: UInt32, primary: UInt32,
+        vendor: UInt32, model: UInt32, serial: UInt32, expectedSerial: UInt32,
+        builtin: Bool, mirrored: Bool, online: [UInt32: CGRect]) -> Bool {
+        guard id != 0, id != primary, !builtin, !mirrored,
+              vendor == 0x0CAC, model == 0x0CAC, serial == expectedSerial, expectedSerial > 1,
+              let bounds = online[id], !bounds.isEmpty, online.count > 1 else { return false }
+        return !online.contains { $0.key != id && $0.value.intersects(bounds) }
+    }
+
+    public static func matchesIdentity(pid: Int32, windowID: UInt32, launchDate: Date,
+                                       livePID: Int32, liveWindowID: UInt32, liveLaunchDate: Date?) -> Bool {
+        pid > 0 && windowID > 0 && pid == livePID && windowID == liveWindowID && launchDate == liveLaunchDate
+    }
+
+    public static func sameFrame(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 2 && abs(a.minY - b.minY) < 2
+            && abs(a.width - b.width) < 2 && abs(a.height - b.height) < 2
     }
 
     public static func destination(frame: CGRect, area: CGRect) -> CGRect {
@@ -33,11 +48,6 @@ public enum ToolWindowPolicy {
         let height = min(frame.height, area.height)
         return CGRect(x: area.minX + (area.width - width) / 2,
                       y: area.minY + (area.height - height) / 2, width: width, height: height)
-    }
-
-    public static func workArea(visibleFrame: CGRect, primaryHeight: CGFloat) -> CGRect {
-        CGRect(x: visibleFrame.minX, y: primaryHeight - visibleFrame.maxY,
-               width: visibleFrame.width, height: visibleFrame.height)
     }
 
     public static func eligible(role: String, subrole: String, minimized: Bool, fullscreen: Bool) -> Bool {

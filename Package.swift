@@ -7,9 +7,12 @@ let package = Package(
     products: [.executable(name: "CodexPlus", targets: ["CodexPlus"])],
     targets: [
         .target(name: "CodexPlusCore"),
+        .target(name: "AgentDisplayShim", publicHeadersPath: "include",
+                cSettings: [.unsafeFlags(["-fobjc-arc"])],
+                linkerSettings: [.linkedFramework("CoreGraphics"), .linkedFramework("ApplicationServices")]),
         .executableTarget(
             name: "CodexPlus",
-            dependencies: ["CodexPlusCore"],
+            dependencies: ["CodexPlusCore", "AgentDisplayShim"],
             exclude: ["Resources"],
             linkerSettings: [.unsafeFlags([
                 "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT",

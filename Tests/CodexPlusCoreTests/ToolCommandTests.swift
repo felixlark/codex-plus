@@ -8,8 +8,13 @@ final class ToolCommandTests: XCTestCase {
         XCTAssertNil(ToolCommand.windowIdentity(pid: 1, windowID: -1))
         XCTAssertNil(try ToolCommand.parse(["--status"]))
         XCTAssertEqual(try ToolCommand.parse(["--tool-status"])?["command"] as? String, "tool-status")
-        let opened = try ToolCommand.parse(["--tool-open", "--app-path", "/Applications/Example.app", "--dedicated"])
-        XCTAssertEqual(opened?["dedicated"] as? Bool, true)
+        let opened = try ToolCommand.parse(["--tool-open", "--app-path", "/Applications/Example.app"])
+        XCTAssertEqual(opened?["appPath"] as? String, "/Applications/Example.app")
+        XCTAssertThrowsError(try ToolCommand.parse(["--tool-open", "--app-path", "/Applications/Example.app", "--dedicated"]))
+        XCTAssertThrowsError(try ToolCommand.parse(["--tool-recover"]))
+        XCTAssertThrowsError(try ToolCommand.parse(["--tool-exempt"]))
+        XCTAssertThrowsError(try ToolCommand.parse(["--tool-open", "--app-path", "/Applications/Example.app", "--url", "https://example.com"]))
+        XCTAssertEqual(try ToolCommand.parse(["--tool-restore", "--pid", "1", "--window-id", "2"])?["windowID"] as? Int, 2)
         for args in [["--tool-unknown"], ["--tool-open"], ["--tool-open", "--app-path", "relative.app"], ["--tool-status", "--pid", "1"], ["--tool-place", "--pid", "1"], ["--tool-routing", "--enabled", "yes"]] {
             XCTAssertThrowsError(try ToolCommand.parse(args))
         }

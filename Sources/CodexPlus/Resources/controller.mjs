@@ -10,6 +10,7 @@ import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction,reviewedFeatureResource,removeFeatureEntries} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {allocateWindowNumbers} from './window-number.mjs';
+import {reviewedHumanRuntime,nativeWindowDefaults,preserveNativeBounds,preferredHumanNumbers,isHumanWindowURL} from './human-window.mjs';
 import {CDP} from './cdp.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
@@ -22,7 +23,7 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{}};
+let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
@@ -31,7 +32,66 @@ const inFlight=new Set();
 let stopping=false;
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
 let featureSupported=false,suggestionSupported=false,sidebarSupported=false;
-let displays=[];
+let displays=[];let humanNativeSupported=false;
+const humanCreations=new Map();
+let humanFrames=[];
+async function createHumanWindow(nonce){
+  if(typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||humanCreations.has(nonce))return;
+  humanCreations.set(nonce,{phase:'creating'});
+  try{
+    const source=[...sessions].find(([,s])=>s.main);
+    if(!source)throw Error('No native main renderer');
+    const probe=await command(source[0],'Runtime.evaluate',{expression:'new URL(location.href).searchParams.get("initialRoute")',returnByValue:true});
+    const previous=probe.result.value;
+    // Root + query is rejected by the host's route validator. The accepted
+    // plugins route carries the token until the owned new target is navigated home.
+    const route=(typeof previous==='string'&&/^\/local\//.test(previous)?previous.split(/[?#]/)[0]:'/plugins/installed')+'?codexPlusHumanWindow='+nonce;
+    const result=await command(source[0],'Runtime.evaluate',{expression:`window.electronBridge.sendMessageFromView(${JSON.stringify({type:'open-in-new-window',path:route})})`,awaitPromise:true,returnByValue:true});
+    if(result.exceptionDetails)throw Error('Native window request failed');
+    humanCreations.set(nonce,{phase:'requested'});
+  }catch(error){humanCreations.set(nonce,{phase:'failed',error:error.message});}
+}
+function humanMarker(value){try{const u=new URL(value);return u.searchParams.get('codexPlusHumanWindow')??new URL(u.searchParams.get('initialRoute')??'/','https://codex.invalid').searchParams.get('codexPlusHumanWindow');}catch{return null;}}
+async function settleHumanCreations(){
+  if(![...humanCreations.values()].some(r=>r.phase==='requested'))return;
+  const {targetInfos}=await cdp.call('Target.getTargets');
+  for(const [nonce,request] of humanCreations){
+    if(request.phase!=='requested')continue;
+    const matching=targetInfos.filter(t=>t.type==='page'&&mainURL(t.url)&&humanMarker(t.url)===nonce);
+    if(matching.length!==1)continue;
+    const target=matching[0];
+    const session=[...sessions].find(([,s])=>s.target===target.targetId);
+    if(!session)continue;
+    // Do not cancel the native window's initial intercepted module requests.
+    // The nonce-bound page must finish bootstrapping before normalization.
+    const ready=await command(session[0],'Runtime.evaluate',{expression:'({complete:document.readyState==="complete",enhanced:globalThis.__codexPlusFeatures?.status()?.phase==="active"})',returnByValue:true});
+    if(!ready.result.value?.complete||featureSupported&&!ready.result.value.enhanced)continue;
+    // Navigate only the nonce-bound, newly-created human window. Existing pages,
+    // drafts and navigation are never used as a reload surface.
+    const url=new URL('app://-/index.html');url.searchParams.set('initialRoute','/');url.searchParams.set('codexPlusHumanWindow',nonce);
+    humanCreations.set(nonce,{phase:'created',target:target.targetId});session[1].human=true;
+    await command(session[0],'Page.navigate',{url:url.href});
+  }
+}
+async function repairNativeWindowDefaults(){
+  if(!humanFrames.length||!humanNativeSupported)return;
+  const destination=humanFrames.find(f=>f.number===1)??humanFrames[0];
+  const source=[...sessions].find(([,s])=>s.main);
+  if(!source)return;
+  const bounds={x:destination.x,y:destination.y,width:destination.width,height:destination.height};
+  const evaluate=async(operation)=>{
+    const result=await command(source[0],'Runtime.evaluate',{expression:`(${nativeWindowDefaults.toString()})(${JSON.stringify(operation)},${JSON.stringify(bounds)})`,awaitPromise:true,returnByValue:true});
+    if(result.exceptionDetails)throw Error('Native geometry service unavailable');return result.result.value;
+  };
+  try{
+    const before=await evaluate('read');
+    if(before.present&&['x','y','width','height'].every(k=>before.value?.[k]===bounds[k])&&before.value?.isMaximized===false){await publishNativeWindowDefaults({phase:'ready'});return;}
+    await preserveNativeBounds(path.join(path.dirname(stateFile),'native-window-bounds-backup.json'),before,fs);
+    await publishNativeWindowDefaults(await evaluate('write'));
+  }catch{await publishNativeWindowDefaults({phase:'native-state-unavailable'});}
+}
+async function publishNativeWindowDefaults(value){if(JSON.stringify(value)!==JSON.stringify(state.nativeWindowDefaults)){state.nativeWindowDefaults=value;await publish();}}
+
 const sidebarProfiles=new SidebarProfiles(path.join(path.dirname(stateFile),'sidebar-layouts.json'),fs);
 await sidebarProfiles.load();
 let reviewDigest='';const reviewRequests=new Map();
@@ -117,10 +177,10 @@ async function reconnectEnhancements(){
 
 function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean'){suggestions.configure(message.enabled&&attemptStoreReady);void updateSuggestionPolicy();}}catch{}}
 
-const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
+const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -173,12 +233,19 @@ async function samplingSupported(archive){
   for await(const chunk of createReadStream(path.join(values.app,reviewedSamplingResource.binaryPath)))hash.update(chunk);
   return hash.digest('hex')===reviewedSamplingResource.binarySHA256;
 }
-function mainURL(value){const url=new URL(value);return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&!/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(url.searchParams.get('initialRoute')??'');}
+function mainURL(value){return isHumanWindowURL(value);}
 async function refreshWindowNumbers(){
   const {targetInfos}=await cdp.call('Target.getTargets');
   const targets=targetInfos.filter(t=>t.type==='page'&&t.url.startsWith('app://-/index.html')&&mainURL(t.url)).map(t=>t.targetId);
-  const numbers=allocateWindowNumbers(targets,state.windowNumbers);
-  if(Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
+  const pages=[];
+  for(const [id,s]of sessions)if(s.main&&targets.includes(s.target)){
+    const r=await command(id,'Runtime.evaluate',{expression:'({x:screenX,y:screenY,width:outerWidth,height:outerHeight})',returnByValue:true});pages.push({target:s.target,frame:r.result.value});
+  }
+  const preferred=preferredHumanNumbers(pages,humanFrames,state.humanTargets);
+  const bindingChanged=JSON.stringify(preferred)!==JSON.stringify(state.humanTargets);
+  state.humanTargets=preferred;
+  const numbers=allocateWindowNumbers(targets,state.windowNumbers,preferred,humanFrames.length?[1,2]:[]);
+  if(bindingChanged||Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
 }
 function command(session,method,params={}){return cdp.call(method,params,session);}
 function assertOwner(pid,endpoint){
@@ -193,6 +260,7 @@ async function main(){
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict','-R=anchor apple generic and identifier "com.openai.codex" and certificate leaf[subject.OU] = "2DC432GLL2"',values.app],{stdio:'pipe'});
   const archive=await openAsar(values.app);
   try{
+    const runtimeEntry=archive.entries.find(e=>e.path===reviewedHumanRuntime.path);humanNativeSupported=!!runtimeEntry&&createHash('sha256').update(await archive.read(runtimeEntry)).digest('hex')===reviewedHumanRuntime.sha256;state.nativeWindowDefaults={phase:humanNativeSupported?'waiting-for-human-windows':'unsupported-host'};
     const footer=archive.entries.find(e=>e.path===reviewedFeatureResource.path);
     featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')===reviewedFeatureResource.sha256;
     state.pageEntries={supported:featureSupported,phase:featureSupported?'waiting':'unsupported-host'};
@@ -217,7 +285,7 @@ async function main(){
   if(stopping)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
-    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
+    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},humanTargets:saved.humanTargets??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     state.phase='launching';state.launchMethod='launch-services';await publish();
@@ -245,7 +313,7 @@ async function main(){
     if(message.method==='connectionClosed'&&!stopping){state.phase='disconnected';void publish().then(()=>process.exit(1));}
   });
   async function attach({sessionId,targetInfo,waitingForDebugger}){
-    const session={target:targetInfo.targetId,contexts:new Map(),main:false};
+    const session={target:targetInfo.targetId,contexts:new Map(),main:false,human:!!humanMarker(targetInfo.url)};
     sessions.set(sessionId,session);state.attached++;
     try{
       if(targetInfo.type==='page'&&!stopping){
@@ -297,6 +365,8 @@ async function main(){
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping)return;inspecting=true;
     try{
+      await settleHumanCreations();
+      await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
         const pages=[];
         for(const [id,s]of sessions)if(s.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});pages.push({protocol:r.result.value??null});}
