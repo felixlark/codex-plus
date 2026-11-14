@@ -391,7 +391,7 @@ public final class CodexWorkspaceObserver {
         // Chromium modal dialogs can replace the exposed toolbar identity while
         // retaining the same chat. Invalidate that baseline through the dialog.
         switch CodexWorkspaceTreeSearch.findNode(root: AXIdentity(window), read: readNode, matching: {
-            $0.subrole == "AXApplicationDialog" || ["AXDialog", "AXSheet"].contains($0.role)
+            $0.isBlockingDialog
         }) {
         case .absent: return .absent
         case .found(let identity): return .found(identity.element)
@@ -513,7 +513,9 @@ public final class CodexWorkspaceObserver {
         case .failed: children = nil
         }
         return CodexWorkspaceScanNode(
-            role: role, label: label, children: children, subrole: subrole, isPrimaryShell: role == "AXWebArea"
+            role: role, label: label, children: children, subrole: subrole, isPrimaryShell: role == "AXWebArea",
+            isModal: (subrole == "AXApplicationDialog" || ["AXDialog", "AXSheet"].contains(role))
+                ? attribute(element, kAXModalAttribute) as? Bool : nil
         )
     }
 

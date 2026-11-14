@@ -33,13 +33,23 @@ struct CodexWorkspaceScanNode<Element> {
     let children: [Element]?
     let subrole: String
     let isPrimaryShell: Bool
+    let isModal: Bool?
 
-    init(role: String, label: String, children: [Element]?, subrole: String = "", isPrimaryShell: Bool = false) {
+    init(role: String, label: String, children: [Element]?, subrole: String = "", isPrimaryShell: Bool = false,
+         isModal: Bool? = nil) {
         self.role = role
         self.label = label
         self.children = children
         self.subrole = subrole
         self.isPrimaryShell = isPrimaryShell
+        self.isModal = isModal
+    }
+
+    // Chromium also exposes project hover cards as application dialogs. They
+    // do not block navigation or remount the chat (unlike Rename). An unreadable
+    // modal flag retains the existing conservative dialog handling.
+    var isBlockingDialog: Bool {
+        (subrole == "AXApplicationDialog" || ["AXDialog", "AXSheet"].contains(role)) && isModal != false
     }
 }
 
