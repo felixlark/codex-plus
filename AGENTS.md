@@ -35,4 +35,8 @@ use the user's explicit authorization and official System Settings controls.
 
 One runtime owns the feature. Dock Switch must have its observer removed before
 Codex Plus receives Accessibility permission. Preserve the old installation for
-rollback, and keep GitHub Issue acceptance open until Longbiao accepts the result.
+rollback. The result owner completes installed interaction acceptance and closes the delivery issue with evidence; wait for personal acceptance only when the user explicitly requires it.
+
+## 自动交付
+
+已进入开发交付的事项，由原结果负责人连续完成相称检查、提交推送、开 PR、自动合并、既定环境安装／部署及真实交互验收，不再逐阶段等待人工批准。必要审查由负责人自动组织并处理实质问题，不以等待特定云评审渠道作为默认停顿点；仅在本人明确指定亲验时等待本人。测试失败或实际缺陷继续修复；任务外敏感动作和本人明确暂停仍按具体边界办理。
