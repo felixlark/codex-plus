@@ -22,6 +22,7 @@ final class HumanWindows {
     var createWindow: ((String) -> Bool)?
 
     func open(_ app: NSRunningApplication) {
+        if !requested { deadline = Date().addingTimeInterval(30); error = nil }
         requested = true
         update(app)
     }
@@ -42,6 +43,10 @@ final class HumanWindows {
             let matching = live.filter { marker($0.url) == token }
             if matching.count == 1, let screen = screens[slot] {
                 if place(matching[0], on: screen) { bindings[slot] = matching[0].id; save(app); self.token = nil; requestedSlot = nil }
+                // AX accepts frame changes before a new host window has settled.
+                // Retain this exact nonce and retry on the existing heartbeat;
+                // never create another window while placement is still pending.
+                else if Date() < deadline { return }
                 else { error = "window-placement-failed"; requested = false; return }
             } else if matching.count > 1 || Date() > deadline {
                 error = matching.count > 1 ? "ambiguous-human-window-token" : "human-window-creation-timeout"
@@ -51,7 +56,7 @@ final class HumanWindows {
         for slot in [1, 2] {
             guard let screen = screens[slot] else { error = "physical-display-\(slot)-unavailable"; requested = false; return }
             if let id = bindings[slot], let window = live.first(where: { $0.id == id }) {
-                if !place(window, on: screen) { error = "window-placement-failed"; requested = false; return }
+                if !place(window, on: screen) { placementPending(); return }
                 continue
             }
             // Existing physical main windows are user windows; hidden windows are not inferred from chronology/focus.
@@ -60,7 +65,7 @@ final class HumanWindows {
             }
             if candidates.count == 1 {
                 let window = candidates[0]
-                guard place(window, on: screen) else { error = "window-placement-failed"; requested = false; return }
+                guard place(window, on: screen) else { placementPending(); return }
                 bindings[slot] = window.id; save(app); continue
             }
             let nonce = UUID().uuidString
@@ -149,17 +154,26 @@ final class HumanWindows {
 
     private func place(_ window: Window, on screen: (frame: CGRect, visible: CGRect)) -> Bool {
         guard cp_window_id(window.element) == window.id else { return false }
-        let target = screen.visible
-        if abs(window.frame.minX-target.minX) < 2 && abs(window.frame.minY-target.minY) < 2 && abs(window.frame.width-target.width) < 2 && abs(window.frame.height-target.height) < 2 { return true }
-        var point = target.origin, size = target.size
-        guard let position = AXValueCreate(.cgPoint, &point), let dimensions = AXValueCreate(.cgSize, &size) else { return false }
-        AXUIElementSetAttributeValue(window.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-        let positioned = AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
-        let resized = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, dimensions)
-        // Resize can be constrained by the source screen; move once more, then verify the actual frame.
-        AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
-        guard positioned == .success, resized == .success, let actual = frame(window.element) else { return false }
-        return abs(actual.minX-target.minX) < 3 && abs(actual.minY-target.minY) < 3 && abs(actual.width-target.width) < 3 && abs(actual.height-target.height) < 3
+        if value(window.element, kAXMinimizedAttribute) as? Bool == true {
+            AXUIElementSetAttributeValue(window.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            return false
+        }
+        switch HumanWindowPlacement.next(frame: window.frame, target: screen.visible) {
+        case .ready: return true
+        case .resize(var size):
+            if let dimensions = AXValueCreate(.cgSize, &size) {
+                AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, dimensions)
+            }
+        case .move(var point):
+            if let position = AXValueCreate(.cgPoint, &point) {
+                AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
+            }
+        }
+        return false
+    }
+
+    private func placementPending() {
+        if Date() >= deadline { error = "window-placement-failed"; requested = false }
     }
 
     private func frame(_ element: AXUIElement) -> CGRect? {
