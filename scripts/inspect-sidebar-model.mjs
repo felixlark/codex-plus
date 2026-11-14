@@ -9,12 +9,12 @@ import { createHash } from 'node:crypto';
 
 export const toolRoot = path.join(os.homedir(), 'Library/Caches/codex-plus/project-order-probe');
 export const reviewedHostResource = Object.freeze({
-  path: 'webview/assets/async/739301.37a39f26d6.js',
-  sha256: 'acc2174e4ed3d2068af26c1731f08e8978c853864aea9c0a917ae9d246885058',
+  path: 'webview/assets/async/907538.0572f09d40.js',
+  sha256: 'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c',
 });
 export const reviewedRouteResource = Object.freeze({
-  path: 'webview/assets/async/92243.7ae2a0b971.js',
-  sha256: '2090b888705be8a3fac914f21b672f27a2c3ce6f854ca1312449c53fbad244d9',
+  path: 'webview/assets/async/757723.3067c948bc.js',
+  sha256: '67cc5635a64f200b60e53cbf6b2fe74e4e8f0440c6ab0ccffd6c0056f849f3e4',
 });
 
 export async function adaptReloadRoute(source) {

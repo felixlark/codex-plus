@@ -2,6 +2,41 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.7.0 build 20 设置页移除待审建议（2026-11-14）
+
+- [x] 移除设置页待审列表、空状态、批准／拒绝／重审按钮及对应原生界面数据处理；提示文案不再引导到待审列表。后台审查规则保持，敏感或范围不明的建议不自动发送。
+- [x] 47 项 Node、40 项 Swift 检查通过；Developer ID 签名构建、正式安装及严格验签通过。构建与安装可执行文件 SHA256 均为 `fe9ff6ba40a9ad33b1ac5382621adedc862b9348e0fc4ca3ab1514e0ccf9c7ba`。
+- [x] 从 `/Applications/Codex Plus.app` 启动设置页，OCU 截图及完整控件树确认建议开关之后直接进入工作区设置，无待审区块或审批按钮。自动发送保留开启，宿主 PID 64999 未重启；页面入口、项目排序及连接均 active。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/settings-cleanup-20261114/`，含 tests.log、build.log、install.log、signing.log、settings-ocu.txt 及 final.json。安装脚本保留旧安装包供回退。本次只验收设置页变化，未重复后台发送或硬件快捷键验收。
+
+## 0.7.0 build 19 工作区展开适配（2026-11-14）
+
+宿主 `/Applications/ChatGPT.app` 26.1111.21308 (27194) 将收起时的入口改为 `AXCheckBox`「Show tabs」。旧适配仅识别「New tab」，使收起状态变成未知，任务切换无法触发展开。本版识别新版入口并保留旧版按钮／弹出按钮；沿用任务身份、屏幕范围及手动收起保护。
+
+- [x] 47 项 Node、40 项 Swift 检查通过；新增回归覆盖新版收起结构，以及不把 Hide tabs、菜单或文本当作展开入口。
+- [x] Developer ID 签名构建、正式安装及严格验签通过；构建与安装可执行文件 SHA256 均为 `74f8e8ddb19e46d5f06df6109a3f47a7a94751d7b97d151239ecd324ebceed0c`。
+- [x] 在真实安装版收起本案工作区，切到已有验收聊天再返回，右侧工作区可见恢复；动作计数 0→1。
+- [x] 当前任务手动收起后保持收起；通过 OCU 的应用内 ⌘N 新建 Codex 页，工作区展开，动作计数 1→2。此项验证应用快捷键，不声称硬件 HID 路径。
+- [x] 切到 ChatGPT 模式，收起后应用内 ⌘N，保持收起，动作计数仍为 2。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/workspace-fix-20261114/`。既有用户偏好及未发送草稿保留，宿主进程未重启。旧安装包由安装脚本保存在 Library/Caches 下供回退。
+
+## 0.6.0 后台原生建议（2026-11-12）
+
+Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `443A8B04-FEA3-35EF-92E8-7F44FB205A9B`，安装版与构建缓存的可执行文件SHA256同为`c889c83e556d5c5d7b46a81cd43d961162d06a9a3aa00187cdbc72268d1a2055`，安装版严格验签通过。build12的UUID为`CAA6708B-4AC6-3DA6-AB6C-98449F774272`；build13因嵌入的Info.plist版本号变化重新链接。原记录误将build12 UUID沿用于13，发布前已按安装包、缓存及保留备份核正。官方宿主 `26.1106.51428` 的包未修改。JS资源安装与源码SHA256一致。开关通过原UserDefaults保留true，原生设置窗实际显示“无需打开会话”“已开启 · 前后台聊天的新建议将自动发送”。
+
+- build12真实后台发送：保持其他聊天选中，官方send_message_to_thread只给既有测试chat `01a1ce66-e97c-73c1-abdc-1a523ff783aa` 发送无工具/文件的seed；原生live建议触发。自动产生用户消息“只回复 CP-BACKGROUND 自动续轮完成，本轮到此结束”，下一轮 `01a1cf4a-8ecc-7260-968d-d1e64d0ca886` completed，官方read_thread读回。整个发送前未导航到目标chat；用户期间可自行切换其他chat。随后另一原生建议也自动续轮，证实可能连续执行。
+- 草稿保护：上述成功后才打开测试chat，填入36字未发送的本案终止验收草稿，再切走。后台seed轮 `01a1cf4b-f131-79a2-bd5e-093f95051183` completed并实际生成新的live候选；target probe为false，协调器显示draft-or-state-changed，后续官方read_thread仍停在该轮，未自动发送。草稿保留，开关始终true。检查覆盖切走后的原生保留composer节点。
+- 最终build13只移除候选条数的硬上限，发送与检查链路未变化；复用build12真实发送/保护证据，7项定向Node测试重跑通过。原候选完整scripts/test为17 Node +35 Swift全部通过。签名build/install后主页面重载，bridge protocol2/registered3、mode background-native、pageReady true已读回。重启恢复不重放来源轮。
+- 已核代码接缝：原生J8Ro后台live缓存写入，GNwQ原生scope包装及retainedScopeEntries生命周期；独立复审见[评审记录](reviews/background-suggestions-egm.md)。关闭/持久化故障/跨窗口重复/晚期许可拒绝有确定性测试；本轮保持用户开启偏好，没有为验收临时关闭总开关。原生未生成或过滤的场景不声称覆盖。
+
+证据：`~/Library/Logs/codex-plus/background-suggestion-20261112/`，含official-thread-readback.json、seed-route.jsonl、after-background.jsonl、draft-block-candidate.jsonl、tests.txt、build13.txt及运行状态。运行态以该目录RESULT.md的最新读回为准。
+
+0.5.2的F6定位基线沿用：另一owner已通过NanoKVM真实USB键盘完成热启动entry6→7和正常退出后的冷启动，旧Plus4922/host5156退出，新Plus41501/controller41502/host41520；DELL外屏external_fill正确，autoSend true与三项增强恢复，按键释放。该证据绑定0.5.2 build11，未声称build13重新做了KVM冷启动。原始记录 `~/Library/Logs/codex-plus/kvm-acceptance-20261112/`。
+
 ## 0.5.2 F6 沿用 Dock Switch 定位（2026-11-12）
 
 Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开从 Dock Switch 安装配置读取 ChatGPT 的 `placement`，当前为 `external_fill`；定位由 Dock Switch 按实际宿主 PID 执行。配置修改下次打开生效，读取失败保留窗口位置。构建与安装 Mach-O UUID 同为 `414C2C9A-79BC-382B-BDC9-F8B9A81FCFDC`，Developer ID Team HJG65XBC25、Hardened Runtime 和安全时间戳有效，安装版严格验签通过。旧版备份在 `~/Library/Caches/codex-plus/previous-install.jkIOi7/Codex Plus.app`。
@@ -167,3 +202,32 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [ ] Longbiao 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/circular-identity-20261112/`，包括小尺寸浅深色预览、installed-navigation.png、installed-finder.png、installed-settings.png、installed-snake.png、installed-layout.json、installed-final-status.json、tests.log、build.log、signing.log。OCU 用于截图及页面/原生设置；无窗口的菜单栏由已授权原生工具操作。菜单图标的全屏像素截图未取得：OCU 无可选 key window，CUA 同样超时，原生截图工具缺 Screen Recording 权限；未新增权限，菜单可用性与安装包矢量资源分别取证，不将预览冒充实际菜单截图。
+
+## 0.7.0 后台语义审查与敏感建议待审（2026-11-14）
+
+正式安装 `/Applications/Codex Plus.app` 0.7.0 build17，bridge protocol5。Mach-O UUID `696EB81E-74F4-3C49-92EB-E4F8E96D2AA5`，严格验签通过；安装的 controller、发送桥、审查策略、LaunchServices helper 与源码逐文件摘要相同。宿主 PID1605 保持运行。
+
+- [x] 43 项 Node、39 项 Swift 通过，签名构建/安装及 diff 检查通过；方案、风险粘连、升级接入、验收范围及关闭路径独立审查的适用发现均已修复和复核。
+- [x] OCU 在真实安装版点击“重新接入页面增强”，四个原生主页面全部 protocol5、registered>0、legacyPages=0、pageReady=true，无需用户手动刷新或退出 Codex。
+- [x] 未选中的旧验收任务通过 readonly preview 原生加载完整历史并完成 thread/sample 语义审查，`sourceUnchanged=true`、`historyComplete=true`；保留已有36字符草稿，preview 不批准、不捕获、不认领、不发送。
+- [x] OCU 新建无副作用夹具“确认 CP17 夹具就绪”（`01a1d886-6519-7290-a6d0-54044b800712`），随后切回本开发聊天。Plus 以仅此 UUID 的 RAM-only 验收范围启用自动发送。原生新建议经审查后后台提交一次，官方 read_thread 确认续轮 `01a1d888-4a8d-7391-b376-cc9db550c62e` completed，回复 `CP17 后台续轮完成`；未切目标任务。
+- [x] 含邮件/微信的纯字符串夹具停在待审列表，OCU 读回具体行动、对象、范围和单次批准说明；提交数保持1。OCU 点击“批准本次”后，原生后台续轮 `01a1d889-220d-7d82-aac1-d36e4751c74a` completed，提交数变2。夹具禁止工具和实际通信，未执行真实敏感操作。
+- [x] 第二条敏感字符串建议进入待审后，OCU 点击“拒绝”，列表清空且 submitted 保持2，没有对应新增续轮。关闭验收开关并退出范围会话，正常重启后 scoped=false、日常自动发送仍关闭。
+- [x] 安装版无效 acceptance UUID 立即退出2，拒绝无范围启动；日常偏好不受验收开关影响。父进程退出后 controller 9.8秒内自行退出，宿主仍存活。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+本轮 Codex GUI 由已安装官方 OCU 原生 MCP/CLI 控制；连接器 transport 关闭时恢复同一 OCU 的 stdio MCP 会话。另一套统一 CUA 的拒绝不作为 OCU 拒绝证据。生产版本没有 Reload Window，未要求用户执行不存在的菜单。CDP 仅用于产品接入、只读观察及产品定义恢复动作；不以它代替 GUI 输入。
+
+证据：`~/Library/Logs/codex-plus/suggestion-review-20261114/`，含 tests17.log、build17.log、installed17-identity.json、native-thread-evidence.json、pending-sensitive-ocu.txt 及最终状态。宿主冷启动/截图责任归属尚未在本轮验收；helper 的源码和单元检查不能替代该结果。原生采样每条建议增加一次模型调用，固定宿主资源变更后关闭发送等待重新审查。
+
+### 更新后兼容复验：build18
+
+桌面更新至 Codex 26.1111.21308（27194）时，build17 的固定资源守卫按预期停用。对新 host907538、route757723、scope956370、bootstrap631 完成源码核对后适配；明确 `allowInProgressTurn:false`，并将二进制守卫从 shell wrapper 改为真正 arm64 Mach-O。独立源码复核零 P1/P2。
+
+- [x] 47 Node / 39 Swift 通过；签名 build18 安装及严格验签通过。Mach-O UUID `C9BE294C-42E3-3BE4-B61B-341B9D11E5E7`，安装源码逐文件一致。
+- [x] OCU 点击产品重新接入，protocol5 registered2、pageReady=true、legacyPages=0；原生 preview 再次 `historyComplete=true`、`sourceUnchanged=true`。
+- [x] 只绑定原验收 UUID，保持当前路由 `/`，原生自动提交一次 `只回复 CP18 后台续轮完成，不使用工具，回复后结束。`，官方 read_thread 读回 turn `01a1d894-7317-7fc2-8dce-83856c069eaa` completed。
+
+本候选同时集成既有界面任务的 footer 尺寸与先清理界面再等待在途请求补丁；可见退出/尺寸验收归原任务，不以本次建议续轮代替。宿主为更新后 PID64999，未为本次验收强退。
+
+- [x] build18敏感字符串建议停在待审，展示行动/对象/范围；OCU拒绝后submitted保持1。已退出仅测试UUID会话并正常重启，保留更新后检测到的日常偏好；未将测试开关写回日常偏好。

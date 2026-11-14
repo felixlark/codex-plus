@@ -1,108 +1,260 @@
 import {createHash} from 'node:crypto';
+import {createSuggestionReviewPolicy} from './suggestion-review.mjs';
+export const reviewedSamplingResource=Object.freeze({path:'.vite/build/early-bootstrap-631-c364c4eef36b8fb5.js',sha256:'3d33823eff6f760caed93a06c7bd580a2ed7631c961bf7f4454622c47205fc2c',binaryPath:'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex',binarySHA256:'3ea20787e106af94573d3d6c19480aed93a1334b0dd32b6b04e2f780ce82cf4b'});
+export const backgroundGuardBinding='__codexPlusBackgroundGuard';
+export const reviewedBackgroundDependency=Object.freeze({path:'webview/assets/async/956370.aff5cce818.js',sha256:'84c3881d294dc4ac2892d9a58f7f60bed97cb061bde375a4fe2f1a768ea22379'});
+export const reviewedBackgroundResource=Object.freeze({path:'webview/assets/async/907538.0572f09d40.js',sha256:'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c'});
 
-export const reviewedSuggestionResource=Object.freeze({
-  path:'webview/assets/async/864380.74f4445879.js',
-  sha256:'63ad0177e7b2d888cbf80db7ed6167c73f0012a652fc6ecd10f34052a1e87ff0',
-});
-
-export function adaptSuggestions(source) {
-  if(createHash('sha256').update(source).digest('hex')!==reviewedSuggestionResource.sha256)return {supported:false,reason:'unreviewed-suggestion-source'};
-  source=source.toString();
-  const widget='i.dataset.cumberbatch="",i.inert=!0',reuse='if(r.text===o?.prediction.text)return{...o,prediction:r};';
-  if(source.split(widget).length!==2||source.split(reuse).length!==2)return {supported:false,reason:'suggestion-structure'};
-  const metadata='i.dataset.cumberbatch="",!("kind"in l)&&l.sourceTurnId&&(()=>{const s=e.get(f.ww);if(s?.latestTurnId===l.sourceTurnId)i.dataset.codexPlusSuggestion=JSON.stringify({protocol:1,hostId:s.hostId,threadId:s.threadId,sourceTurnId:l.sourceTurnId,expected:n.textContent});})(),i.inert=!0';
-  source=source.replace(widget,metadata).replace(reuse,'if(r.text===o?.prediction.text&&r.sourceTurnId===o?.prediction.sourceTurnId&&("kind"in r)===("kind"in o.prediction))return{...o,prediction:r};');
-  return {supported:true,source:'globalThis.__codexPlusSuggestionHost=1;'+source};
+export function adaptBackgroundSuggestions(original,adapted=original.toString()) {
+  if(createHash('sha256').update(original).digest('hex')!==reviewedBackgroundResource.sha256)return {supported:false,reason:'unreviewed-background-source'};
+  const register='function nz(e,t,i,A){',cache='e.queryClient.setQueryData((0,tw.pv)(u,d,l),_)';
+  if(adapted.split(register).length!==2||adapted.split(cache).length!==2)return {supported:false,reason:'background-structure'};
+  const registration='globalThis.__codexPlusBackgroundSuggestions.register(globalThis.__codexPlusBackgroundNative(e,t,i,()=>nX&&(A?.()??!0),{drafts:n("CiLO"),identities:n("V3rO"),composer:n("Sd8U"),wrap:n("GNwQ").GB,identity:()=>[e.get(Y.chatGptAuthenticatedAccountId$),e.get(Y.o8),e.get(tw.S8)]}));';
+  const captured=`(${cache},globalThis.__codexPlusBackgroundSuggestions.capture(t,c,_,()=>i()&&e.get(tw.S8)===h&&e.get(Y.chatGptAuthenticatedAccountId$)===u&&e.get(Y.o8)===d))`;
+  const prefix=`;globalThis.__codexPlusSuggestionReviewPolicy=(${createSuggestionReviewPolicy.toString()})();globalThis.__codexPlusBackgroundNative=(${createNativeSuggestionContext.toString()});globalThis.__codexPlusBackgroundSuggestions??=(${createBackgroundSuggestionBridge.toString()})(${JSON.stringify(backgroundGuardBinding)});\n`;
+  return {supported:true,source:prefix+adapted.replace(register,register+registration).replace(cache,captured)};
 }
 
-// The renderer exposes observations and synchronous guarded actions. Only the
-// connected controller schedules actions; losing it leaves any accepted draft.
-export function installSuggestionReader() {
-  if(globalThis.__codexPlusSuggestions?.protocol===1)return;
-  let revision=0,pending=null,composing=false;
-  const events=['keydown','pointerdown','beforeinput','compositionstart','compositionend','focusout'];
-  const changed=e=>{if(e.type==='compositionstart')composing=true;if(e.type==='compositionend')composing=false;if(e.isTrusted)revision++;};
-  for(const event of events)document.addEventListener(event,changed,true);
-  const blurred=()=>{revision++;};window.addEventListener('blur',blurred);
-  function route(){return new URL(location.href).searchParams.get('initialRoute')??'/';}
-  function visible(e){return !!e&&e.isConnected&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';}
-  function blocked(root){return [...document.querySelectorAll('dialog[open],[role="dialog"],[role="alertdialog"]')].some(visible)||!!root.querySelector('[data-attachment-id],[data-composer-attachments-row] > *,[data-composer-takeover]');}
-  function editorText(editor){return editor.pmViewDesc?.node?.textContent??editor.textContent;}
-  function sendButton(root){const buttons=[...root.querySelectorAll('button[aria-label="Send"],button[aria-label="发送"]')].filter(visible);return buttons.length===1&&!buttons[0].disabled?buttons[0]:null;}
-  function context(editor,meta){
-    const current=route(),match=current.match(/^\/(local|remote)\/([^/?#]+)(?:[?#].*)?$/);
-    const root=editor.closest('[data-codex-composer-root]');
-    if(!match||match[2]!==meta.threadId||!root||root.querySelectorAll('[data-codex-composer="true"]').length!==1)return null;
-    return {root,route:current};
+// These adapters only use the reviewed host's native client and existing scope.
+export function createNativeSuggestionContext(scope,hostId,client,isCurrent,{drafts,identities,composer,wrap,identity}) {
+  const dispose=value=>value?.[Symbol.dispose]?.();
+  function probe(target){
+    const principal=identity?.();
+    if(target.hostId!==hostId||!isCurrent()||!principal||principal[0]==null||principal[1]==null)return false;
+    const aliases=new Set(keys(target));
+    if([...aliases].some(key=>drafts.lD(scope,key)))return false;
+    let root=scope.node;while(root.parent)root=root.parent;
+    const seen=new Set();
+    function visit(node,ancestors){
+      if(seen.has(node))return true;seen.add(node);
+      const chain=new Map(ancestors);chain.set(node.token.id,node);
+      if(node.token===composer.PR&&aliases.has(node.key)&&drafts.rD(wrap(composer.PR,chain,node)))return false;
+      for(const entries of node.retainedScopeEntries.values())for(const entry of entries.values())if(!visit(entry.node,chain))return false;
+      return true;
+    }
+    return visit(root,scope.chain);
   }
-  function eligible(editor,root){return !composing&&document.visibilityState==='visible'&&document.hasFocus()&&visible(editor)&&editor.contentEditable==='true'&&!blocked(root)&&(document.activeElement===editor||document.activeElement===document.body);}
+  function keys(target){return [...new Set([identities.JJ(scope,target.threadId),identities.s8(target.threadId)])];}
+  async function validate(target,ownMessageId,readOnly=false){
+    const eligible=()=>{const principal=identity?.();return target.hostId===hostId&&isCurrent()&&principal?.[0]!=null&&principal?.[1]!=null&&(readOnly||probe(target));};
+    const values=[];
+    try{
+      const meta=await client.getCachedConversationMetadata(target.threadId);values.push(meta);
+      const follow=await client.getFollowUpContext(target.threadId);values.push(follow);
+      const history=await client.getLoadedConversationHistory(target.threadId);values.push(history);
+      const execution=await client.getThreadExecutionState(target.threadId);values.push(execution);
+      const archiving=await client.isConversationArchiving(target.threadId);
+      if(!eligible()||archiving||meta?.streamRole?.role!=='owner'||meta.ephemeral||meta.sideConversation||follow?.resumeState!=='resumed'||follow.isClosedSubagent||follow.mode==='durable'||follow.latestCollaborationMode?.mode==='plan')return false;
+      const turns=history?.turns;if(!Array.isArray(turns))return false;
+      const latest=turns.filter(t=>t.turnId!=null).at(-1);
+      if(latest?.turnId!==target.latestTurnId||latest.status!=='completed'||latest.automationKind!=null||latest.params?.turnTrigger?.startsWith('automation_'))return false;
+      const pending=turns.filter(t=>t.status==='inProgress');
+      if(pending.some(t=>t.turnId!=null||!ownMessageId||t.params?.clientUserMessageId!==ownMessageId)||pending.length>1)return false;
+      // Before native dispatch its own optimistic turn is present. Other work
+      // must never be steered, queued behind, or mistaken for that turn.
+      if(execution?.hasMisalignmentPolicyViolation||execution?.activeTurnId!=null||execution?.inProgress&&pending.length!==1)return false;
+      return eligible();
+    }finally{for(const value of values.reverse())dispose(value);}
+  }
+  async function snapshot(target,hydrate=false) {
+    // Hydration is a native data operation, never a route/focus/composer change.
+    if(target.hostId!==hostId||!isCurrent())throw Error('background-host-unavailable');
+    if(hydrate){
+      if(!await client.ensureConversationFirstPage(target.threadId))throw Error('background-history-unavailable');
+      await client.ensureConversationHistoryLoaded(target.threadId,[],{force:true});
+    }
+    const values=[];
+    try{
+      const meta=await client.getCachedConversationMetadata(target.threadId);values.push(meta);
+      const follow=await client.getFollowUpContext(target.threadId);values.push(follow);
+      const history=await client.getLoadedConversationHistory(target.threadId);values.push(history);
+      const permissions=await client.getCurrentPermissions(target.threadId);values.push(permissions);
+      const sandbox=await client.getTurnSandboxPolicy(target.threadId,target.latestTurnId);values.push(sandbox);
+      const principal=identity?.();
+      if(!principal||principal[0]==null||principal[1]==null||!history?.turns||!follow||!meta||!isCurrent())throw Error('review-context-unavailable');
+      // Own native optimistic turn appears during preparation; only completed
+      // source history belongs in the review identity. validate() checks work.
+      const turns=history.turns.filter(t=>t.turnId!=null);
+      const latest=turns.at(-1);
+      if(latest?.turnId!==target.latestTurnId||latest.status!=='completed')throw Error('source-changed');
+      const pickInput=t=>t.params?.input??t.items?.filter(i=>i.type==='userMessage').flatMap(i=>i.content??[])??[];
+      return JSON.parse(JSON.stringify({principal,meta:{owner:meta.streamRole?.role,ephemeral:meta.ephemeral,sideConversation:meta.sideConversation},follow,permissions,sandbox,history:{title:history.title,isComplete:history.isComplete,turns},sourceInput:pickInput(latest)}));
+    }finally{for(const value of values.reverse())dispose(value);}
+  }
+  async function review(target,text) {
+    const policy=globalThis.__codexPlusSuggestionReviewPolicy;
+    if(!policy||typeof client.sendRequest!=='function')throw Error('review-unavailable');
+    const prompt=policy.prompt(text);
+    // The reviewed upstream thread/sample protocol accepts at most 4,000 bytes.
+    if(new TextEncoder().encode(prompt).length>4000)throw Error('review-prompt-too-long');
+    const response=await client.sendRequest('thread/sample',{threadId:target.threadId,expectedTurnId:target.latestTurnId,allowInProgressTurn:false,prompt,disableMcp:true,threadSource:'composer_predictions',turnTrigger:'composer_predictions'});
+    try{return policy.parse(response,target.latestTurnId);}finally{dispose(response);}
+  }
+  return {hostId,client,probe,keys,validate,validateReadOnly:target=>validate(target,undefined,true),snapshot,review,send:(target,text,messageId,assertCurrent)=>client.startTurnWithOutcome(target.threadId,{request:{threadId:target.threadId,input:[{type:'text',text,text_elements:[]}],clientUserMessageId:messageId},context:{inheritThreadSettings:true,assertRequestCurrent:assertCurrent}})};
+}
+
+export function createBackgroundSuggestionBridge(binding,environment={}) {
+  const now=environment.now??Date.now,contexts=new Map(),candidates=new Map(),guards=new Map(),sensitiveThreads=new Set();
+  const policy=environment.reviewPolicy??globalThis.__codexPlusSuggestionReviewPolicy;
+  // Human reviews must not inherit the 60-second immediate-dispatch lifetime.
+  const reviewLifetimeMs=15*60*1000;
+  const counts={captured:0,reviewing:0,reviewed:0,blocked:0,expired:0};
+  let settings=null,expires=0,inputRevision=0,lastReason='waiting-for-new-suggestion';
+  const changed=event=>{if(event.isTrusted)inputRevision++;};
+  const doc=environment.document??globalThis.document;
+  for(const type of ['beforeinput','pointerdown','compositionstart','keydown'])doc?.addEventListener(type,changed,true);
+  const live=()=>settings?.enabled===true&&now()<expires;
+  const keyFor=t=>JSON.stringify([t.hostId,t.threadId,t.latestTurnId]);
+  const threadKey=t=>JSON.stringify([t.hostId,t.threadId]);
+  const current=c=>live()&&candidates.get(c.key)===c&&c.current()&&c.context===contexts.get(c.target.hostId)&&settings.connection===c.settings.connection&&settings.revision===c.settings.revision;
+  async function fingerprint(c,snapshot){
+    const bytes=new TextEncoder().encode(JSON.stringify({version:policy?.version,target:c.target,text:c.prediction.text,snapshot}));
+    const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
+    return [...new Uint8Array(digest)].map(n=>n.toString(16).padStart(2,'0')).join('');
+  }
+  function configure(next){
+    if(settings?.connection===next.connection&&next.revision<settings.revision)return;
+    if(!settings||settings.connection!==next.connection||settings.revision!==next.revision||settings.enabled!==next.enabled){candidates.clear();for(const resolve of guards.values())resolve(false);guards.clear();}
+    settings={...next};expires=now()+5000;
+  }
+  function register(context){contexts.set(context.hostId,context);}
+  function prune(){
+    for(const [key,c]of candidates){
+      if(now()>c.deadline||!c.current()||c.context!==contexts.get(c.target.hostId)){candidates.delete(key);counts.expired++;}
+    }
+  }
+  async function assess(c){
+    counts.reviewing++;lastReason='reviewing';
+    try{
+      if(!policy)throw Error('review-unavailable');
+      const snapshot=await c.context.snapshot(c.target,true);
+      if(!current(c))return;
+      c.title=snapshot.history?.title??'未命名任务';
+      c.sourceInput=JSON.stringify(snapshot.sourceInput??[]);
+      c.snapshotId=await fingerprint(c,snapshot);
+      c.token=globalThis.crypto.randomUUID();
+      c.deadline=now()+reviewLifetimeMs;
+      if(snapshot.history?.isComplete!==true||snapshot.permissions==null||snapshot.sandbox==null)throw Error('review-context-incomplete');
+      if(!await c.context.validate(c.target))throw Error('draft-or-state-changed');
+      const hardReason=c.hardReason;
+      const result=await c.context.review(c.target,c.prediction.text);
+      if(!current(c))return;
+      if(result.decision==='sensitive'||hardReason)sensitiveThreads.add(threadKey(c.target));
+      const latest=await c.context.snapshot(c.target);
+      if(!current(c)||await fingerprint(c,latest)!==c.snapshotId)throw Error('review-source-changed');
+      c.assessment=result;
+      c.canApprove=result.contextSufficient===true&&result.decision!=='uncertain';
+      const risky=hardReason||sensitiveThreads.has(threadKey(c.target))||result.decision!=='low-risk';
+      c.phase=!risky&&result.contextSufficient?'allowed':'needs-review';
+      c.reason=hardReason??(sensitiveThreads.has(threadKey(c.target))?'此任务涉及敏感事项，每次续跑均需审查。':result.contextSufficient?'本次行动需人工审查。':'行动范围或上下文不明确，请回原任务核实。');
+      counts.reviewed++;if(c.phase==='needs-review')counts.blocked++;
+      c.deadline=now()+(c.phase==='allowed'?60000:reviewLifetimeMs);
+      lastReason=c.phase==='allowed'?'review-allowed':'needs-review';
+    }catch(error){
+      if(current(c)){
+        c.phase='needs-review';c.canApprove=false;c.reason='审查或上下文暂不可用，未自动发送；请重新审查或回原任务处理。';
+        c.token??=globalThis.crypto.randomUUID();c.deadline=now()+reviewLifetimeMs;
+        c.failure=['review-context-incomplete','draft-or-state-changed','review-source-changed'].includes(error.message)?error.message:'review-unavailable';
+        lastReason=c.failure;counts.blocked++;
+      }
+    }finally{counts.reviewing--;}
+  }
+  function capture(client,target,prediction,currentTarget){
+    const context=contexts.get(target.hostId);
+    if(settings?.acceptanceThread&&target.threadId!==settings.acceptanceThread)return;
+    if(!live()||context?.client!==client||target.generationTrigger!=='live'||prediction.sourceTurnId!==target.latestTurnId||typeof prediction.text!=='string'||!prediction.text.trim()||!currentTarget())return;
+    const key=keyFor(target);
+    // Preserve already-observed risk even when hydration/inference fails or
+    // when this candidate is superseded before its asynchronous review ends.
+    const hardReason=policy?.reasonFor(prediction.text);
+    if(hardReason)sensitiveThreads.add(threadKey(target));
+    // A duplicate cache write cannot reset a pending or consumed approval.
+    const old=candidates.get(key);if(old?.prediction.text===prediction.text&&old.context===context)return;
+    for(const [k,c]of candidates)if(threadKey(c.target)===threadKey(target))candidates.delete(k);
+    const c={key,target:{...target},prediction:{text:prediction.text},hardReason,current:currentTarget,context,born:now(),deadline:now()+reviewLifetimeMs,settings:{...settings},phase:'reviewing'};
+    candidates.set(key,c);counts.captured++;void assess(c);
+  }
   function inspect(){
-    const base={supported:globalThis.__codexPlusSuggestionHost===1,route:route(),revision,focused:document.hasFocus()&&document.visibilityState==='visible'};
-    if(!base.supported)return {...base,reason:'page-reload-required'};
-    if(pending){const {editor,meta,root}=pending;return {...base,pending:true,key:pending.key,valid:pending.revision===revision&&pending.route===base.route&&eligible(editor,root)&&editorText(editor)===meta.expected&&!editor.querySelector('[data-cumberbatch]'),ready:!!sendButton(root),empty:editorText(editor)==='',working:[...root.querySelectorAll('button[aria-label="Stop"],button[aria-label="停止"]')].some(visible)};}
-    const widgets=[...document.querySelectorAll('[data-cumberbatch][data-codex-plus-suggestion]')].filter(visible);
-    const candidates=[];
-    for(const widget of widgets){try{
-      const meta=JSON.parse(widget.dataset.codexPlusSuggestion),editor=widget.closest('[data-codex-composer="true"]');
-      if(meta.protocol!==1||typeof meta.expected!=='string'||!meta.expected.trim()||typeof meta.hostId!=='string'||typeof meta.threadId!=='string'||typeof meta.sourceTurnId!=='string'||!editor)continue;
-      const ctx=context(editor,meta);if(!ctx)continue;
-      const key=JSON.stringify([meta.hostId,meta.threadId,meta.sourceTurnId]);
-      // A prediction is a decoration, so its visible text is outside the doc.
-      const empty=editor.pmViewDesc?.node?editor.pmViewDesc.node.textContent==='':editor.cloneNode(true);
-      let blank=empty===true;if(empty instanceof Node){empty.querySelectorAll('[data-cumberbatch]').forEach(e=>e.remove());blank=empty.textContent.trim()==='';}
-      candidates.push({key,revision,route:ctx.route,eligible:blank&&eligible(editor,ctx.root),meta,editor,root:ctx.root,widget});
-    }catch{}}
-    if(candidates.length!==1)return {...base,reason:candidates.length?'ambiguous-composer':'no-suggestion'};
-    const c=candidates[0];return {...base,key:c.key,eligible:c.eligible,reason:c.eligible?'ready':'inactive-or-user-content'};
+    prune();
+    return {supported:true,protocol:5,registered:contexts.size,inputRevision,review:{...counts,pending:[...candidates.values()].filter(c=>c.phase==='needs-review').length,reason:lastReason},candidates:live()?[...candidates.values()].filter(c=>['allowed','approved'].includes(c.phase)).map(c=>({key:c.key,target:c.target,reviewId:c.snapshotId,token:c.token})):[]};
   }
-  function accept(expected){
-    const snapshot=inspect();if(!snapshot.eligible||snapshot.key!==expected.key||snapshot.route!==expected.route||snapshot.revision!==expected.revision)return {ok:false,reason:'changed-before-accept'};
-    const widget=[...document.querySelectorAll('[data-codex-plus-suggestion]')].find(e=>{try{const m=JSON.parse(e.dataset.codexPlusSuggestion);return JSON.stringify([m.hostId,m.threadId,m.sourceTurnId])===expected.key&&visible(e);}catch{return false;}});
-    if(!widget)return {ok:false,reason:'suggestion-gone'};
-    const editor=widget.closest('[data-codex-composer="true"]'),meta=JSON.parse(widget.dataset.codexPlusSuggestion),ctx=context(editor,meta);
-    editor.focus({preventScroll:true});
-    pending={editor,meta,root:ctx.root,key:expected.key,route:ctx.route,revision};
-    editor.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',code:'Tab',keyCode:9,which:9,bubbles:true,cancelable:true}));
-    editor.dispatchEvent(new KeyboardEvent('keyup',{key:'Tab',code:'Tab',keyCode:9,which:9,bubbles:true}));
-    return {ok:true,revision};
+  // Only this deliberate in-memory UI channel includes prompt content. inspect,
+  // state.json, durable attempts and diagnostic status never include it.
+  function reviews(){
+    prune();return live()?[...candidates.values()].filter(c=>c.phase==='needs-review').map(c=>({id:c.token,snapshotId:c.snapshotId??'',title:c.title??'待核实任务',text:c.prediction.text,sourceInput:c.sourceInput??'',reason:c.reason,action:c.assessment?.action??'行动尚未核实',target:c.assessment?.target??'对象尚未核实',scope:c.assessment?.scope??'范围尚未核实',canApprove:c.canApprove===true,expiresAt:c.deadline})):[];
   }
-  function submit(key){const snapshot=inspect();if(!pending||pending.key!==key||!snapshot.valid||!snapshot.ready)return {ok:false,reason:'changed-before-send'};const button=sendButton(pending.root);button.click();return {ok:true};}
-  function cancel(){pending=null;}
-  function dispose(){cancel();for(const event of events)document.removeEventListener(event,changed,true);window.removeEventListener('blur',blurred);delete globalThis.__codexPlusSuggestions;}
-  globalThis.__codexPlusSuggestions={protocol:1,inspect,accept,submit,cancel,dispose};
+  async function decide({id,snapshotId,action}){
+    prune();const c=[...candidates.values()].find(c=>c.token===id&&c.phase==='needs-review');
+    if(!c||!current(c)||(c.snapshotId??'')!==snapshotId)return false;
+    if(action==='reject'){candidates.delete(c.key);lastReason='review-rejected';return true;}
+    if(action==='retry'){c.phase='reviewing';c.token=null;c.canApprove=false;void assess(c);return true;}
+    if(action!=='approve'||!c.canApprove)return false;
+    // Remove from the approvable state before awaiting, so double clicks cannot
+    // approve twice or race a newer decision.
+    c.phase='revalidating';
+    try{
+      if(!await c.context.validate(c.target)||!current(c)||await fingerprint(c,await c.context.snapshot(c.target))!==c.snapshotId)throw Error('approval-stale');
+      if(!current(c)||now()>c.deadline)throw Error('approval-expired');
+      c.phase='approved';lastReason='review-approved';return true;
+    }catch{candidates.delete(c.key);lastReason='approval-stale';return false;}
+  }
+  function probe(target){try{return {ok:contexts.get(target.hostId)?.probe(target)===true,inputRevision};}catch{return {ok:false,inputRevision};}}
+  function requestGuard(c,operation){
+    if(!current(c))return Promise.resolve(false);
+    const requestId=globalThis.crypto.randomUUID();
+    return new Promise(resolve=>{
+      const timer=setTimeout(()=>{guards.delete(requestId);resolve(false);},2000);
+      guards.set(requestId,ok=>{clearTimeout(timer);resolve(ok===true);});
+      try{globalThis[binding](JSON.stringify({protocol:5,requestId,operation,key:c.key,reviewId:c.snapshotId,token:c.token,connection:settings.connection,revision:settings.revision}));}catch{clearTimeout(timer);guards.delete(requestId);resolve(false);}
+    });
+  }
+  function resolveGuard(requestId,ok){const resolve=guards.get(requestId);guards.delete(requestId);resolve?.(ok);}
+  // Read-only native integration probe used before enabling the installed
+  // candidate. It cannot capture, approve, claim or send a follow-up.
+  async function preview(target,text){
+    const context=contexts.get(target.hostId);
+    if(!context||!policy)throw Error('review-unavailable');
+    const before=await context.snapshot(target,true);
+    if(!await context.validateReadOnly(target))throw Error('source-not-idle');
+    const assessment=await context.review(target,text);
+    const after=await context.snapshot(target);
+    if(JSON.stringify(before)!==JSON.stringify(after))throw Error('sample-source-changed');
+    return {assessment,sourceUnchanged:true,historyComplete:after.history?.isComplete===true};
+  }
+  async function submit({key,operation,reviewId,token}){
+    const c=candidates.get(key);
+    if(!c||!['allowed','approved'].includes(c.phase)||c.snapshotId!==reviewId||c.token!==token||!current(c)||now()>c.deadline)return {outcome:'rejected',reason:'review-not-current'};
+    c.phase='claimed';c.operation=operation;
+    const messageId=globalThis.crypto.randomUUID();
+    const valid=()=>current(c)&&c.phase==='claimed'&&c.operation===operation&&now()<c.deadline&&probe(c.target).ok;
+    const assertCurrent=async()=>{
+      if(!valid()||!await c.context.validate(c.target,messageId)||!valid()||await fingerprint(c,await c.context.snapshot(c.target))!==c.snapshotId||!valid()||!await requestGuard(c,operation)||!valid())throw Error('Codex Plus suggestion admission cancelled');
+    };
+    try{
+      await assertCurrent();
+      const outcome=await c.context.send(c.target,c.prediction.text,messageId,assertCurrent);
+      return {outcome:['accepted','rejected','unconfirmed'].includes(outcome)?outcome:'unconfirmed'};
+    }catch{return {outcome:'unconfirmed'};}
+    finally{if(candidates.get(key)===c)candidates.delete(key);}
+  }
+  function dispose(){configure({connection:settings?.connection,revision:(settings?.revision??0)+1,enabled:false});for(const type of ['beforeinput','pointerdown','compositionstart','keydown'])doc?.removeEventListener(type,changed,true);}
+  return {protocol:5,configure,register,capture,inspect,probe,submit,resolveGuard,decide,reviews,preview,dispose};
 }
 
 export class SuggestionCoordinator {
-  constructor({attempts=[],persist}){this.attempts=new Set(attempts);this.persist=persist;this.enabled=false;this.revision=0;this.baselines=new Set();this.pending=null;this.cancellations=[];this.counts={attempted:0,accepted:0,submitted:0,unknown:0};this.reason='disabled';}
-  configure(enabled){if(this.enabled===enabled)return;this.enabled=enabled;this.revision++;this.baselines.clear();if(this.pending)this.cancellations.push(this.pending.id);this.pending=null;this.reason=enabled?'waiting-for-new-suggestion':'disabled';}
-  async tick(pages,act){
+  constructor({attempts=[],persist}){this.attempts=new Set(attempts);this.persist=persist;this.enabled=false;this.revision=0;this.pending=null;this.counts={attempted:0,accepted:0,submitted:0,unknown:0};this.reason='disabled';}
+  configure(enabled){if(this.enabled===enabled)return;this.enabled=enabled;this.revision++;this.reason=enabled?'waiting-for-new-suggestion':'disabled';}
+  async tick(pages,{probe,submit}){
+    if(!this.enabled||this.pending)return;
     const revision=this.revision;
-    for(const id of this.cancellations.splice(0))await act(id,'cancel').catch(()=>{});
-    if(!this.enabled)return;
-    if(this.pending){
-      const p=this.pending,page=pages.find(p=>p.id===this.pending.id),s=page?.snapshot;
-      // Native submission can move focus and clear/recreate the editor. Once
-      // sent, observe the result without scheduling another action.
-      if(p.sent){if(s&&s.key===p.key&&s.route===p.route&&(s.empty||s.working)){this.counts.submitted++;this.reason='submitted';}else{this.counts.unknown++;this.reason='submission-unconfirmed';}this.pending=null;await act(p.id,'cancel');return;}
-      if(!s||s.key!==p.key||s.route!==p.route||!s.focused||s.revision!==p.inputRevision||!s.valid){this.pending=null;await act(p.id,'cancel');this.reason='cancelled';return;}
-      if(!s.ready){this.pending=null;await act(p.id,'cancel');this.reason='send-unavailable';return;}
+    for(const page of pages)for(const candidate of page.snapshot.candidates??[]){
+      if(this.attempts.has(candidate.key))continue;
+      if(!await probe(candidate.target)||!this.enabled||revision!==this.revision){this.reason='draft-or-state-changed';continue;}
+      this.attempts.add(candidate.key);
+      try{await this.persist([...this.attempts]);}catch{this.configure(false);this.reason='attempt-storage-unavailable';return;}
       if(!this.enabled||revision!==this.revision)return;
-      // Clear before awaiting so a failed command is never retried.
-      this.pending=null;
-      let result;try{result=await act(p.id,'submit',p.key);}catch{this.counts.unknown++;this.reason='submission-unconfirmed';return;}
-      if(result?.ok&&this.enabled&&revision===this.revision)this.pending={...p,sent:true};
-      else this.reason=result?.reason??'cancelled';
-      return;
-    }
-    for(const page of pages){const s=page.snapshot;
-      if(!this.baselines.has(page.id)){this.baselines.add(page.id);if(s.key)this.attempts.add(s.key);continue;}
-      if(!s.supported||!s.eligible||!s.key||this.attempts.has(s.key))continue;
-      this.attempts.add(s.key);
-      try{await this.persist([...this.attempts]);}catch{this.enabled=false;this.revision++;this.reason='attempt-storage-unavailable';return;}
-      if(!this.enabled||this.revision!==revision)return;
-      this.counts.attempted++;
-      let result;try{result=await act(page.id,'accept',{key:s.key,route:s.route,revision:s.revision});}catch{this.reason='accept-unconfirmed';return;}
-      if(result?.ok&&this.enabled&&revision===this.revision){this.counts.accepted++;this.pending={id:page.id,key:s.key,route:s.route,inputRevision:result.revision??s.revision,sent:false};this.reason='accepted';}else this.reason=result?.reason??'cancelled';
+      const operation=globalThis.crypto.randomUUID();this.pending={id:page.id,key:candidate.key,target:candidate.target,reviewId:candidate.reviewId,token:candidate.token,operation,revision};this.counts.attempted++;
+      try{const result=await submit(page.id,{key:candidate.key,operation,reviewId:candidate.reviewId,token:candidate.token});if(result?.outcome==='accepted'){this.counts.accepted++;this.counts.submitted++;this.reason='submitted-in-background';}else if(result?.outcome==='rejected')this.reason='native-rejected';else{this.counts.unknown++;this.reason='submission-unconfirmed';}}catch{this.counts.unknown++;this.reason='submission-unconfirmed';}finally{this.pending=null;}
       return;
     }
   }

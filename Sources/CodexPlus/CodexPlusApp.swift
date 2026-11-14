@@ -25,8 +25,12 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.5.2\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.7.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
             return
+        }
+        guard SuggestionAcceptance.isValidOrAbsent else {
+            fputs("Invalid acceptance thread; refusing to start without a valid scope.\n", stderr)
+            exit(2)
         }
         let currentPID = ProcessInfo.processInfo.processIdentifier
         if NSRunningApplication.runningApplications(withBundleIdentifier: CodexWorkspacePreference.domain)
@@ -89,7 +93,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.5.2",
+                return ["ok": true, "app": "Codex Plus", "version": "0.7.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
@@ -152,9 +156,9 @@ final class SettingsModel: ObservableObject {
             onEnabledChange?()
         }
     }
-    @Published var autoSendSuggestions = UserDefaults.standard.bool(forKey: "autoSendSuggestions") {
+    @Published var autoSendSuggestions = !SuggestionAcceptance.isRequested && UserDefaults.standard.bool(forKey: "autoSendSuggestions") {
         didSet {
-            UserDefaults.standard.set(autoSendSuggestions, forKey: "autoSendSuggestions")
+            if !SuggestionAcceptance.isRequested { UserDefaults.standard.set(autoSendSuggestions, forKey: "autoSendSuggestions") }
             onSuggestionChange?()
         }
     }
@@ -250,10 +254,19 @@ struct SettingsView: View {
             Text("页面增强").font(.headline)
             Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
             Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
+            Button("重新接入页面增强") { launcher.reconnectEnhancements() }
+                .disabled(model.autoSendSuggestions)
+            Text("更新后可在此重新接入；先关闭自动发送。有未提交输入、附件或对话框时不执行。")
+                .font(.caption).foregroundColor(.secondary)
+            if let result = launcher.reconnectResult { Text(result).font(.callout).foregroundColor(.secondary) }
             Toggle("自动发送建议提示词", isOn: $model.autoSendSuggestions)
-            Text("当前聊天出现新的建议后自动采纳并发送，可能连续开启后续轮次。关闭可随时停止。")
+            Text("无需打开任务。普通建议经审查后在后台发送；敏感或无法确认范围的建议不自动发送。关闭后停止尚未提交的动作。")
                 .font(.callout).foregroundColor(.secondary)
             Text("建议提示词：\(launcher.suggestionSummary)").font(.callout).foregroundColor(.secondary)
+            if SuggestionAcceptance.threadID != nil {
+                Text("验收模式：仅处理指定测试任务；自动发送开关不保存到日常偏好。")
+                    .font(.caption).foregroundColor(.secondary)
+            }
             Divider()
             Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
                 .foregroundColor(.secondary)

@@ -52,7 +52,7 @@ final class CodexWorkspaceAXPolicyTests: XCTestCase {
             1: CodexWorkspaceScanNode(role: "AXPopUpButton", label: "New tab", children: [])
         ]
         let result = CodexWorkspaceTreeSearch.find(root: 0, read: { header[$0] },
-                                                  matching: CodexWorkspaceHeaderSearch.isNewTabControl)
+                                                  matching: CodexWorkspaceHeaderSearch.isExpandControl)
         guard case .found(1) = result else { return XCTFail("Command-N exposes New tab as a popup button") }
 
         let unrelated = [
@@ -61,8 +61,31 @@ final class CodexWorkspaceAXPolicyTests: XCTestCase {
             2: CodexWorkspaceScanNode(role: "AXPopUpButton", label: "Chat actions", children: [])
         ]
         guard case .absent = CodexWorkspaceTreeSearch.find(root: 0, read: { unrelated[$0] },
-            matching: CodexWorkspaceHeaderSearch.isNewTabControl) else {
+            matching: CodexWorkspaceHeaderSearch.isExpandControl) else {
             return XCTFail("Menu items and unrelated popups must not identify the workspace control")
+        }
+    }
+
+    func testUpdatedHostCollapsedWorkspaceToggleIsRecognized() {
+        let header = [
+            0: CodexWorkspaceScanNode(role: "AXGroup", label: "", children: [1, 2]),
+            1: CodexWorkspaceScanNode(role: "AXToolbar", label: "Chat toolbar", children: []),
+            2: CodexWorkspaceScanNode(role: "AXCheckBox", label: "Show tabs", children: [])
+        ]
+        let state = CodexWorkspaceHeaderSearch.nearest(startingAt: 0, parent: { _ in nil }, inspect: { root in
+            switch CodexWorkspaceTreeSearch.find(root: root, read: { header[$0] },
+                                                matching: CodexWorkspaceHeaderSearch.isExpandControl) {
+            case .found(let control): return .closed(control)
+            case .absent: return .absent
+            case .unknown: return .unknown
+            }
+        })
+        guard case .closed(2) = state else {
+            return XCTFail("The updated host's Show tabs toggle must identify a collapsed workspace")
+        }
+        for (role, label) in [("AXCheckBox", "Hide tabs"), ("AXMenuItem", "Show tabs"),
+                              ("AXStaticText", "Show tabs"), ("AXCheckBox", "New tab")] {
+            XCTAssertFalse(CodexWorkspaceHeaderSearch.isExpandControl(role: role, label: label))
         }
     }
 

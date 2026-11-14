@@ -1,4 +1,21 @@
 export const featureProtocol=1;
+export const reviewedFeatureResource=Object.freeze({
+  path:'webview/assets/async/720223.d11ecd5c98.js',
+  sha256:'a3fc97c5c07d47cc198605bb2a7f8535e3c31a252aa175249414a9d64a4fa671'
+});
+
+// Visible cleanup must start before unrelated requests can consume shutdown's
+// existing response budget. A stale main-frame flag must not leave our UI behind.
+export async function removeFeatureEntries(sessions, command) {
+  await Promise.allSettled([...sessions].map(async([id,session])=>{
+    const removeScript=session.script
+      ? command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{})
+      : Promise.resolve();
+    const removeUI=command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});
+    await Promise.allSettled([removeScript,removeUI]);
+    await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});
+  }));
+}
 export const featureBinding='__codexPlusNative';
 
 export function validateNativeAction(message) {
@@ -26,7 +43,7 @@ export function installFeatureEntry(options, createGame, openGame) {
     try{globalThis[options.binding](JSON.stringify({version:1,action:'open-settings',requestId:id}));}catch{complete(id,false);}
   }
   const ring='<circle cx="10" cy="10" r="7.25"/>';
-  const icons={settings:`${ring}<path d="M10 6.75v6.5M6.75 10h6.5"/>`,snake:`${ring}<path d="M7 6.5h4.5c2.3 0 2.3 3.5 0 3.5h-3c-2.3 0-2.3 3.5 0 3.5H13"/>`};
+  const icons={settings:`<circle cx="10" cy="10" r="9.25"/><path d="M10 6.75v6.5M6.75 10h6.5"/>`,snake:`${ring}<path d="M7 6.5h4.5c2.3 0 2.3 3.5 0 3.5h-3c-2.3 0-2.3 3.5 0 3.5H13"/>`};
   for(const [id,label,action] of [['settings','Codex Plus',settings],['snake','贪吃蛇',()=>{if(game){game.focus();return;}game=openGame(createGame,()=>{game=null;});}]]){
     const b=document.createElement('button');b.type='button';b.dataset.codexPlusEntry=id;b.title=label;b.setAttribute('aria-label',label);
     // Icons are fixed product markup, never host or message content.
@@ -52,7 +69,16 @@ export function installFeatureEntry(options, createGame, openGame) {
     if(!projects?.firstElementChild||!projects.querySelector('svg')){state.phase='projects-unavailable';return;}
     if(footer!==candidate||toolGroup!==projects.parentElement){footer=candidate;toolGroup=projects.parentElement;observe();}
     const first=buttons.get('settings'),snake=buttons.get('snake');
-    applyPresentation(first,projects);applyPresentation(snake,projects);
+    const avatar=footer.querySelector('button[aria-haspopup="menu"] img');
+    const footerTemplate=avatar?.closest('button')??footer.querySelector('button[aria-haspopup="menu"]');
+    applyPresentation(first,footerTemplate);applyPresentation(snake,projects);
+    // Footer avatars/usage circles have a larger visual footprint than the
+    // navigation glyphs. Opt out of the host's automatic 20px SVG sizing.
+    const diameter=avatar?.getBoundingClientRect().width||24;
+    const svg=first.querySelector('svg');svg.setAttribute('data-no-autosize','true');
+    svg.setAttribute('width',String(diameter));svg.setAttribute('height',String(diameter));
+    svg.style.width=`${diameter}px`;svg.style.height=`${diameter}px`;
+    svg.setAttribute('stroke-width','1.5');
     if(footer.firstElementChild!==first)footer.prepend(first);
     if(projects.nextElementSibling!==snake)projects.after(snake);
     if(!style.isConnected)(document.head??document.documentElement).append(style);

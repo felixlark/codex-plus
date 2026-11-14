@@ -270,7 +270,7 @@ public final class CodexWorkspaceObserver {
     private func inspect() {
         guard CodexWorkspacePreference.enabled, AXIsProcessTrusted(), let sample = sampleForInspection() else { return }
         guard tracker.observe(window: AXIdentity(sample.window), chat: AXIdentity(sample.toolbar), workspaceOpen: sample.open),
-              let button = sample.newTab else { return }
+              let button = sample.expandControl else { return }
         let decision = CodexWorkspaceDisplayPolicy.decide(selection: CodexWorkspaceDisplayPreference.load(),
             windowFrame: sample.frame, displays: CodexWorkspaceDisplayCatalog.capture())
         guard decision.eligible else { return }
@@ -278,7 +278,7 @@ public final class CodexWorkspaceObserver {
         // chat/window, no activation, no retries after an unknown action result.
         guard let current = sampleForInspection(), CFEqual(current.window, sample.window),
               CFEqual(current.toolbar, sample.toolbar), !current.open,
-              let currentButton = current.newTab, CFEqual(currentButton, button),
+              let currentButton = current.expandControl, CFEqual(currentButton, button),
               attribute(currentButton, kAXEnabledAttribute) as? Bool == true,
               CodexWorkspacePreference.enabled, AXIsProcessTrusted() else { return }
         let selection = CodexWorkspaceDisplayPreference.load()
@@ -346,7 +346,7 @@ public final class CodexWorkspaceObserver {
         let window: AXUIElement
         let toolbar: AXUIElement
         let open: Bool
-        let newTab: AXUIElement?
+        let expandControl: AXUIElement?
         let frame: CGRect?
     }
 
@@ -432,7 +432,7 @@ public final class CodexWorkspaceObserver {
             case .found: return .open
             case .unknown: return .unknown
             case .absent:
-                switch find(in: group, matching: CodexWorkspaceHeaderSearch.isNewTabControl) {
+                switch find(in: group, matching: CodexWorkspaceHeaderSearch.isExpandControl) {
                 case .found(let button): return .closed(AXIdentity(button))
                 case .absent: return .absent
                 case .unknown: return .unknown
@@ -440,8 +440,8 @@ public final class CodexWorkspaceObserver {
             }
         })
         switch state {
-        case .open: return .chat(Sample(window: window, toolbar: toolbar, open: true, newTab: nil, frame: windowFrame(window)))
-        case .closed(let button): return .chat(Sample(window: window, toolbar: toolbar, open: false, newTab: button.element, frame: windowFrame(window)))
+        case .open: return .chat(Sample(window: window, toolbar: toolbar, open: true, expandControl: nil, frame: windowFrame(window)))
+        case .closed(let button): return .chat(Sample(window: window, toolbar: toolbar, open: false, expandControl: button.element, frame: windowFrame(window)))
         case .absent, .unknown: return .unknown
         }
     }
