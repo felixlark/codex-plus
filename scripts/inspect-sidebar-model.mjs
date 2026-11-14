@@ -310,10 +310,13 @@ export async function openAsar(app) {
   collect(header);
   return {
     entries,
-    async read(entry) {
+    async readBytes(entry) {
       const body = Buffer.alloc(entry.size);
       await file.read(body, 0, entry.size, 8 + headerSize + Number(entry.offset));
-      return body.toString('utf8');
+      return body;
+    },
+    async read(entry) {
+      return (await this.readBytes(entry)).toString('utf8');
     },
     close: () => file.close(),
   };

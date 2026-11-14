@@ -328,3 +328,20 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [ ] X Chat输入框焦点连续实测：当前等待真实输入框就位，未激活XChat、未输入或发送任何标记。
 
 证据：`~/Library/Logs/codex-plus/agent-display-20261115/` 中 installed42.json、settings42-open.json、settings42-close-verified/receipt.json、settings42-focus-summary.json、text42-open.json、text42-edit/receipt.json、text42-screen/get_app_state-3.png、text42-restored.json、text42-close/receipt.json、text42-focus-summary.json、protection42.json、swift41.log、pipe41-tests.log、preflight41-live.txt。build42是当前模块的真实安装交互证据；后续集成候选需重新绑定身份/摘要，复用未变模块证据。
+
+## Codex 原前端移动原型（2026-11-15）
+
+原案 [Smart Shadow #578](https://github.com/felixlark/smart-shadow/issues/578)，实现 [PR18](https://github.com/felixlark/codex-plus/pull/18)。Mac 正式安装 Plus 0.10.0 build46，iPhone 18 Pro 模拟器 iOS27.0 上正式安装 Codex Mobile 0.1.0 build3；原签名宿主 26.1111.21308/build27194 保持运行。冻结 build46 源 39ba223；集成 main 的 5a66271 与其 tree 完全相同。未改写原 UI。
+
+- [x] 原厂19,192个网页资源按 ASAR 摘要提取，760,911,186字节，仅在个人 Library 缓存和本机 App；build2 安装包逐文件复核零差异，build3复用相同资源。原 preload 兼容层在 WKWebView 页面启动前注入。
+- [x] 原生创建的独立窗口固定准确 target 后导航同一窗口到 `about:blank`，实测原 preload 可用、加载完成、无原页面 script、隔离标记成立，再注册唯一 app-host。真实专用窗口经 OCU 停放并最小化，两个原人工 Codex 窗口几何不变。
+- [x] 手机本地运行的原页面经指定 Tailscale IPv4/WSS 访问现役 Mac 后台，读到既有会话历史。没有第二执行器、私有数据库拷贝或屏幕串流。TLS pin、有效期、签名、serverAuth 和准确 IP SAN 保持校验，私钥留 Keychain。
+- [x] build45 的 A 测试由手机点击一次 Send，原后台完成001–080；真实录屏在 Stop 仍可用时出现尚未完整的行，随后继续增长。Mac 官方同会话读回80行、0工具调用。
+- [x] build45 的 B 测试由手机点击一次 Send，Mac 官方入口确认 inProgress 后，断开本任务 gateway 连接。手机显示断线并明确不重发；Mac继续完成120行。明确终止并重开 iOS App 后读到120；A/B各1条，原草稿恢复。
+- [x] build46/iOS build3 的 C 回归由手机点击一次 Send。实际 AX 快照在 Stop 活跃时显示001–004及不完整的下一行；Mac同会话8.832秒完成40行、0工具调用，A/B/C各1条。手机跳到回复底部040，原36字草稿已恢复。
+- [x] Node24本机89项检查全部通过，CI的Node为84项通过／5项宿主依赖检查跳过、Swift57项通过；涵盖 codec、准确 anchor、版本摘要和 paused target 启动顺序。build46 签名构建及安装验签通过，原厂签名未更改。46另经真实消息路径验证 Swift 临时对象跨异步发送的生命周期。
+- [x] build46 同一 controller/gateway 身份连续1805.02秒，4次 `proc_pid_rusage` physical footprint 定点采样：controller 776.91→908.27→107.23→111.18 MiB，gateway 4.77→55.09→20.30→15.88 MiB。发送、断开和重连后持续保持连接，本窗口内未见持续增长。原宿主不变、专用窗保持最小化、人工两窗几何不变；下次启动自动建窗已关闭。45曾达约1.09GB，低 RSS 来自压缩，不能记健康通过；46逐帧 autoreleasepool、队列 workItem pool 与 cancelled handler 释放修复对应持有链。
+
+本批只证明模拟器原会话读取、发送、流式和断线语义。模拟器沿 Mac 网络栈访问其 Tailscale 地址，未验证物理 iPhone 的跨节点 WireGuard 或漫游；原 UI 的其他宿主能力也未全量验收。每次原 Codex 更新须重新绑定准确版本和摘要。
+
+本机私有证据位于 `~/Library/Logs/codex-plus/mobile-port-design-20261114/`：`installed45-ios-assets.json`、`message45-readback.json`、`disconnect45-readback.json`、`message46-readback.json`、三个 message/disconnect ledger、`simulator45-send-stream.mp4`、`simulator45-real-disconnected.png`、`simulator45-recovered-restored.png`、`simulator46-send-stream.mp4`、`simulator46-final-restored.png` 和 `health46.jsonl`、`health46-summary.json` 和两张46流式录屏帧。聊天原文、资源和接入配置不入 Git。

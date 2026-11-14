@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CACHE="$HOME/Library/Caches/codex-plus/mobile"
+mkdir -p "$CACHE/bin" "$CACHE/swift-cache"
+swiftc -module-cache-path "$CACHE/swift-cache" "$ROOT/mobile/Shared/"*.swift "$ROOT/mobile/Gateway/"*.swift -o "$CACHE/bin/MobileGateway"
+codesign --force --options runtime --timestamp --identifier me.longbiaochen.codex-plus.mobile-gateway --sign "${CSC_NAME:-Developer ID Application: LONGBIAO CHEN (HJG65XBC25)}" "$CACHE/bin/MobileGateway"
+codesign --verify --strict "$CACHE/bin/MobileGateway"
+printf '%s\n' "$CACHE/bin/MobileGateway"

@@ -12,9 +12,11 @@ import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {allocateWindowNumbers} from './window-number.mjs';
 import {reviewedHumanRuntime,nativeWindowDefaults,preserveNativeBounds,preferredHumanNumbers,isHumanWindowURL} from './human-window.mjs';
 import {CDP} from './cdp.mjs';
+import {initializePageSession} from './page-session.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
+import {MobileAccess,mobileHostSupported} from './mobile-access.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
@@ -27,6 +29,7 @@ let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,atta
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
+let mobile, mobileSupported=false;
 const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
@@ -105,6 +108,7 @@ async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Pr
 }
 function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
 async function probeSuggestions(target){
+  if(mobile?.ownsThread(target.threadId))return false;
   const generation=suggestions.revision,initial=pageSet(),ids=[...sessions].filter(([,s])=>s.main).map(([id])=>id);
   if(!ids.length)return false;
   const probe=async()=>Promise.all(ids.map(async id=>{const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.probe(${JSON.stringify(target)})`,returnByValue:true});return r.result.value;}));
@@ -233,7 +237,7 @@ async function samplingSupported(archive){
   for await(const chunk of createReadStream(path.join(values.app,reviewedSamplingResource.binaryPath)))hash.update(chunk);
   return hash.digest('hex')===reviewedSamplingResource.binarySHA256;
 }
-function mainURL(value){return isHumanWindowURL(value);}
+function mainURL(value){return isHumanWindowURL(value)&&!mobile?.isAnchorURL(value);}
 async function refreshWindowNumbers(){
   const {targetInfos}=await cdp.call('Target.getTargets');
   const targets=targetInfos.filter(t=>t.type==='page'&&t.url.startsWith('app://-/index.html')&&mainURL(t.url)).map(t=>t.targetId);
@@ -260,6 +264,7 @@ async function main(){
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict','-R=anchor apple generic and identifier "com.openai.codex" and certificate leaf[subject.OU] = "2DC432GLL2"',values.app],{stdio:'pipe'});
   const archive=await openAsar(values.app);
   try{
+    mobileSupported=await mobileHostSupported(archive);
     const runtimeEntry=archive.entries.find(e=>e.path===reviewedHumanRuntime.path);humanNativeSupported=!!runtimeEntry&&createHash('sha256').update(await archive.read(runtimeEntry)).digest('hex')===reviewedHumanRuntime.sha256;state.nativeWindowDefaults={phase:humanNativeSupported?'waiting-for-human-windows':'unsupported-host'};
     const footer=archive.entries.find(e=>e.path===reviewedFeatureResource.path);
     featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')===reviewedFeatureResource.sha256;
@@ -296,15 +301,16 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
+  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
-    if(message.method==='Target.detachedFromTarget'){forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
+    if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
-    if(message.method==='Runtime.executionContextDestroyed'){sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
-    if(message.method==='Runtime.executionContextsCleared'){sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
-    if(message.method==='Runtime.bindingCalled'){void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
+    if(message.method==='Runtime.executionContextDestroyed'){const context=sessions.get(message.sessionId)?.contexts.get(message.params.executionContextId);if(context?.auxData?.isDefault)mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
+    if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
@@ -317,13 +323,11 @@ async function main(){
     sessions.set(sessionId,session);state.attached++;
     try{
       if(targetInfo.type==='page'&&!stopping){
-        const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
-        if(resources.length){work.push(command(sessionId,'Fetch.enable',{patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'}))}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
-        if(suggestionSupported)work.push(command(sessionId,'Runtime.addBinding',{name:backgroundGuardBinding}));
-        if(sidebarSupported)work.push(command(sessionId,'Runtime.addBinding',{name:sidebarBinding}));
-        if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
-        await command(sessionId,'Runtime.runIfWaitingForDebugger');
-        await Promise.all(work);
+        session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
+          patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
+          bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
+          source:featureSupported?featureSource:undefined,
+        });
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
         if(session.main){
           if(suggestionSupported)await updateSuggestionPolicy();
@@ -332,7 +336,7 @@ async function main(){
           if(runtime.result.value===8)state.projectOrder.phase='active';
           else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
         }
-        state.lastAttach={waitingForDebugger,fetchBeforeResume:true};state.phase='active';
+        state.lastAttach={waitingForDebugger,setupDispatchedBeforeResume:true,resumeBeforeSetupAck:true};state.phase='active';
       }
     }finally{
       await command(sessionId,'Runtime.runIfWaitingForDebugger').catch(()=>{});state.resumed++;await publish();
@@ -365,6 +369,7 @@ async function main(){
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping)return;inspecting=true;
     try{
+      if(mobile){await mobile.tick();const current=mobile.status();if(JSON.stringify(current)!==JSON.stringify(state.mobile)){state.mobile=current;await publish();}}
       await settleHumanCreations();
       await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
@@ -409,6 +414,7 @@ async function shutdown(){
   let timer;
   const cleanup=(async()=>{
     if(!cdp?.open)return;
+    await mobile?.close();
     // Revoke visible entry points first, even if a page is no longer marked main.
     const resumed=Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
     await removeFeatureEntries(sessions,command);

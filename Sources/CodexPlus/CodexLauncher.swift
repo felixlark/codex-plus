@@ -112,6 +112,7 @@ final class CodexLauncher: ObservableObject {
          "placementSource": "codex-plus-dual-window", "placementRule": "external-1-right-2",
          "humanWindows": humanWindows.status(), "nativeWindowDefaults": snapshot["nativeWindowDefaults"] ?? NSNull(),
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
+         "mobile": snapshot["mobile"] ?? NSNull(),
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
          "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],
