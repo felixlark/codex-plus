@@ -180,3 +180,20 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [ ] Longbiao 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/circular-identity-20261112/`，包括小尺寸浅深色预览、installed-navigation.png、installed-finder.png、installed-settings.png、installed-snake.png、installed-layout.json、installed-final-status.json、tests.log、build.log、signing.log。OCU 用于截图及页面/原生设置；无窗口的菜单栏由已授权原生工具操作。菜单图标的全屏像素截图未取得：OCU 无可选 key window，CUA 同样超时，原生截图工具缺 Screen Recording 权限；未新增权限，菜单可用性与安装包矢量资源分别取证，不将预览冒充实际菜单截图。
+
+## 0.7.0 后台语义审查与敏感建议待审（2026-11-14）
+
+正式安装 `/Applications/Codex Plus.app` 0.7.0 build17，bridge protocol5。Mach-O UUID `696EB81E-74F4-3C49-92EB-E4F8E96D2AA5`，严格验签通过；安装的 controller、发送桥、审查策略、LaunchServices helper 与源码逐文件摘要相同。宿主 PID1605 保持运行。
+
+- [x] 43 项 Node、39 项 Swift 通过，签名构建/安装及 diff 检查通过；方案、风险粘连、升级接入、验收范围及关闭路径独立审查的适用发现均已修复和复核。
+- [x] OCU 在真实安装版点击“重新接入页面增强”，四个原生主页面全部 protocol5、registered>0、legacyPages=0、pageReady=true，无需用户手动刷新或退出 Codex。
+- [x] 未选中的旧验收任务通过 readonly preview 原生加载完整历史并完成 thread/sample 语义审查，`sourceUnchanged=true`、`historyComplete=true`；保留已有36字符草稿，preview 不批准、不捕获、不认领、不发送。
+- [x] OCU 新建无副作用夹具“确认 CP17 夹具就绪”（`01a1d886-6519-7290-a6d0-54044b800712`），随后切回本开发聊天。Plus 以仅此 UUID 的 RAM-only 验收范围启用自动发送。原生新建议经审查后后台提交一次，官方 read_thread 确认续轮 `01a1d888-4a8d-7391-b376-cc9db550c62e` completed，回复 `CP17 后台续轮完成`；未切目标任务。
+- [x] 含邮件/微信的纯字符串夹具停在待审列表，OCU 读回具体行动、对象、范围和单次批准说明；提交数保持1。OCU 点击“批准本次”后，原生后台续轮 `01a1d889-220d-7d82-aac1-d36e4751c74a` completed，提交数变2。夹具禁止工具和实际通信，未执行真实敏感操作。
+- [x] 第二条敏感字符串建议进入待审后，OCU 点击“拒绝”，列表清空且 submitted 保持2，没有对应新增续轮。关闭验收开关并退出范围会话，正常重启后 scoped=false、日常自动发送仍关闭。
+- [x] 安装版无效 acceptance UUID 立即退出2，拒绝无范围启动；日常偏好不受验收开关影响。父进程退出后 controller 9.8秒内自行退出，宿主仍存活。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+本轮 Codex GUI 由已安装官方 OCU 原生 MCP/CLI 控制；连接器 transport 关闭时恢复同一 OCU 的 stdio MCP 会话。另一套统一 CUA 的拒绝不作为 OCU 拒绝证据。生产版本没有 Reload Window，未要求用户执行不存在的菜单。CDP 仅用于产品接入、只读观察及产品定义恢复动作；不以它代替 GUI 输入。
+
+证据：`~/Library/Logs/codex-plus/suggestion-review-20261114/`，含 tests17.log、build17.log、installed17-identity.json、native-thread-evidence.json、pending-sensitive-ocu.txt 及最终状态。宿主冷启动/截图责任归属尚未在本轮验收；helper 的源码和单元检查不能替代该结果。原生采样每条建议增加一次模型调用，固定宿主资源变更后关闭发送等待重新审查。

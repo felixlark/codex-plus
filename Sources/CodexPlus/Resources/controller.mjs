@@ -1,37 +1,42 @@
 import fs from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {spawn,execFileSync} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
+import {launchHost,parentIsAlive} from './launch-host.mjs';
 import {parseArgs} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import readline from 'node:readline';
 import {featureBinding,installFeatureEntry,validateNativeAction} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
-import {backgroundGuardBinding,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
+import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
+import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
 const {openAsar,adaptSidebar,adaptReloadRoute,reviewedHostResource,reviewedRouteResource}=await import(adapterURL.href);
-const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/ChatGPT.app'},profile:{type:'string'},state:{type:'string'},attach:{type:'boolean',default:false},'auto-send-suggestions':{type:'boolean',default:false}}});
+const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/ChatGPT.app'},profile:{type:'string'},state:{type:'string'},attach:{type:'boolean',default:false},'auto-send-suggestions':{type:'boolean',default:false},'suggestion-acceptance-thread':{type:'string'}}});
+const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
 let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[]};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
-let cdp,child;
+let cdp;
 const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
 let featureSupported=false,suggestionSupported=false;
+let reviewDigest='';const reviewRequests=new Map();
 const attemptFile=path.join(path.dirname(stateFile),'suggestion-attempts.json');
 let attempts=[],attemptStoreReady=true;
 try{const value=JSON.parse(await fs.readFile(attemptFile,'utf8'));if(!Array.isArray(value)||value.some(k=>typeof k!=='string'))throw Error('Invalid attempt store');attempts=value;}catch(error){if(error.code!=='ENOENT')attemptStoreReady=false;}
 const suggestions=new SuggestionCoordinator({attempts,persist:async keys=>{if(!attemptStoreReady)throw Error('Attempt store unavailable');try{await fs.writeFile(attemptFile+'.tmp',JSON.stringify(keys),{mode:0o600});await fs.rename(attemptFile+'.tmp',attemptFile);}catch(error){attemptStoreReady=false;throw error;}}});
 suggestions.configure(values['auto-send-suggestions']&&attemptStoreReady);
-const suggestionPolicy=()=>({connection,revision:suggestions.revision,enabled:suggestions.enabled&&suggestionSupported&&attemptStoreReady});
-async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Promise.allSettled([...sessions].filter(([,s])=>s.main).map(([id])=>command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.configure(${JSON.stringify(policy)})`})));
+const suggestionPolicy=()=>({connection,revision:suggestions.revision,enabled:suggestions.enabled&&suggestionSupported&&attemptStoreReady,...acceptanceThread?{acceptanceThread}:{}});
+async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Promise.allSettled([...sessions].filter(([,s])=>s.main).map(([id])=>command(id,'Runtime.evaluate',{expression:`(()=>{const bridge=globalThis.__codexPlusBackgroundSuggestions;bridge?.configure((${policyForBackgroundPage.toString()})(${JSON.stringify(policy)},bridge.protocol));})()`})));
 }
 function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
 async function probeSuggestions(target){
@@ -44,18 +49,73 @@ async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
   if(stopping||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
   let request;try{request=JSON.parse(event.payload);}catch{return;}
-  if(request.protocol!==2||typeof request.requestId!=='string'||request.requestId.length>100)return;
+  if(request.protocol!==5||typeof request.requestId!=='string'||request.requestId.length>100)return;
   const p=suggestions.pending;
-  let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
+  let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.reviewId===p.reviewId&&request.token===p.token&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
   if(ok)ok=await probeSuggestions(p.target);
   ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping;
   await command(message.sessionId,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.resolveGuard(${JSON.stringify(request.requestId)},${ok})`,contextId:event.executionContextId});
 }
+async function reviewDecision(message){
+  if(message.type!=='suggestion-review'||message.version!==1||!['approve','reject','retry'].includes(message.action))return;
+  const request=reviewRequests.get(message.id);
+  let ok=false;
+  if(request&&request.snapshotId===message.snapshotId){
+    reviewRequests.delete(message.id);
+    const arg={id:message.id,snapshotId:message.snapshotId,action:message.action};
+    try{
+      const result=await command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.decide(${JSON.stringify(arg)})`,returnByValue:true,awaitPromise:true});
+      ok=result.result.value===true;
+    }catch{}
+  }
+  process.stdout.write(JSON.stringify({type:'suggestion-review-result',version:1,id:message.id,ok})+'\n');
+}
+let reconnecting=false;
+async function reconnectEnhancements(){
+  if(reconnecting||stopping||suggestions.enabled||suggestions.pending)return;
+  reconnecting=true;let ok=false,reason='unavailable';const operation=randomUUID(),reloaded=new Set();
+  const windowSet=()=>JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.target]));
+  const allIds=[...sessions].filter(([,s])=>s.main).map(([id])=>id),ids=[],before=windowSet();
+  const evaluate=async(id,expression)=>{
+    const result=await command(id,'Runtime.evaluate',{expression,returnByValue:true});
+    if(result.exceptionDetails)throw Error('unavailable');return result.result.value;
+  };
+  try{
+    if(!allIds.length)throw Error('unavailable');
+    for(const id of allIds){const state=await evaluate(id,'globalThis.__codexPlusBackgroundSuggestions?.inspect()');if(state?.protocol!==5)ids.push(id);}
+    for(const id of allIds)await evaluate(id,`(()=>{globalThis.__codexPlusReconnectGuard?.dispose();globalThis.__codexPlusReconnectGuard=(${createReconnectGuard.toString()})(${JSON.stringify(operation)},${inspectReconnectSafety.toString()},${canReconnectPage.toString()});return true;})()`);
+    for(const id of ids){
+      if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
+      for(const remaining of allIds.filter(value=>!reloaded.has(value))){
+        const state=await evaluate(remaining,'globalThis.__codexPlusReconnectGuard?.check()');
+        if(state?.operation!==operation||!state.safe)throw Error('unsubmitted-content');
+      }
+      const started=await evaluate(id,`globalThis.__codexPlusReconnectGuard?.reload(${JSON.stringify(operation)})`);
+      if(started!==true)throw Error('state-changed');reloaded.add(id);
+    }
+    // A navigation acknowledgement is not proof that the new hooks loaded.
+    const deadline=Date.now()+30000;
+    while(Date.now()<deadline){
+      if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
+      let ready=true;
+      for(const id of allIds){try{const state=await evaluate(id,'globalThis.__codexPlusBackgroundSuggestions?.inspect()');if(state?.protocol!==5||!(state.registered>0))ready=false;}catch{ready=false;}}
+      if(ready){ok=true;reason='reconnected';break;}
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    if(!ok)reason='not-ready';
+  }catch(error){reason=['unsubmitted-content','state-changed'].includes(error.message)?error.message:'unavailable';}
+  finally{
+    for(const id of allIds)await evaluate(id,`(()=>{const guard=globalThis.__codexPlusReconnectGuard;if(guard?.operation===${JSON.stringify(operation)}){guard.dispose();delete globalThis.__codexPlusReconnectGuard;}})()`).catch(()=>{});
+    reconnecting=false;process.stdout.write(JSON.stringify({type:'enhancement-reconnect-result',version:1,ok,reason,reloaded:reloaded.size})+'\n');
+  }
+}
+
 function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean'){suggestions.configure(message.enabled&&attemptStoreReady);void updateSuggestionPolicy();}}catch{}}
 
 const featureSource=`if(location.protocol==='app:'&&location.hostname==='-'&&location.pathname==='/index.html'&&!/^\\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\\/|$)/.test(new URL(location.href).searchParams.get('initialRoute')??'')){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line),request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('close',()=>void shutdown());
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
 async function nativeAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -68,6 +128,13 @@ async function nativeAction(message){
 }
 
 const resources=[reviewedHostResource,reviewedRouteResource].map((resource,index)=>({...resource,kind:'project-order',adapt:index===0?source=>adaptSidebar(source,{host:true,resourcePath:resource.path}):adaptReloadRoute,url:'app://-/'+resource.path.replace(/^webview\//,'')}));
+async function samplingSupported(archive){
+  const entry=archive.entries.find(e=>e.path===reviewedSamplingResource.path);
+  if(!entry||createHash('sha256').update(await archive.read(entry)).digest('hex')!==reviewedSamplingResource.sha256)return false;
+  const hash=createHash('sha256');
+  for await(const chunk of createReadStream(path.join(values.app,reviewedSamplingResource.binaryPath)))hash.update(chunk);
+  return hash.digest('hex')===reviewedSamplingResource.binarySHA256;
+}
 function mainURL(value){const url=new URL(value);return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&!/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(url.searchParams.get('initialRoute')??'');}
 function command(session,method,params={}){return cdp.call(method,params,session);}
 function assertOwner(pid,endpoint){
@@ -93,7 +160,7 @@ async function main(){
         let adaptation=await resource.adapt(source);
         if(resource.path===reviewedHostResource.path&&adaptation.supported){
           const dependency=archive.entries.find(e=>e.path===reviewedBackgroundDependency.path);
-          if(dependency&&createHash('sha256').update(await archive.read(dependency)).digest('hex')===reviewedBackgroundDependency.sha256){const background=adaptBackgroundSuggestions(source,adaptation.source);suggestionSupported=background.supported;if(background.supported)adaptation=background;}
+          if(dependency&&createHash('sha256').update(await archive.read(dependency)).digest('hex')===reviewedBackgroundDependency.sha256&&await samplingSupported(archive)){const background=adaptBackgroundSuggestions(source,adaptation.source);suggestionSupported=background.supported;if(background.supported)adaptation=background;}
         }
         if(!adaptation.supported)throw new Error('Unsupported adapter: '+adaptation.reason);
         resource.replacement=Buffer.from(adaptation.source).toString('base64');
@@ -102,25 +169,19 @@ async function main(){
     if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
+  if(stopping)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
     state={...state,pid:saved.pid,endpoint:saved.endpoint,phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
-    const args=['--remote-debugging-address=127.0.0.1','--remote-debugging-port=0'];
-    const env={...process.env};if(values.profile){args.push(`--user-data-dir=${values.profile}/user-data`);env.CODEX_HOME=values.profile+'/codex-home';env.CODEX_ELECTRON_USER_DATA_PATH=values.profile+'/user-data';}
-    child=spawn(path.join(values.app,'Contents/MacOS/ChatGPT'),args,{env,detached:true,stdio:['ignore','ignore','pipe']});
-    state.pid=child.pid;state.phase='launching';await publish();
-    const endpoint=await new Promise((resolve,reject)=>{
-      let line='';const timer=setTimeout(()=>reject(new Error('Host debug listener timeout')),30000);
-      child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',()=>{clearTimeout(timer);reject(new Error('Host exited before listener'));});
-      child.stderr.on('data',bytes=>{line+=bytes.toString();for(const complete of line.split('\n').slice(0,-1)){const match=complete.match(/^DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/\S+)/);if(match){clearTimeout(timer);resolve(match[1]);}}line=line.slice(line.lastIndexOf('\n')+1);});
-    });
-    state.endpoint=endpoint;
+    state.phase='launching';state.launchMethod='launch-services';await publish();
+    const launched=await launchHost({app:values.app,profile:values.profile});
+    state.pid=launched.pid;state.endpoint=launched.endpoint;
     await publish();
-    // This unguessable endpoint arrives from the verified child before its first page.
-    cdp=await CDP.connect(endpoint);
-    child.stderr.removeAllListeners('data');child.stderr.resume();child.unref();
+    // The freshly written endpoint is authenticated against the real signed
+    // app process and all its listeners before any debug connection is made.
+    cdp=await CDP.connect(launched.endpoint);
   }
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
@@ -136,7 +197,7 @@ async function main(){
       const work=response(message.sessionId,message.params).catch(fail);
       inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
-    if(message.method==='connectionClosed'){state.phase='disconnected';void publish().then(()=>process.exit(1));}
+    if(message.method==='connectionClosed'&&!stopping){state.phase='disconnected';void publish().then(()=>process.exit(1));}
   });
   async function attach({sessionId,targetInfo,waitingForDebugger}){
     const session={target:targetInfo.targetId,contexts:new Map(),main:false};
@@ -178,13 +239,14 @@ async function main(){
     }catch(error){state.errors.push('Response adaptation failed');try{await original();}catch{await cdp.call('Target.detachFromTarget',{sessionId}).catch(()=>{});}}
     finally{await publish();}
   }
+  if(stopping){cdp.close();return;}
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();
   const suggestionHeartbeat=setInterval(()=>{if(!stopping)void updateSuggestionPolicy();},1000);
   let inspecting=false;
   const monitor=setInterval(async()=>{
-    if(process.ppid!==parentPID){clearInterval(monitor);void shutdown();return;}
+    if(process.ppid!==parentPID||!parentIsAlive(parentPID)){clearInterval(monitor);void shutdown();return;}
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping)return;inspecting=true;
     try{
@@ -192,12 +254,17 @@ async function main(){
         const entries={supported:true,phase:pages.some(p=>p.phase==='active')?'active':'waiting-for-sidebar',pages};
         if(JSON.stringify(entries)!==JSON.stringify(state.pageEntries)){state.pageEntries=entries;await publish();}}
       if(suggestionSupported){
-        const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.inspect()',returnByValue:true});if(r.result.value)pages.push({id,snapshot:r.result.value});}
-        await suggestions.tick(pages,{probe:probeSuggestions,submit:async(id,arg)=>{
+        const pages=[];for(const [id,session]of sessions)if(session.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.inspect()',returnByValue:true});pages.push({id,snapshot:r.result.value??{protocol:null,registered:0,candidates:[]}});}
+        const reviewItems=[];reviewRequests.clear();
+        for(const {id}of pages){const result=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.reviews()',returnByValue:true});for(const item of result.result.value??[]){reviewRequests.set(item.id,{session:id,snapshotId:item.snapshotId});reviewItems.push(item);}}
+        const digest=JSON.stringify(reviewItems);if(digest!==reviewDigest){reviewDigest=digest;process.stdout.write(JSON.stringify({type:'suggestion-reviews',version:1,items:reviewItems})+'\n');}
+
+        const readiness=reviewedBackgroundPages(pages);
+        await suggestions.tick(readiness.ready.map(page=>({...page,snapshot:{...page.snapshot,candidates:(page.snapshot.candidates??[]).filter(c=>!acceptanceThread||c.target.threadId===acceptanceThread)}})),{probe:probeSuggestions,submit:async(id,arg)=>{
           if(stopping||!cdp.open)throw Error('Controller disconnected');
           const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.submit(${JSON.stringify(arg)})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
         }});
-        const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,mode:'background-native',pageReady:pages.length>0&&pages.every(p=>p.snapshot.registered>0)};
+        const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,mode:'background-native-reviewed',review:{pending:pages.reduce((n,p)=>n+(p.snapshot.review?.pending??0),0),reviewing:pages.reduce((n,p)=>n+(p.snapshot.review?.reviewing??0),0),captured:pages.reduce((n,p)=>n+(p.snapshot.review?.captured??0),0),reasons:[...new Set(pages.map(p=>p.snapshot.review?.reason).filter(Boolean))]},pageReady:readiness.pageReady,legacyPages:readiness.legacyPages};
         if(!snapshot.pageReady)snapshot.reason='page-reload-required';
         if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
       }
@@ -207,19 +274,26 @@ async function main(){
 function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
 function fail(error){state.errors.push(error.message);void publish();}
 async function shutdown(){
-  if(stopping)return;stopping=true;
-  if(cdp?.open){
-    for(const session of sessions.keys())await command(session,'Runtime.runIfWaitingForDebugger').catch(()=>{});
-    while(inFlight.size)await Promise.allSettled([...inFlight]);
-    for(const [id,session]of sessions){
-      if(suggestionSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
-      if(featureSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
+  if(stopping)return;stopping=true;suggestions.configure(false);
+  // Cleanup is best effort after leases and admissions are revoked. Reuse the
+  // existing 10s CDP response budget; dead browser targets must not orphan us.
+  let timer;
+  const cleanup=(async()=>{
+    if(!cdp?.open)return;
+    await Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
+    if(inFlight.size)await Promise.allSettled([...inFlight]);
+    await Promise.allSettled([...sessions].map(async([id,session])=>{
+      if(suggestionSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
+      if(featureSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
       await command(id,'Fetch.disable').catch(()=>{});
-    }
-    requests.clear();
-    await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});cdp.close();
-  }
-  state.phase='stopped';await publish();process.exit(0);
+    }));
+    await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});
+  })();
+  await Promise.race([cleanup,new Promise(resolve=>{timer=setTimeout(resolve,10000);})]);
+  clearTimeout(timer);requests.clear();cdp?.close();
+  state.phase='stopped';
+  await publish().catch(()=>{});process.exit(0);
 }
+
 process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
 main().catch(async error=>{state.phase='failed';state.error=error.message;if(cdp)cdp.close();await publish();process.exit(1);});
