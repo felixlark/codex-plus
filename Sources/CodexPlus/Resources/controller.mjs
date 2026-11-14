@@ -7,7 +7,7 @@ import {launchHost,parentIsAlive} from './launch-host.mjs';
 import {parseArgs} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import readline from 'node:readline';
-import {featureBinding,installFeatureEntry,validateNativeAction} from './feature-entry.mjs';
+import {featureBinding,installFeatureEntry,validateNativeAction,reviewedFeatureResource,removeFeatureEntries} from './feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from './snake.mjs';
 import {CDP} from './cdp.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
@@ -149,8 +149,8 @@ async function main(){
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict','-R=anchor apple generic and identifier "com.openai.codex" and certificate leaf[subject.OU] = "2DC432GLL2"',values.app],{stdio:'pipe'});
   const archive=await openAsar(values.app);
   try{
-    const footer=archive.entries.find(e=>e.path==='webview/assets/async/885910.79b4f4977c.js');
-    featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')==='1011c180e813ef95373b33f53ec234baa941d748dd1110f4de4538a42a550feb';
+    const footer=archive.entries.find(e=>e.path===reviewedFeatureResource.path);
+    featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')===reviewedFeatureResource.sha256;
     state.pageEntries={supported:featureSupported,phase:featureSupported?'waiting':'unsupported-host'};
     state.projectOrder={supported:true,phase:'waiting'};
     for(const resource of resources){
@@ -280,11 +280,13 @@ async function shutdown(){
   let timer;
   const cleanup=(async()=>{
     if(!cdp?.open)return;
-    await Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
+    // Revoke visible entry points first, even if a page is no longer marked main.
+    const resumed=Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
+    await removeFeatureEntries(sessions,command);
+    await resumed;
     if(inFlight.size)await Promise.allSettled([...inFlight]);
     await Promise.allSettled([...sessions].map(async([id,session])=>{
       if(suggestionSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
-      if(featureSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusFeatures?.dispose()'}).catch(()=>{});if(session.script)await command(id,'Page.removeScriptToEvaluateOnNewDocument',{identifier:session.script}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:featureBinding}).catch(()=>{});}
       await command(id,'Fetch.disable').catch(()=>{});
     }));
     await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});

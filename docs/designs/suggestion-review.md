@@ -50,3 +50,5 @@ NnGo 赋值已核实：主进程 `canWritePrimaryWindowTabPersistence = !rendere
 重新接入修订：各页先安装本操作独占的 trusted-input 失效标记；每页重连前重核所有尚未重连页，最终检查与 location.reload 在同一 renderer 同步任务执行。只重连旧协议页，已为 protocol5 的页面保留。窗口集合变化或新增输入则停止其余页；部分已重连必须据实报告。收到导航回执后最多观察30秒，全部原页面 protocol5 且 registered>0 才报成功，否则显示未完全接入且保持自动发送关闭。该观察时限是UI结果等待，并非资源/并发上限。
 
 生命周期恢复：Plus 关闭后的 pipe EOF 或真实 OS 父进程消失均撤销发送租约并停止 controller。清理并行执行，沿既有 CDP 请求时限最多等待10秒，随后关闭连接退出；不终止 Codex 宿主。该期限仅界定关闭时资源回收，不是模型审查或任务执行时限。安装17实测父进程退出后9.8秒内 controller 退出，宿主1605继续运行。
+
+2026-11-14 更新后候选为0.7.0 build18，支持实际宿主26.1111.21308/27194；固定资源清单随独立核验更新。thread/sample显式allowInProgressTurn:false，不使用新版正在执行轮次采样能力。采样实现守卫改为Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex真正Mach-O，避免wrapper不变而实际二进制改变时失察。新版语义及安装复验见acceptance.md。

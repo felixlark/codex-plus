@@ -197,3 +197,15 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 本轮 Codex GUI 由已安装官方 OCU 原生 MCP/CLI 控制；连接器 transport 关闭时恢复同一 OCU 的 stdio MCP 会话。另一套统一 CUA 的拒绝不作为 OCU 拒绝证据。生产版本没有 Reload Window，未要求用户执行不存在的菜单。CDP 仅用于产品接入、只读观察及产品定义恢复动作；不以它代替 GUI 输入。
 
 证据：`~/Library/Logs/codex-plus/suggestion-review-20261114/`，含 tests17.log、build17.log、installed17-identity.json、native-thread-evidence.json、pending-sensitive-ocu.txt 及最终状态。宿主冷启动/截图责任归属尚未在本轮验收；helper 的源码和单元检查不能替代该结果。原生采样每条建议增加一次模型调用，固定宿主资源变更后关闭发送等待重新审查。
+
+### 更新后兼容复验：build18
+
+桌面更新至 Codex 26.1111.21308（27194）时，build17 的固定资源守卫按预期停用。对新 host907538、route757723、scope956370、bootstrap631 完成源码核对后适配；明确 `allowInProgressTurn:false`，并将二进制守卫从 shell wrapper 改为真正 arm64 Mach-O。独立源码复核零 P1/P2。
+
+- [x] 47 Node / 39 Swift 通过；签名 build18 安装及严格验签通过。Mach-O UUID `C9BE294C-42E3-3BE4-B61B-341B9D11E5E7`，安装源码逐文件一致。
+- [x] OCU 点击产品重新接入，protocol5 registered2、pageReady=true、legacyPages=0；原生 preview 再次 `historyComplete=true`、`sourceUnchanged=true`。
+- [x] 只绑定原验收 UUID，保持当前路由 `/`，原生自动提交一次 `只回复 CP18 后台续轮完成，不使用工具，回复后结束。`，官方 read_thread 读回 turn `01a1d894-7317-7fc2-8dce-83856c069eaa` completed。
+
+本候选同时集成既有界面任务的 footer 尺寸与先清理界面再等待在途请求补丁；可见退出/尺寸验收归原任务，不以本次建议续轮代替。宿主为更新后 PID64999，未为本次验收强退。
+
+- [x] build18敏感字符串建议停在待审，展示行动/对象/范围；OCU拒绝后submitted保持1。已退出仅测试UUID会话并正常重启，保留更新后检测到的日常偏好；未将测试开关写回日常偏好。

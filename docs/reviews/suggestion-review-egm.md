@@ -14,3 +14,5 @@
 - 验收范围独立审查发现无效 UUID 回退日常无范围模式；以 absent/thread/invalid 三态、主程序和 launcher 双检查、RAM-only 开关修复，并覆盖空值、重复参数、等号形式。定向复审已关闭原 P1。
 - controller 关闭路径独立定向复核：EOF、真实 OS 父进程存活、10秒清理上限、stopping guard；未发现剩余 P1/P2，parent liveness 定向检查通过。安装版父进程退出后 controller 9.8秒退出、宿主保留是单列运行证据。
 - 启动责任归属 helper 由既有截图任务提供并归还 writer，保持 LaunchServices 启动和受认证本机端点验证。仅源码/测试纳入；本轮未冷启宿主，不宣称截图归属问题真实验收通过。
+
+- 桌面更新后的兼容独立复核：实际新版host907538、scope956370、bootstrap631及Mach-O；nz/nX/A注册、tw/Y/_捕获、CiLO草稿、owner/idle、显式allowInProgressTurn:false均核对对应，22项建议定向测试通过，零明确P1/P2。安装版后台续轮另以build18实测。

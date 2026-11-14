@@ -72,7 +72,7 @@ test('reviewed original host composes sidebar and background capture inside nati
     const sidebar=await adaptSidebar(source,{host:true,resourcePath:reviewedBackgroundResource.path});assert.equal(sidebar.supported,true);
     const result=adaptBackgroundSuggestions(source,sidebar.source);assert.equal(result.supported,true);
     const {parse}=await parser();parse(result.source,{ecmaVersion:'latest',sourceType:'module'});
-    assert.ok(result.source.includes('&&('+'e.queryClient.setQueryData((0,t_.pv)(u,d,l),f),globalThis.__codexPlusBackgroundSuggestions.capture'));
+    assert.ok(result.source.includes('&&('+'e.queryClient.setQueryData((0,tw.pv)(u,d,l),_),globalThis.__codexPlusBackgroundSuggestions.capture'));
     assert.ok(result.source.includes('globalThis.__codexPlusProjectOrder.sort('));assert.equal(adaptBackgroundSuggestions(source+'\n').supported,false);
   }finally{await archive.close();}
 });
@@ -217,4 +217,24 @@ test('explicit empty or malformed acceptance scope cannot become an unrestricted
  assert.equal(normalizeAcceptanceThread(undefined),undefined);
  assert.equal(normalizeAcceptanceThread('A1111111-2222-4333-8444-555555555555'),'a1111111-2222-4333-8444-555555555555');
  for(const value of ['',null,'bad','--settings'])assert.throws(()=>normalizeAcceptanceThread(value));
+});
+
+// The reviewed native protocol can sample running turns; Plus deliberately cannot.
+test('native review explicitly excludes in-progress turns and pins the actual executable',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const {createHash}=await import('node:crypto');
+  const {reviewedSamplingResource}=await import('../Sources/CodexPlus/Resources/suggestion-auto-send.mjs');
+  let binary;try{binary=await readFile('/Applications/ChatGPT.app/'+reviewedSamplingResource.binaryPath);}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(binary){assert.equal(binary.subarray(0,4).toString('hex'),'cffaedfe');assert.equal(createHash('sha256').update(binary).digest('hex'),reviewedSamplingResource.binarySHA256);}
+  const previous=globalThis.__codexPlusSuggestionReviewPolicy;let request;
+  globalThis.__codexPlusSuggestionReviewPolicy={prompt:()=>'{review-only}',parse:r=>r};
+  try{
+    const client={sendRequest:async(method,args)=>{request={method,args};return 'reviewed';}};
+    const context=createNativeSuggestionContext({},'local',client,()=>true,{});
+    assert.equal(await context.review(target,'sample'),'reviewed');
+    assert.equal(request.method,'thread/sample');
+    assert.equal(request.args.allowInProgressTurn,false);
+    assert.equal(request.args.expectedTurnId,target.latestTurnId);
+    assert.equal(request.args.disableMcp,true);
+  }finally{if(previous===undefined)delete globalThis.__codexPlusSuggestionReviewPolicy;else globalThis.__codexPlusSuggestionReviewPolicy=previous;}
 });

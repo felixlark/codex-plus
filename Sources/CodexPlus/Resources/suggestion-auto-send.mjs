@@ -1,16 +1,16 @@
 import {createHash} from 'node:crypto';
 import {createSuggestionReviewPolicy} from './suggestion-review.mjs';
-export const reviewedSamplingResource=Object.freeze({path:'.vite/build/early-bootstrap-631-9880b56d55f301d1.js',sha256:'bce29a615bb1ab7019b9db27acdff7018ddaae8a2c7d6ede4b6c983b01f90ebe',binaryPath:'Contents/Resources/codex-cli/bin/codex',binarySHA256:'50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8'});
+export const reviewedSamplingResource=Object.freeze({path:'.vite/build/early-bootstrap-631-c364c4eef36b8fb5.js',sha256:'3d33823eff6f760caed93a06c7bd580a2ed7631c961bf7f4454622c47205fc2c',binaryPath:'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex',binarySHA256:'3ea20787e106af94573d3d6c19480aed93a1334b0dd32b6b04e2f780ce82cf4b'});
 export const backgroundGuardBinding='__codexPlusBackgroundGuard';
-export const reviewedBackgroundDependency=Object.freeze({path:'webview/assets/async/514766.2d2f1ddc86.js',sha256:'943016fbef25cbfe62703ea7ab5ee7d2e9971b8db3681147fb983e7bd12e6f39'});
-export const reviewedBackgroundResource=Object.freeze({path:'webview/assets/async/739301.37a39f26d6.js',sha256:'acc2174e4ed3d2068af26c1731f08e8978c853864aea9c0a917ae9d246885058'});
+export const reviewedBackgroundDependency=Object.freeze({path:'webview/assets/async/956370.aff5cce818.js',sha256:'84c3881d294dc4ac2892d9a58f7f60bed97cb061bde375a4fe2f1a768ea22379'});
+export const reviewedBackgroundResource=Object.freeze({path:'webview/assets/async/907538.0572f09d40.js',sha256:'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c'});
 
 export function adaptBackgroundSuggestions(original,adapted=original.toString()) {
   if(createHash('sha256').update(original).digest('hex')!==reviewedBackgroundResource.sha256)return {supported:false,reason:'unreviewed-background-source'};
-  const register='function nG(e,t,I,C){',cache='e.queryClient.setQueryData((0,t_.pv)(u,d,l),f)';
+  const register='function nz(e,t,i,A){',cache='e.queryClient.setQueryData((0,tw.pv)(u,d,l),_)';
   if(adapted.split(register).length!==2||adapted.split(cache).length!==2)return {supported:false,reason:'background-structure'};
-  const registration='globalThis.__codexPlusBackgroundSuggestions.register(globalThis.__codexPlusBackgroundNative(e,t,I,()=>nH&&(C?.()??!0),{drafts:n("TSib"),identities:n("V3rO"),composer:n("Sd8U"),wrap:n("GNwQ").GB,identity:()=>[e.get(G.chatGptAuthenticatedAccountId$),e.get(G.o8),e.get(t_.S8)]}));';
-  const captured=`(${cache},globalThis.__codexPlusBackgroundSuggestions.capture(t,c,f,()=>a()&&e.get(t_.S8)===h&&e.get(G.chatGptAuthenticatedAccountId$)===u&&e.get(G.o8)===d))`;
+  const registration='globalThis.__codexPlusBackgroundSuggestions.register(globalThis.__codexPlusBackgroundNative(e,t,i,()=>nX&&(A?.()??!0),{drafts:n("CiLO"),identities:n("V3rO"),composer:n("Sd8U"),wrap:n("GNwQ").GB,identity:()=>[e.get(Y.chatGptAuthenticatedAccountId$),e.get(Y.o8),e.get(tw.S8)]}));';
+  const captured=`(${cache},globalThis.__codexPlusBackgroundSuggestions.capture(t,c,_,()=>i()&&e.get(tw.S8)===h&&e.get(Y.chatGptAuthenticatedAccountId$)===u&&e.get(Y.o8)===d))`;
   const prefix=`;globalThis.__codexPlusSuggestionReviewPolicy=(${createSuggestionReviewPolicy.toString()})();globalThis.__codexPlusBackgroundNative=(${createNativeSuggestionContext.toString()});globalThis.__codexPlusBackgroundSuggestions??=(${createBackgroundSuggestionBridge.toString()})(${JSON.stringify(backgroundGuardBinding)});\n`;
   return {supported:true,source:prefix+adapted.replace(register,register+registration).replace(cache,captured)};
 }
@@ -87,7 +87,7 @@ export function createNativeSuggestionContext(scope,hostId,client,isCurrent,{dra
     const prompt=policy.prompt(text);
     // The reviewed upstream thread/sample protocol accepts at most 4,000 bytes.
     if(new TextEncoder().encode(prompt).length>4000)throw Error('review-prompt-too-long');
-    const response=await client.sendRequest('thread/sample',{threadId:target.threadId,expectedTurnId:target.latestTurnId,prompt,disableMcp:true,threadSource:'composer_predictions',turnTrigger:'composer_predictions'});
+    const response=await client.sendRequest('thread/sample',{threadId:target.threadId,expectedTurnId:target.latestTurnId,allowInProgressTurn:false,prompt,disableMcp:true,threadSource:'composer_predictions',turnTrigger:'composer_predictions'});
     try{return policy.parse(response,target.latestTurnId);}finally{dispose(response);}
   }
   return {hostId,client,probe,keys,validate,validateReadOnly:target=>validate(target,undefined,true),snapshot,review,send:(target,text,messageId,assertCurrent)=>client.startTurnWithOutcome(target.threadId,{request:{threadId:target.threadId,input:[{type:'text',text,text_elements:[]}],clientUserMessageId:messageId},context:{inheritThreadSettings:true,assertRequestCurrent:assertCurrent}})};
