@@ -2,6 +2,19 @@
 
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
+## 0.7.0 build 21 项目行新建任务展开（2026-11-14）
+
+项目悬浮信息卡也可暴露为 `AXApplicationDialog`。此前观察器不区分模态状态，会将信息卡视为阻塞对话框并清空任务基线，使项目行新建页跳过展开。现在读取公开 `AXModal` 属性：明确非模态的卡片不再阻塞；真正模态及模态状态不可读取的对话框沿用原保护。
+
+- [x] 47 项 Node、42 项 Swift 检查通过，新增回归覆盖非模态悬浮卡、真正／未知对话框及重复事件；原对话框重建基线检查保留。
+- [x] Developer ID 签名构建、正式安装及严格验签通过；构建与安装可执行文件 SHA256 均为 `f15505b2923755930e1b0f00c6db3a49b9b545fc05615cb3160f0d8feb443a8c`。
+- [x] 从正式安装版运行：手动收起新建页后返回已有聊天，再点击项目行 `Start new chat in codex-plus`，新建页右侧自动恢复；动作计数 1→2。OCU 控件树确认 `Chat tabs`、`Hide tabs` 和 New tab 内容可见。手动收起当前页保持，切换已收起聊天也能展开。
+- [x] 恢复原活动列表开启及本案聊天，窗口从 OCU 辅助屏恢复；宿主 PID 64999 保持，未发送验收消息。安装保留旧版回退包。
+- [ ] 带真实指针悬浮卡的点击路径未单独取得截图；该分支由结构回归覆盖。
+- [ ] Longbiao 最终接受；Issue #1 保持开放。
+
+证据：`~/Library/Logs/codex-plus/project-new-chat-20261114/`，含 tests.log、build.log、install.log、installed-hashes.txt、project-new-result.json、final-ocu.txt 及 final.png。OCU 在退出 Plus 后自动重新打开了旧版；最终通过公开 `NSRunningApplication.terminate()` 正常退出自有 Plus 后完成安装，未强制结束或重启宿主。
+
 ## 0.7.0 build 20 设置页移除待审建议（2026-11-14）
 
 - [x] 移除设置页待审列表、空状态、批准／拒绝／重审按钮及对应原生界面数据处理；提示文案不再引导到待审列表。后台审查规则保持，敏感或范围不明的建议不自动发送。
