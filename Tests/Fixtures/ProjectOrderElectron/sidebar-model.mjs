@@ -43,7 +43,7 @@ function render(input) {
     return item;
   }));
   globalThis.fixtureResult = { order: layout.projectKeys, navigation, pinned: layout.pinnedKeys, custom: layout.customKeys,
-    adapted: globalThis.__codexPlusProjectOrder?.protocol === 7 };
+    adapted: globalThis.__codexPlusProjectOrder?.protocol === 8 };
 }
 globalThis.fixtureUpdate = name => render(data[name]);
 render(data.initial);

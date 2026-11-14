@@ -167,7 +167,7 @@ final class CodexLauncher: ObservableObject {
         pageSummary = connected && entries?["phase"] as? String == "active"
             ? "已接入 · 左下角 Plus 设置与上方贪吃蛇"
             : (entries?["supported"] as? Bool == false ? "当前 Codex 版本待适配；菜单栏设置可用" : "等待页面连接；普通启动后需正常退出，再按 F6")
-        orderSummary = connected && order?["phase"] as? String == "active" ? "已启用 · 需处理、进行中与未读优先" : "尚未接入"
+        orderSummary = connected && order?["phase"] as? String == "active" ? "已启用 · 需处理、未读与进行中优先" : "尚未接入"
         if controller?.isRunning == true {
             switch snapshot["phase"] as? String {
             case "active":

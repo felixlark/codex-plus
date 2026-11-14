@@ -254,7 +254,7 @@ async function main(){
           if(suggestionSupported)await updateSuggestionPolicy();
           if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
-          if(runtime.result.value===7)state.projectOrder.phase='active';
+          if(runtime.result.value===8)state.projectOrder.phase='active';
           else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
         }
         state.lastAttach={waitingForDebugger,fetchBeforeResume:true};state.phase='active';
@@ -293,7 +293,7 @@ async function main(){
       if(state.projectOrder.supported){
         const pages=[];
         for(const [id,s]of sessions)if(s.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});pages.push({protocol:r.result.value??null});}
-        const status={supported:true,protocol:7,phase:pages.length&&pages.every(p=>p.protocol===7)?'active':pages.some(p=>p.protocol!==null)?'page-reload-required':'waiting',pages};
+        const status={supported:true,protocol:8,phase:pages.length&&pages.every(p=>p.protocol===8)?'active':pages.some(p=>p.protocol!==null)?'page-reload-required':'waiting',pages};
         if(JSON.stringify(status)!==JSON.stringify(state.projectOrder)){state.projectOrder=status;await publish();}
       }
       if(sidebarSupported){
