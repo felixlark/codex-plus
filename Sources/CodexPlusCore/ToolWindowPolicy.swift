@@ -23,13 +23,14 @@ public enum ToolWindowPolicy {
         claims.subtracting(knownDocuments)
     }
 
-    /// Only a newly owned, independent display can qualify; never select by position.
-    public static func isIsolatedDisplay(id: UInt32, before: [UInt32: CGRect], after: [UInt32: CGRect],
-                                        primaryBefore: UInt32, primaryAfter: UInt32, mirrored: Bool) -> Bool {
-        guard id != 0, id != primaryAfter, before[id] == nil, !before.isEmpty, primaryBefore == primaryAfter, !mirrored,
-              let bounds = after[id], !bounds.isEmpty,
-              before.allSatisfy({ after[$0.key] == $0.value }) else { return false }
-        return !before.values.contains { $0.intersects(bounds) }
+    /// Exact official OCU namespace identity; never choose a screen by position.
+    public static func isPersistentAgentDisplay(id: UInt32, primary: UInt32,
+        vendor: UInt32, model: UInt32, serial: UInt32, expectedSerial: UInt32,
+        builtin: Bool, mirrored: Bool, online: [UInt32: CGRect]) -> Bool {
+        guard id != 0, id != primary, !builtin, !mirrored,
+              vendor == 0x0CAC, model == 0x0CAC, serial == expectedSerial, expectedSerial > 1,
+              let bounds = online[id], !bounds.isEmpty, online.count > 1 else { return false }
+        return !online.contains { $0.key != id && $0.value.intersects(bounds) }
     }
 
     public static func matchesIdentity(pid: Int32, windowID: UInt32, launchDate: Date,
