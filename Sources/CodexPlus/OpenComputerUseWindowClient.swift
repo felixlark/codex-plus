@@ -6,7 +6,17 @@ import CodexPlusCore
 /// free so OCU can query Plus's own Agent Settings through accessibility.
 final class OpenComputerUseWindowClient {
     static let executable = "/Applications/Open Computer Use (Dev).app/Contents/MacOS/OpenComputerUse"
-    enum Outcome { case accepted, unavailable, unsupported, unknown }
+    enum Outcome {
+        case accepted, unavailable, unsupported, unknown(String)
+        var diagnostic: String {
+            switch self {
+            case .accepted: return "accepted"
+            case .unavailable: return "client-unavailable"
+            case .unsupported: return "exact-lifecycle-unsupported"
+            case .unknown(let reason): return reason
+            }
+        }
+    }
 
     func call(arguments: [String: Any]? = nil, completion: @escaping (Outcome) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -44,8 +54,16 @@ final class OpenComputerUseWindowClient {
                 // An error may follow a partial move. Caller must inspect the
                 // exact identity/frame; never replay an unknown operation.
                 if let arguments {
-                    let result = request(3, "tools/call", ["name": "get_app_state", "arguments": arguments])?["result"] as? [String: Any]
-                    outcome = result?["isError"] as? Bool == false ? .accepted : .unknown
+                    let reply = request(3, "tools/call", ["name": "get_app_state", "arguments": arguments])
+                    let result = reply?["result"] as? [String: Any]
+                    if result?["isError"] as? Bool == false { outcome = .accepted }
+                    else {
+                        let content = result?["content"] as? [[String: Any]]
+                        let reason = content?.first(where: { $0["type"] as? String == "text" })?["text"] as? String
+                            ?? (reply?["error"] as? [String: Any])?["message"] as? String ?? "unconfirmed-tool-reply"
+                        // Only the first error line; never retain AX trees or image data.
+                        outcome = .unknown(String((reason.split(separator: "\n").first ?? "unconfirmed-tool-reply").prefix(1000)))
+                    }
                 } else { outcome = .accepted }
             }
             try? input.fileHandleForWriting.close()

@@ -249,7 +249,7 @@ final class ToolWindowRouter {
 
     private func ocuArguments(pid: pid_t, id: UInt32, placement: String) -> [String: Any] {
         ["app": String(pid), "window_id": Int(id), "window_placement": placement,
-         "allow_activation": false, "include_ax": false, "include_screenshot": false]
+         "allow_activation": false, "include_ax": false, "include_screenshot": true]
     }
 
     private func finishStopIfReady() {
@@ -640,11 +640,17 @@ final class ToolWindowRouter {
                 self.registeredAgentSettings = id; self.lastError = nil
                 if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "opened-agent-settings" }
             } else {
+                if self.lastOpen["windowID"] as? Int == Int(id) {
+                    let frame = window.frame
+                    self.lastOpen["diagnostic"] = ["outcome": outcome.diagnostic,
+                        "windowID": id, "nativeFrame": self.jsonFrame(frame),
+                        "systemFrame": self.windowInfo(id)?[kCGWindowBounds as String] ?? NSNull()]
+                }
                 // If a user took over, release any OCU record without moving it.
                 // Otherwise this is still our hidden Settings window; close it.
                 if self.ownAgentWindowIsParked(window) { window.close(); self.ownAgentWindow = nil }
                 else { self.registeredAgentSettings = id; self.forgetAgentSettings() }
-                self.lastError = "ocu-agent-settings-registration-unconfirmed"
+                self.lastError = "ocu-agent-settings-registration-unconfirmed: " + outcome.diagnostic
                 if self.lastOpen["windowID"] as? Int == Int(id) { self.lastOpen["state"] = "failed" }
             }
         }
