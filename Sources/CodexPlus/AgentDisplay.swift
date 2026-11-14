@@ -31,6 +31,11 @@ final class AgentDisplay {
         // OCU's upstream display readiness budget. No GUI input or focus changes.
         let deadline = Date().addingTimeInterval(3)
         while CGDisplayBounds(display).isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        guard preservePriorMain(primary, original: before) else {
+            error = "virtual-display-main-preservation-failed"
+            cp_virtual_display_destroy(created); handle = nil; id = 0
+            return nil
+        }
         let after = Self.displays()
         guard ToolWindowPolicy.isIsolatedDisplay(id: display, before: before, after: after,
                   primaryBefore: primary, primaryAfter: CGMainDisplayID(),
@@ -42,6 +47,27 @@ final class AgentDisplay {
         }
         error = nil
         return bounds
+    }
+
+    // Same login-session-only main-screen protection as OCU's installed
+    // persistent display implementation. Creating CGVirtualDisplay may change
+    // the global coordinate origin; translate that change back, never modes.
+    private func preservePriorMain(_ primary: UInt32, original: [UInt32: CGRect]) -> Bool {
+        guard CGMainDisplayID() == id else { return CGMainDisplayID() == primary }
+        let current = Self.displays()
+        guard let anchor = current[primary], let previous = original[primary] else { return false }
+        let dx = anchor.minX - previous.minX, dy = anchor.minY - previous.minY
+        var configuration: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&configuration) == .success, let configuration else { return false }
+        for (display, bounds) in current {
+            guard let x = Int32(exactly: (bounds.minX - dx).rounded()),
+                  let y = Int32(exactly: (bounds.minY - dy).rounded()),
+                  CGConfigureDisplayOrigin(configuration, display, x, y) == .success else {
+                CGCancelDisplayConfiguration(configuration); return false
+            }
+        }
+        return CGCompleteDisplayConfiguration(configuration, .forSession) == .success
+            && CGMainDisplayID() == primary
     }
 
     /// Call only after all owned windows are restored or closed.
