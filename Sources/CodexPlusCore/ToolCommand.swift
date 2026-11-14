@@ -10,18 +10,16 @@ public enum ToolCommand {
         guard let first = arguments.first, first.hasPrefix("--tool-") else { return nil }
         let command = String(first.dropFirst(2))
         let allowed: [String: Set<String>] = [
-            "tool-open": ["--app-path", "--url", "--dedicated"],
+            "tool-open": ["--app-path", "--url"],
             "tool-place": ["--pid", "--window-id"], "tool-routing": ["--enabled"],
-            "tool-status": [], "tool-exempt": [], "tool-recover": []
+            "tool-status": [], "tool-restore": ["--pid", "--window-id"]
         ]
         guard let options = allowed[command] else { throw failure("Unknown tool command") }
         var values: [String: String] = [:]
-        var dedicated = false
         var index = 1
         while index < arguments.count {
             let name = arguments[index]
             guard options.contains(name), values[name] == nil else { throw failure("Unexpected or duplicate option: \(name)") }
-            if name == "--dedicated" { guard !dedicated else { throw failure("Duplicate --dedicated") }; dedicated = true; index += 1; continue }
             guard index + 1 < arguments.count else { throw failure("Missing value for \(name)") }
             values[name] = arguments[index + 1]; index += 2
         }
@@ -29,12 +27,12 @@ public enum ToolCommand {
         switch command {
         case "tool-open":
             guard let path = values["--app-path"], path.hasPrefix("/"), path.hasSuffix(".app") else { throw failure("--app-path requires an absolute app bundle path") }
-            request["appPath"] = path; request["dedicated"] = dedicated
+            request["appPath"] = path
             if let raw = values["--url"] {
-                guard let url = URL(string: raw), ["file", "http", "https"].contains(url.scheme ?? "") else { throw failure("--url requires file/http/https") }
+                guard let url = URL(string: raw), url.isFileURL else { throw failure("--url requires a local file URL") }
                 request["url"] = raw
             }
-        case "tool-place":
+        case "tool-place", "tool-restore":
             guard let pid = values["--pid"].flatMap(Int.init), pid > 0, pid <= Int(Int32.max),
                   let id = values["--window-id"].flatMap(UInt32.init), id > 0 else { throw failure("--pid and --window-id are required") }
             request["pid"] = pid; request["windowID"] = Int(id)

@@ -1,29 +1,31 @@
-# Quiet tool windows in Codex Plus
+# Agent-only invisible windows
 
-Codex stays on the middle external display. Identified independent tool windows use the rightmost external display without activation, Raise, pointer movement or Space changes. The target is bound to a stable display UUID; disconnecting it pauses routing instead of using the Codex screen.
+Codex Plus owns Agent-only windows on an invisible virtual display. The middle and right physical screens remain the user's two Codex windows. No horizontal/rightmost display selection, physical-screen fallback, utility-process ownership, or old display UUID remains.
 
-## Ownership
+## Display and identity
 
-`ToolWindowPolicy` in CodexPlusCore and `ToolWindowRouter` in CodexPlus own this feature. Use the existing display catalog and convert NSScreen.visibleFrame into AX coordinates. Missing visible work area skips placement. Protected Codex, X and X Chat windows never qualify.
+A small native AgentDisplay owns an independent display using the MIT virtual-display shim from Open Computer Use (Leo, upstream fccf49a). Attribution/license is included in source and the signed app. Its distinct product/serial never borrows OCU's live display. Runtime-resolved CGVirtualDisplay availability is checked; there is no change to any installed vendor app.
 
-Known utility bundles and explicitly dedicated tool-only sessions may have process observers. Mixed-use applications require a requested file URL matched to public AXDocument metadata, or explicit PID/window ID mapped to exactly one AX window. No timing, process ancestry or cold-start ownership inference. Baseline existing windows on every request; an already-open document creates no pending claim. Tab reuse consumes the claim without moving the containing window. A manual window opened after a tool document remains unowned. Handled windows are not repeatedly moved after a user drag. Sheets, minimized and fullscreen windows are excluded.
+Creation is lazy, before opening a new file/Agent Settings. Creation verifies online bounds, no mirroring or overlap, unchanged existing display positions/main identity and both human Codex frames. Every reuse checks current isolation. Failure returns before opening a resource and never falls back to a physical display. Status reads do not create displays.
 
-## Command and lifecycle
+AX windows are directly mapped to CGWindowID using the same runtime identity API as OCU. PID, process launch date, AX element and CG owner are checked before moving or restoring; overlapping geometry is never identity. Codex, X, X Chat and normal Plus windows are protected.
 
-The installed native binary accepts `--tool-open --app-path PATH [--url URL] [--dedicated]`, `--tool-place --pid PID --window-id ID`, `--tool-status`, `--tool-routing --enabled true/false`, `--tool-exempt`, and `--tool-recover`. Parsing occurs before NSApplication startup. Commands never auto-launch Plus or retry a sent request. A lost response is an unknown result; inspect status before another action. PID and window ID are checked using exact bounded conversions, including raw socket requests.
+## Ownership and lifecycle
 
-A separate mode-0600 `tool-control.sock` accepts newline-framed JSON. Accepted sockets explicitly clear inherited O_NONBLOCK. Fragmented reads and partial writes are handled off main. A connected peer with no payload does not block UI or the existing read-only status server. Routing executes on main; quit shuts down pending clients, and their single I/O owner closes each descriptor after reading/writing ends. `--status` retains its read-only contract and adds `toolWindows`.
+Only an explicit local file matched through AXDocument, an exact PID/window ID, or a newly created Agent Settings window qualifies. Baseline manual windows on each file request. File/tab reuse consumes the claim without moving the manual window; no delayed reopening revives consumed claims. There are no launch/activation/unhide watchers for utility applications, no process-wide dedicated mode, and no implicit utility windows.
 
-NSWorkspace opens use activates=false. Plus's own Settings entry invokes a nonactivating in-process callback instead of reopening the bundle (which would activate Codex). Newly created Settings is positioned before display; ordinary user Settings/F6 actions retain their intentional activation semantics. Menu pause removes observers; exemption and offscreen recovery are explicit. Claims are session-local and never restored after restart. A cold-app cannotComplete error retries only the same explicit scope for at most two seconds, carrying monotonically reduced document claims. The epoch captured before open invalidates both late completion and retries on pause/stop; the application is never reopened.
+The original request epoch cancels both late completions and bounded AX readiness retries. Pause discards pending observers/claims permanently; resuming only accepts new requests. Existing parked windows stay invisible. The independent command socket retains its complete-frame, no-replay and single-I/O-owner shutdown contracts.
 
-## Migration and cleanup
+Before mutating a window, retain its exact identity, original frame/display, and last observed frame. Verify the move by readback. Partial failures roll back immediately; failed rollback stays a recoverable record. Restore only the same live identity still at the last frame and an unchanged original display. A user-moved window is released without further movement. An unavailable CG inventory is unknown, not proof a window closed.
 
-Source issue moved from Dock Switch #62 to [Codex Plus #10](https://github.com/felixlark/codex-plus/issues/10). Dock Switch PR65 removes its tool router, commands, feature menu, policy and documentation ownership; its general launcher and positioning stay intact. No permanent forwarding adapter or second runtime remains.
+Normal Settings stays user-owned. Agent Settings is a separate window positioned on the virtual display before showing without activation. On normal quit, close only still-owned Agent Settings, restore all other live owned windows and read back results, then release the display. Failed restore or remaining windows cancels that quit without activating a dialog, preserving the display/status for recovery. No persistent AX handles or automatic crash reclaim exists; process crash handling remains macOS behavior.
 
-Deployment backs up the installed apps and the presence/value of the two legacy preferences. With both owners stopped, copy `quietToolWindowsEnabled` and `quietToolDisplayUUID` from Dock Switch only when the Plus destination key is absent, preserving false. Install cleaned Dock Switch before starting new Plus. Verify one owner, then remove only those two legacy keys. Existing launcher configuration, Plus layout/sorting and unrelated preferences remain intact. Historical evidence is retained.
+## Entry points
 
-## Verification
+The native installed binary exposes --tool-open (local file or own Agent Settings), --tool-place/--tool-restore with exact PID/window ID, --tool-status, and --tool-routing. Old --dedicated, --tool-exempt and --tool-recover semantics are removed. New preference agentToolWindowsEnabled defaults on for this user-requested feature; only quietToolDisplayUUID/quietToolWindowsEnabled are retired.
 
-Policy and CLI/socket unit tests do not launch GUI. Signed installed acceptance opens actual tool files and Settings while X Chat's text area holds a temporary unsent draft; record activation events, focused element, draft preservation, pointer and public window geometry. Check Codex stays middle, managed tools fit the right work area, existing/manual windows remain untouched, duplicate document opens do not claim windows, and pause/resume works. Check cold Plus CLI fails without opening an app and malformed/fragmented socket requests do not freeze the runtime. Clear only the temporary draft and close only test windows.
+## Acceptance
 
-Original Dock Switch 1.1.0 algorithm acceptance is retained at `~/Library/Logs/dock-switch/quiet-tools-20261114/`; migration evidence is under `~/Library/Logs/codex-plus/tool-window-migration-20261114/`. New installed acceptance is recorded separately in docs/acceptance.md. Physical hotplug and F6 require their own hardware evidence; unchanged earlier claims do not imply new coverage.
+Use signed /Applications installation. Record both current human Codex IDs/frames, foreground app/focused AX identity and a content fingerprint only (no message contents), system pointer/input-idle and clipboard count. Never place test text in X/X Chat. Open a local Agent test document, operate/save it through Agent Desktop strict headless and inspect it through OCU; prove virtual geometry and saved contents. Verify manual same-app window stays unchanged when another Agent file opens. Cover duplicate file, protected-window rejection, pause/cancel/resume, targeted restoration, user-move release, and normal display destruction/restart. Activation notifications and live geometry cover the critical actions, with user physical input distinguished from Agent activity. Unit tests never launch GUI.
+
+Migration evidence: ~/Library/Logs/codex-plus/agent-display-20261115/. Earlier right-screen acceptance is historical only and does not describe current behavior.

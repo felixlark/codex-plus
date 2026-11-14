@@ -2,14 +2,22 @@
 
 0.9.1 在每个窗口左下角的 Codex Plus 圆形按钮中央显示窗口编号（1、2……），点击仍打开设置。编号跟随窗口，切换聊天、移屏、页面重载或重启 Plus 时保持；关闭窗口后编号可以供新窗口使用。无需新增侧栏按钮或重载已有页面。设计见[窗口编号](docs/designs/window-number.md)。
 
-0.9.0 接管 Codex 独立工具窗口：Codex 保留中间外屏，明确认领的工具窗口尽量放到最右外屏，后台打开时保留当前输入焦点。菜单栏可暂停归集、保留当前窗口或找回屏外工具窗。普通浏览器和编辑器按具体窗口或文件认领，已有人工窗口不会变成整进程管理。原 Dock Switch 实现已移除，详见[工具窗口方案](docs/designs/quiet-tool-windows.md)。
+0.10.0 将 Agent 专用工具窗口隔离到不可见虚拟屏。中间与右侧两个人工 Codex 窗口、X 和 X Chat 始终保留原位置与输入焦点。右屏归集、专用应用整进程规则、旧显示器偏好和物理屏恢复入口均已移除。只认领明确文件或准确 PID/窗口 ID；人工设置与 Agent 设置使用不同窗口。
 
 ```sh
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-status
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-open --app-path /System/Applications/TextEdit.app --url file:///absolute/path/preview.txt
+"/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-open --app-path "/Applications/Codex Plus.app"
 ```
 
-命令要求 Plus 已运行；连接失败不会启动或重放工具。`requested` 仅表示接收打开请求，定位结果须看 `--tool-status`。仅对独立专用工具使用 `--dedicated`；浏览器窗口由其工具提供准确 PID 和窗口 ID 后，通过 `--tool-place --pid PID --window-id ID` 定位。
+浏览器等已有正式窗口提供方返回准确窗口身份后，可明确隔离或恢复该 Agent 窗口：
+
+```sh
+"/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-place --pid PID --window-id ID
+"/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-restore --pid PID --window-id ID
+```
+
+命令要求 Plus 已运行，连接失败不启动或重放工具；`requested` 只表示接收请求，须从状态确认 `parked`。虚拟屏不可用时不回退物理屏；`--tool-open` 对外部 App 要求实际本地文件，非文件窗口使用准确窗口 ID。暂停取消尚未认领的请求，已隔离窗口继续保留；正常退出会无激活地恢复仍受管的窗口。恢复失败时保留虚拟屏并报告状态。设计见[Agent 窗口隔离](docs/designs/quiet-tool-windows.md)。
 
 0.8.0 为每个 Codex 窗口独立保存侧栏展开与折叠状态，覆盖自定义分区、Projects 等内置分区和项目内聊天列表。一个窗口收起 Smart Shadow，不会影响另一个窗口；原生项目与聊天内容仍然共享。
 

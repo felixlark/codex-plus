@@ -13,6 +13,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let toolServer = ToolControlServer()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var agentSettingsWindow: NSWindow?
     private let settings = SettingsModel()
     private let launcher = CodexLauncher()
 
@@ -40,7 +41,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.9.1\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] [--dedicated] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-exempt | --tool-recover]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.10.0\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-restore --pid PID --window-id ID]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         guard SuggestionAcceptance.isValidOrAbsent else {
@@ -71,7 +72,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
-        toolWindows.openOwnSettings = { [weak self] in self?.presentSettings(activate: false) }
+        toolWindows.openOwnSettings = { [weak self] in self?.presentAgentSettings() }
         toolWindows.start()
         do { try toolServer.start { [weak self] in self?.toolWindows.command($0) ?? ["ok": false] } }
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
@@ -93,11 +94,9 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
-        let quiet = NSMenuItem(title: "工具窗口集中到右屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
+        let quiet = NSMenuItem(title: "Agent 工具窗口使用虚拟屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
         quiet.target = self
         menu.addItem(quiet)
-        menu.addItem(NSMenuItem(title: "当前窗口保留原位", action: #selector(exemptToolWindow), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "找回屏外工具窗口", action: #selector(recoverToolWindows), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -139,7 +138,11 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        launcher.stop { NSApp.reply(toApplicationShouldTerminate: true) } ? .terminateLater : .terminateNow
+        guard toolWindows.stop() else {
+            settings.error = "Agent 窗口尚未安全恢复，已保留虚拟屏。请通过工具状态核对后重试退出。"
+            return .terminateCancel
+        }
+        return launcher.stop { NSApp.reply(toApplicationShouldTerminate: true) } ? .terminateLater : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -158,8 +161,6 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolWindows.setEnabled(!toolWindows.enabled)
         item.state = toolWindows.enabled ? .on : .off
     }
-    @objc private func exemptToolWindow() { toolWindows.exemptFocused() }
-    @objc private func recoverToolWindows() { toolWindows.recover() }
     @objc private func showSettings() { presentSettings(activate: true) }
     private func presentSettings(activate: Bool) {
         settings.refresh()
@@ -170,13 +171,28 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: 500, height: 340)
             window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
-            toolWindows.prepareOwnWindow(window)
+            window.center()
             settingsWindow = window
         }
         if activate {
             settingsWindow?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         } else { settingsWindow?.orderFront(nil) }
+    }
+
+    private func presentAgentSettings() {
+        settings.refresh()
+        if agentSettingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            window.title = "Codex Plus — Agent"
+            window.isReleasedWhenClosed = false
+            window.contentMinSize = NSSize(width: 500, height: 340)
+            window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
+            agentSettingsWindow = window
+        }
+        guard let window = agentSettingsWindow, toolWindows.prepareAgentWindow(window) else { return }
+        window.orderFront(nil)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
