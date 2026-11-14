@@ -339,9 +339,9 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] build45 的 A 测试由手机点击一次 Send，原后台完成001–080；真实录屏在 Stop 仍可用时出现尚未完整的行，随后继续增长。Mac 官方同会话读回80行、0工具调用。
 - [x] build45 的 B 测试由手机点击一次 Send，Mac 官方入口确认 inProgress 后，断开本任务 gateway 连接。手机显示断线并明确不重发；Mac继续完成120行。明确终止并重开 iOS App 后读到120；A/B各1条，原草稿恢复。
 - [x] build46/iOS build3 的 C 回归由手机点击一次 Send。实际 AX 快照在 Stop 活跃时显示001–004及不完整的下一行；Mac同会话8.832秒完成40行、0工具调用，A/B/C各1条。手机跳到回复底部040，原36字草稿已恢复。
-- [x] 89项 Node 检查通过，涵盖 codec、准确 anchor、版本摘要和 paused target 启动顺序；未变 native 组件复用57项 Swift 检查。build46 签名构建及安装验签通过，原厂签名未更改。46另经真实消息路径验证 Swift 临时对象跨异步发送的生命周期。
-- [ ] build46 的持续资源验收：已启动真实 `proc_pid_rusage` physical footprint 采样，须同一 controller/gateway 身份连续不少于30分钟并保留至少3个样本，再填结果。45曾达约1.09GB，低 RSS 来自压缩，不能记健康通过；46逐帧 autoreleasepool、队列 workItem pool 与 cancelled handler 释放已修复对应持有链。
+- [x] Node24本机89项检查全部通过，CI的Node为84项通过／5项宿主依赖检查跳过、Swift57项通过；涵盖 codec、准确 anchor、版本摘要和 paused target 启动顺序。build46 签名构建及安装验签通过，原厂签名未更改。46另经真实消息路径验证 Swift 临时对象跨异步发送的生命周期。
+- [x] build46 同一 controller/gateway 身份连续1805.02秒，4次 `proc_pid_rusage` physical footprint 定点采样：controller 776.91→908.27→107.23→111.18 MiB，gateway 4.77→55.09→20.30→15.88 MiB。发送、断开和重连后持续保持连接，本窗口内未见持续增长。原宿主不变、专用窗保持最小化、人工两窗几何不变；下次启动自动建窗已关闭。45曾达约1.09GB，低 RSS 来自压缩，不能记健康通过；46逐帧 autoreleasepool、队列 workItem pool 与 cancelled handler 释放修复对应持有链。
 
 本批只证明模拟器原会话读取、发送、流式和断线语义。模拟器沿 Mac 网络栈访问其 Tailscale 地址，未验证物理 iPhone 的跨节点 WireGuard 或漫游；原 UI 的其他宿主能力也未全量验收。每次原 Codex 更新须重新绑定准确版本和摘要。
 
-本机私有证据位于 `~/Library/Logs/codex-plus/mobile-port-design-20261114/`：`installed45-ios-assets.json`、`message45-readback.json`、`disconnect45-readback.json`、`message46-readback.json`、三个 message/disconnect ledger、`simulator45-send-stream.mp4`、`simulator45-real-disconnected.png`、`simulator45-recovered-restored.png`、`simulator46-send-stream.mp4`、`simulator46-final-restored.png` 和 `health46.jsonl`。聊天原文、资源和接入配置不入 Git。
+本机私有证据位于 `~/Library/Logs/codex-plus/mobile-port-design-20261114/`：`installed45-ios-assets.json`、`message45-readback.json`、`disconnect45-readback.json`、`message46-readback.json`、三个 message/disconnect ledger、`simulator45-send-stream.mp4`、`simulator45-real-disconnected.png`、`simulator45-recovered-restored.png`、`simulator46-send-stream.mp4`、`simulator46-final-restored.png` 和 `health46.jsonl`、`health46-summary.json` 和两张46流式录屏帧。聊天原文、资源和接入配置不入 Git。
