@@ -23,7 +23,9 @@ export function isAnchorURL(text, config) {
   } catch { return false; }
 }
 export async function mobileHostSupported(archive) {
-  for (const [name, expected] of [['.vite/build/preload.js', mobileHost.preloadSHA256], ['webview/index.html', mobileHost.indexSHA256]]) {
+  const packageEntry = archive.entries.find(e => e.path === 'package.json');
+  if (!packageEntry || JSON.parse(await archive.read(packageEntry)).version !== mobileHost.version) return false;
+  for (const [name, expected] of [...Object.entries(mobileHost.nativeSHA256), ['.vite/build/preload.js', mobileHost.preloadSHA256], ['webview/index.html', mobileHost.indexSHA256]]) {
     const entry = archive.entries.find(e => e.path === name);
     if (!entry || createHash('sha256').update(await archive.read(entry)).digest('hex') !== expected) return false;
   }

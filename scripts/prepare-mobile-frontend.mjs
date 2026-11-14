@@ -26,6 +26,9 @@ export async function prepareFrontend({app, output}) {
     };
     const pkg = JSON.parse((await read('package.json')).toString());
     if (pkg.version !== mobileHost.version || digest(await read('.vite/build/preload.js')) !== mobileHost.preloadSHA256 || digest(await read('webview/index.html')) !== mobileHost.indexSHA256) throw Error('Unreviewed Codex host; keep the previous mobile build');
+    for (const [name, expected] of Object.entries(mobileHost.nativeSHA256)) {
+      if (digest(await read(name)) !== expected) throw Error('Unreviewed Codex native host; keep the previous mobile build');
+    }
     const assets = [];
     for (const entry of archive.entries.filter(e => e.path.startsWith('webview/'))) {
       const relative = entry.path.slice('webview/'.length);
