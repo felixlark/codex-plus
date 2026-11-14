@@ -3,7 +3,7 @@ import CodexPlusCore
 
 /// The accessory app owns one external controller. It never terminates Codex.
 final class CodexLauncher: ObservableObject {
-    @Published private(set) var summary = "F6 打开 Codex"
+    @Published private(set) var summary = "F6 打开双屏 Codex"
     @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
     @Published private(set) var suggestionSummary = "已关闭"
     @Published private(set) var reconnectResult: String?
@@ -23,10 +23,9 @@ final class CodexLauncher: ObservableObject {
     private var entryRequests = 0
     private var lastEntrySource = "none"
     private var autoSendEnabled = !SuggestionAcceptance.isRequested && UserDefaults.standard.bool(forKey: "autoSendSuggestions")
+    private let humanWindows = HumanWindows()
     private var needsPlacement = false
-    private var placementProcess: Process?
     private var placementStatus = "idle"
-    private var placementRule: String?
     private let appURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
     private let profile: String?
     private let stateURL: URL
@@ -46,6 +45,11 @@ final class CodexLauncher: ObservableObject {
     }
 
     func start() {
+        humanWindows.createWindow = { [weak self] nonce in
+            guard let input = self?.controllerInput,
+                  let data = try? JSONSerialization.data(withJSONObject: ["type": "create-human-window", "nonce": nonce]) else { return false }
+            do { try input.write(contentsOf: data + Data([10])); return true } catch { return false }
+        }
         refresh()
         if ownedHost() != nil { startController(attach: true) }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
@@ -58,13 +62,13 @@ final class CodexLauncher: ObservableObject {
         refresh()
         if let host = ownedHost() {
             if controller == nil { recovering = false; startController(attach: true) }
-            host.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            host.activate(options: [.activateIgnoringOtherApps])
             place(host)
             return
         }
         if profile == nil, let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
             .first(where: { !$0.isTerminated && $0.bundleURL == appURL }) {
-            existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            existing.activate(options: [.activateIgnoringOtherApps])
             place(existing)
             summary = "已打开 Codex；正常退出后再按 F6，项目自动排序将生效"
             return
@@ -105,7 +109,8 @@ final class CodexLauncher: ObservableObject {
         ["hotKey": "F6", "hotKeySource": "Karabiner", "dockItem": false,
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
          "entryRequests": entryRequests, "lastEntrySource": lastEntrySource, "placement": placementStatus,
-         "placementSource": "dock-switch", "placementRule": placementRule as Any? ?? NSNull(),
+         "placementSource": "codex-plus-dual-window", "placementRule": "external-1-right-2",
+         "humanWindows": humanWindows.status(), "nativeWindowDefaults": snapshot["nativeWindowDefaults"] ?? NSNull(),
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
@@ -131,12 +136,13 @@ final class CodexLauncher: ObservableObject {
              "name": display.name, "x": display.bounds.minX, "y": display.bounds.minY,
              "width": display.bounds.width, "height": display.bounds.height]
         }
-        if let data = try? JSONSerialization.data(withJSONObject: ["type": "sidebar-displays", "version": 1, "displays": displays]) {
+        if let data = try? JSONSerialization.data(withJSONObject: ["type": "sidebar-displays", "version": 1, "displays": displays, "humanWindows": humanWindows.frames()]) {
             try? input.write(contentsOf: data + Data([10]))
         }
     }
 
     private func refresh() {
+        if let host = ownedHost() { humanWindows.update(host) }
         publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
@@ -171,7 +177,7 @@ final class CodexLauncher: ObservableObject {
         if controller?.isRunning == true {
             switch snapshot["phase"] as? String {
             case "active":
-                summary = "F6 打开 Codex · Codex Plus 页面增强已连接"; recovering = false
+                summary = "F6 打开双屏 Codex · Codex Plus 页面增强已连接"; recovering = false
                 if needsPlacement, let host = ownedHost() { place(host) }
             case "failed", "disconnected": summary = "连接正在恢复；Codex 中的任务继续运行"
             default: summary = "正在连接 Codex…"
@@ -179,35 +185,17 @@ final class CodexLauncher: ObservableObject {
         } else if ownedHost() != nil {
             summary = "Codex 正在运行；正在恢复自动排序连接"
         } else if profile == nil && !NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").isEmpty {
-            summary = "F6 打开 Codex；正常退出后从 F6 启动可启用自动排序"
+            summary = "F6 打开双屏 Codex；正常退出后从 F6 启动可启用自动排序"
         } else if snapshot["phase"] as? String == "failed" {
             summary = "自动排序暂不可用：\(snapshot["error"] as? String ?? "连接失败")"
-        } else { summary = "F6 打开 Codex · Codex Plus 在菜单栏运行" }
+        } else { summary = "F6 打开双屏 Codex · Codex Plus 在菜单栏运行" }
     }
 
     private func place(_ host: NSRunningApplication) {
-        guard needsPlacement, placementProcess == nil else { return }
+        guard needsPlacement else { return }
         needsPlacement = false
-        placementRule = DockSwitchPlacement.load(appName: appURL.deletingPathExtension().lastPathComponent)
-        guard let placementRule else { placementStatus = "configuration-unavailable"; return }
-        let node = "/opt/homebrew/bin/node"
-        let cli = "/Applications/dock-switch.app/Contents/Resources/app/bin/dock-switch-cli.js"
-        guard FileManager.default.isExecutableFile(atPath: node), FileManager.default.fileExists(atPath: cli) else {
-            placementStatus = "unavailable"; return
-        }
-        // Target the already-open host, so placement cannot launch a second Codex.
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: node)
-        process.arguments = [cli, "place", "--pid", String(host.processIdentifier), "--placement", placementRule]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] exited in DispatchQueue.main.async {
-            guard let self, self.placementProcess === exited else { return }
-            self.placementStatus = exited.terminationStatus == 0 ? "placed" : "failed"
-            self.placementProcess = nil
-        }}
-        do { try process.run(); placementProcess = process; placementStatus = "placing" }
-        catch { placementStatus = "failed" }
+        humanWindows.open(host)
+        placementStatus = "dual-window"
     }
 
     private func startController(attach: Bool) {
