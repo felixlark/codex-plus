@@ -9,7 +9,7 @@ guard let at = arguments.firstIndex(of: "--bind"), arguments.indices.contains(at
       mobileIPv4(arguments[at + 1]) != nil else {
     fputs("Expected a Tailscale IPv4 bind address\n", stderr); exit(2)
 }
-let queue = DispatchQueue(label: "codex-plus.mobile.gateway")
+let queue = DispatchQueue(label: "codex-plus.mobile.gateway", autoreleaseFrequency: .workItem)
 let outputLock = NSLock()
 func emit(_ message: [String: Any]) {
     guard let bytes = try? JSONSerialization.data(withJSONObject: message) else { return }
@@ -47,7 +47,7 @@ listener.newConnectionHandler = { connection in
             else { connection.cancel(); return }
             receive(id, connection)
         case .failed: connection.cancel()
-        case .cancelled: ingress.cancelled(claim.id, connection: connection); connections.removeValue(forKey: id); emit(["type": "closed", "id": id])
+        case .cancelled: connection.stateUpdateHandler = nil; ingress.cancelled(claim.id, connection: connection); connections.removeValue(forKey: id); emit(["type": "closed", "id": id])
         default: break
         }
     }
@@ -65,13 +65,18 @@ listener.stateUpdateHandler = { state in
 listener.start(queue: queue)
 DispatchQueue.global().async {
     while let line = readLine() {
-        guard let data = line.data(using: .utf8), let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = message["id"] as? String else { continue }
-        queue.async {
-            guard let connection = connections[id] else { return }
-            if message["type"] as? String == "close" { connection.cancel(); return }
-            guard message["type"] as? String == "send", let text = message["text"] as? String else { return }
-            let context = NWConnection.ContentContext(identifier: "frame", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
-            connection.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { error in if error != nil { connection.cancel() } })
+        // This reader block lives for the whole helper process. Drain each
+        // JSON frame's Foundation temporaries; the queued closure retains its
+        // captured Swift values until the asynchronous send has consumed them.
+        autoreleasepool {
+            guard let data = line.data(using: .utf8), let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = message["id"] as? String else { return }
+            queue.async {
+                guard let connection = connections[id] else { return }
+                if message["type"] as? String == "close" { connection.cancel(); return }
+                guard message["type"] as? String == "send", let text = message["text"] as? String else { return }
+                let context = NWConnection.ContentContext(identifier: "frame", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
+                connection.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { error in if error != nil { connection.cancel() } })
+            }
         }
     }
     queue.async { listener.cancel(); ingress?.stop(); connections.values.forEach { $0.cancel() }; exit(0) }
