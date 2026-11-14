@@ -300,6 +300,8 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 ## 0.9.0 build 28 工具窗口迁移（2026-11-14）
 
+> 历史记录：下述右屏归集已由 build42 的 Agent 隐藏屏隔离替代；当前行为与验收见文末。
+
 工具窗口管理从 Dock Switch 迁入 Codex Plus；原案转为 Codex Plus #10。正式 `/Applications/Codex Plus.app` 0.9.0 build28，Plus PID62464、宿主64999保持，包含已验收的protocol8排序。Dock Switch正式1.1.1，清扫PR65已合并。
 
 - [x] 移入精确文件/窗口认领与右屏归集，复用Plus显示器目录。Dock Switch的旧源码、菜单、策略、测试及工具CLI移除；直接向旧control.sock请求tool-status返回Unsupported command。两项偏好仅在Plus未设置时迁入，随后清除旧域对应键；其他设置和安装备份保留。
@@ -311,3 +313,18 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] OCU清空临时标记且未发送消息，关闭A/B与本轮Plus设置，TextEdit恢复原先未运行状态。Plus保持正常运行、既有自动发送true和页面增强接入保留。新X Chat的独立bundle已加入保护名单，产品入口实测拒绝认领。
 
 证据：`~/Library/Logs/codex-plus/tool-window-migration-20261114/`，含interaction28.json、focus28.jsonl、geometry28-*.json、regression28.json、socket28-acceptance.json、textedit28-ocu.png/txt、cold-cli.json、installed-identity*.json、测试/构建/安装日志。原人工窗口验收保留于`~/Library/Logs/dock-switch/quiet-tools-20261114/`。物理热插拔和实体F6未在本轮重复验证。
+
+
+## 0.10.0 build42 Agent 隐藏屏隔离（2026-11-15）
+
+正式安装 `/Applications/Codex Plus.app` build42，Mach-O UUID `534DE81E-EDE9-314F-8F79-9A8E70C86187`，SHA256 `3def6400327efcb8419afb60f8bbad21acae61fc5c533fc2842ff52d59aee90a`。冻结候选与安装二进制相同并严格验签通过。集成源码基线94b7230含 mobile40；本案5个核心源文件摘要在 release42/identity.json，PR14含对应改动。
+
+- [x] 删除右屏归集、utility/dedicated整进程认领、旧显示器UUID与物理屏自动回退；Plus只读引用OCU持久隐藏屏，精确PID/window_id停放、归还及release均由OCU处理。Plus不创建、重排、销毁或重启共享显示器。
+- [x] 真实Agent Settings后台打开、重复打开复用准确窗口、OCU同会话原生关闭按钮关闭；11287样本/570秒，实际前台Safari输入控件不变，0activation，鼠标/剪贴板/两个人工Codex窗口/显示器拓扑不变。此项不代替XChat专项。
+- [x] 正式42创建独立TextEdit验收文件，窗口27437进入OCU屏34；OCU精确窗口语义修改、虚拟窗口保存，文件内容及SHA落盘一致，真实截图确认；重复文件打开复用原窗。OCU精确restore和原生close成功。既有同PID的人工TextEdit26774全程原位且保留。
+- [x] 上述文本事务994样本/51.2秒：前台Codex及同一焦点元素保持，0activation，鼠标/剪贴板/人工Codex26050和26131/全部显示器模式、主屏与拓扑不变。仅本案验收文档被改写。
+- [x] 正式入口拒绝认领两个人工Codex窗口；旧recover/exempt/dedicated入口拒绝。暂停取消在途请求，恢复后无旧请求重放，observer计数0、ownedWindows空。
+- [x] 85 Node沿未变mobile40资源证据；57 Swift含短MCP行读和断管写2项新纯进程内回归。正式OCU同生产客户端schema握手0.0376秒。真实交互发现并修复FileHandle短包阻塞/SIGPIPE，以及get_app_state两种观察均false非法；采用screenshot-only注册，弃置图像，诊断仅包含本窗口身份/几何/受限错误首行。
+- [ ] X Chat输入框焦点连续实测：当前等待真实输入框就位，未激活XChat、未输入或发送任何标记。
+
+证据：`~/Library/Logs/codex-plus/agent-display-20261115/` 中 installed42.json、settings42-open.json、settings42-close-verified/receipt.json、settings42-focus-summary.json、text42-open.json、text42-edit/receipt.json、text42-screen/get_app_state-3.png、text42-restored.json、text42-close/receipt.json、text42-focus-summary.json、protection42.json、swift41.log、pipe41-tests.log、preflight41-live.txt。build42是当前模块的真实安装交互证据；后续集成候选需重新绑定身份/摘要，复用未变模块证据。
