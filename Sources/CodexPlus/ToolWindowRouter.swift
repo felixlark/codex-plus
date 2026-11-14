@@ -487,7 +487,7 @@ final class ToolWindowRouter {
         var target: [String: Any] = ["type": "agent-virtual-display", "supported": display.supported, "preparing": display.isPreparing]
         if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
         if let bounds = display.bounds {
-            target["id"] = display.id; target["name"] = "Codex Plus Agent"
+            target["id"] = display.id; target["name"] = "Open Computer Use"; target["owner"] = "OCU persistent-display"
             target["frame"] = jsonFrame(bounds)
         }
         var windows = managed.map { record -> [String: Any] in
