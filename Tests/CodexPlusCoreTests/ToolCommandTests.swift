@@ -19,12 +19,18 @@ final class ToolCommandTests: XCTestCase {
         var pair: [Int32] = [0, 0]
         XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair), 0)
         defer { close(pair[0]); close(pair[1]) }
+        // accept() inherits a nonblocking listener on macOS. A delayed sender
+        // must remain connected until the complete request arrives.
+        XCTAssertEqual(fcntl(pair[0], F_SETFL, O_NONBLOCK), 0)
+        try ToolControlChannel.configureAcceptedSocket(pair[0])
+        XCTAssertEqual(fcntl(pair[0], F_GETFL) & O_NONBLOCK, 0)
         let expected = Data(("{\"note\":\"" + String(repeating: "x", count: 12000) + "\"}").utf8)
         let writeFD = pair[1]
         let writer = expectation(description: "fragmented writer completes")
         DispatchQueue.global().async {
             defer { writer.fulfill() }
             for piece in [Data(expected.prefix(13)), Data(expected.dropFirst(13)), Data([0x0A])] {
+                usleep(30_000)
                 try? ToolControlChannel.writeAll(piece, to: writeFD)
             }
         }

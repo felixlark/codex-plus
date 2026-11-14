@@ -64,6 +64,12 @@ public enum ToolControlChannel {
         return withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { operation($0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
     }
 
+    public static func configureAcceptedSocket(_ fd: Int32) throws {
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) == 0 else { throw posixError() }
+        suppressSIGPIPE(fd)
+    }
+
     public static func request(_ command: [String: Any]) throws -> Data {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw posixError() }

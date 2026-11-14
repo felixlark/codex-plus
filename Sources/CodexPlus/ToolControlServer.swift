@@ -26,13 +26,14 @@ final class ToolControlServer {
                 guard let self else { return }
                 let client = accept(self.descriptor, nil, nil)
                 guard client >= 0 else { return }
-                ToolControlChannel.suppressSIGPIPE(client)
+                do { try ToolControlChannel.configureAcceptedSocket(client) }
+                catch { close(client); return }
                 self.clients.insert(client)
                 let epoch = self.epoch
                 DispatchQueue.global().async {
                     let frame = try? ToolControlChannel.readFrame(from: client)
                     let request = frame.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-                    DispatchQueue.main.async { [weak self] in
+                    DispatchQueue.main.async { [weak self = self] in
                         guard let self, self.epoch == epoch, self.clients.remove(client) != nil else { return }
                         guard let request else { close(client); return }
                         let response = handle(request)

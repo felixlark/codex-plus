@@ -26,6 +26,7 @@ final class ToolWindowRouter {
     private var tokens: [NSObjectProtocol] = []
     private var lastOpen: [String: Any] = [:]
     private var observationErrors: [pid_t: Int] = [:]
+    private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
     private var targetUUID: String? = UserDefaults.standard.string(forKey: "quietToolDisplayUUID")
     private(set) var enabled = UserDefaults.standard.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
@@ -58,6 +59,7 @@ final class ToolWindowRouter {
     }
 
     func stop() {
+        observationEpoch = UUID()
         tokens.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         tokens.removeAll()
         if let screenToken { NotificationCenter.default.removeObserver(screenToken) }
@@ -101,12 +103,16 @@ final class ToolWindowRouter {
             scan(existing); return true
         }
         var observer: AXObserver?
-        guard AXObserverCreate(app.processIdentifier, { _, _, _, context in
+        let creation = AXObserverCreate(app.processIdentifier, { _, _, _, context in
             guard let context else { return }
             let owner = Unmanaged<ToolWindowRouter>.fromOpaque(context).takeUnretainedValue()
             // AX callbacks are delivered on the main run loop.
             for w in Array(owner.watches.values) { owner.scan(w) }
-        }, &observer) == .success, let observer else { return false }
+        }, &observer)
+        guard creation == .success, let observer else {
+            observationErrors[app.processIdentifier] = Int(creation.rawValue)
+            return false
+        }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let watch = Watch(app: app, observer: observer, known: baseline, documents: documents)
         watches[app.processIdentifier] = watch
@@ -214,6 +220,7 @@ final class ToolWindowRouter {
     }
 
     func setEnabled(_ flag: Bool) {
+        if !flag { observationEpoch = UUID() }
         enabled = flag
         UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
         if flag {
@@ -242,6 +249,26 @@ final class ToolWindowRouter {
         for i in managed.indices where managed[i].result != "exempt" {
             guard let f = frame(managed[i].element), !areas.contains(where: { ToolWindowPolicy.intersects(f, $0) }) else { continue }
             if move(managed[i].element, to: ToolWindowPolicy.destination(frame: f, area: area)) { managed[i].result = "recovered" }
+        }
+    }
+
+    // Retry only AX readiness for the same explicit resource/dedicated scope.
+    // This never opens the app again or infers ownership from elapsed time.
+    private func retryObservation(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
+                                  id: String, epoch: UUID, remaining: Int = 8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.enabled, self.observationEpoch == epoch, !app.isTerminated else { return }
+            let observed = self.watch(app, baseline: baseline, documents: documents)
+            let placed = self.windows(app).contains { w in
+                !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
+            }
+            let retry = !observed && !placed && remaining > 1
+                && self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue)
+            if self.lastOpen["id"] as? String == id {
+                self.lastOpen["state"] = placed ? "placed" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
+                self.lastOpen["observing"] = self.watches[app.processIdentifier] != nil
+            }
+            if retry { self.retryObservation(app, baseline: baseline, documents: documents, id: id, epoch: epoch, remaining: remaining - 1) }
         }
     }
 
@@ -318,6 +345,11 @@ final class ToolWindowRouter {
                 self.lastOpen = ["id": id, "state": state,
                                  "pid": Int(app.processIdentifier), "observing": observed,
                                  "newProcess": existing == nil]
+                if scope != .none && !observed && !placed && self.enabled,
+                   self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue) {
+                    self.lastOpen["state"] = "waiting-for-accessibility"
+                    self.retryObservation(app, baseline: baseline, documents: documents, id: id, epoch: self.observationEpoch)
+                }
             }
         }
         if let url = resource {
