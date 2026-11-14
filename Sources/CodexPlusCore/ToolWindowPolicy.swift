@@ -38,17 +38,6 @@ public enum ToolWindowPolicy {
         pid > 0 && windowID > 0 && pid == livePID && windowID == liveWindowID && launchDate == liveLaunchDate
     }
 
-    public enum ParkingOutcome: Equatable { case parked(CGRect), rolledBack, recoveryRequired(CGRect?) }
-    /// Readback is authoritative, including AX writes that report a partial failure.
-    public static func parkTransaction(original: CGRect, target: CGRect,
-                                       write: (CGRect) -> Void, read: () -> CGRect?) -> ParkingOutcome {
-        write(target)
-        if let actual = read(), sameFrame(actual, target) { return .parked(actual) }
-        write(original)
-        if let actual = read(), sameFrame(actual, original) { return .rolledBack }
-        return .recoveryRequired(read())
-    }
-
     public static func sameFrame(_ a: CGRect, _ b: CGRect) -> Bool {
         abs(a.minX - b.minX) < 2 && abs(a.minY - b.minY) < 2
             && abs(a.width - b.width) < 2 && abs(a.height - b.height) < 2
