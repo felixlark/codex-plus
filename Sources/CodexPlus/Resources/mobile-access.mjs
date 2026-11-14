@@ -48,14 +48,14 @@ export class MobileAccess {
   constructor(config, {cdp, command, sessions, stateFile, publish}) {
     this.config = config; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
     this.stateFile = stateFile; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
-    this.stopped = false; this.creationAttempted = false; this.busy = false;
+    this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && !!this.anchorSession, port: this.port ?? null}; }
+  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async interceptDocument(id, event) {
-    if (!this.isAnchorURL(event.request.url) || event.resourceType !== 'Document') return false;
-    await this.command(id, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200, responseHeaders: [{name: 'Content-Type', value: 'text/html; charset=utf-8'}, {name: 'Content-Security-Policy', value: "default-src 'none'"}], body: Buffer.from('<!doctype html><html><head><title>Codex Plus Mobile</title></head><body>Codex Plus 移动接入专用窗口</body></html>').toString('base64')});
+    if (this.stopped || !this.isAnchorURL(event.request.url) || event.resourceType !== 'Document') return false;
+    await this.command(id, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200, responseHeaders: [{name: 'Content-Type', value: 'text/html; charset=utf-8'}, {name: 'Content-Security-Policy', value: "default-src 'none'"}], body: Buffer.from(`<!doctype html><html><head><title>Codex Plus Mobile</title><meta name="codex-plus-mobile-anchor" content="${this.config.anchor}"></head><body>Codex Plus 移动接入专用窗口</body></html>`).toString('base64')});
     this.anchorSession = id; this.phase = 'anchor-loading'; return true;
   }
   async tick() {
@@ -69,22 +69,39 @@ export class MobileAccess {
         const session = [...this.sessions].find(([, s]) => s.target === anchors[0].targetId);
         if (!session) return;
         this.anchorTarget = anchors[0].targetId; this.anchorSession = session[0];
-        const result = await this.evaluate('({preload:!!window.electronBridge,ui:!!document.querySelector("script[src]")})');
-        if (!result.preload || result.ui) throw Error('Mobile anchor preload isolation unavailable');
+        if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
+        const {frameTree} = await this.command(session[0], 'Page.getFrameTree');
+        if (this.preparationAttempted && frameTree.frame.loaderId === this.preparingFromLoader) { this.phase = 'anchor-loading'; return; }
+        const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
+        if (!context) { this.phase = 'anchor-loading'; return; }
+        const result = await this.evaluate(`({preload:!!window.electronBridge,complete:document.readyState==='complete',isolated:document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content===${JSON.stringify(this.config.anchor)},ui:!!document.querySelector('script[src]')})`, false, context.id);
+        if (!result.complete) { this.phase = 'anchor-loading'; return; }
+        if (!result.preload) throw Error('Mobile anchor preload unavailable');
+        if (!result.isolated || result.ui) {
+          // Prepare only the nonce-owned page. Navigation closes its old native
+          // app-host port before any phone port is installed; never replace a live view.
+          if (this.preparationAttempted) throw Error('Mobile anchor isolation unavailable');
+          this.preparationAttempted = true; this.preparingFromLoader = frameTree.frame.loaderId; this.phase = 'preparing-anchor';
+          const navigation = await this.command(session[0], 'Page.navigate', {url: anchors[0].url});
+          if (navigation.errorText) throw Error('Mobile anchor navigation failed');
+          return;
+        }
+        this.anchorPrepared = true;
         if (!this.gateway) await this.startGateway();
       } else if (!this.creationAttempted) {
         const source = [...this.sessions].find(([, s]) => s.main);
         if (!source) return;
         this.creationAttempted = true; this.phase = 'creating-anchor';
         const route = `/local/${this.config.threadId}?codexPlusMobileAnchor=${this.config.anchor}`;
-        await this.command(source[0], 'Runtime.evaluate', {expression: `window.electronBridge.sendMessageFromView(${JSON.stringify({type: 'open-in-new-window', path: route})})`, awaitPromise: true});
+        const creation = await this.command(source[0], 'Runtime.evaluate', {expression: `window.electronBridge.sendMessageFromView(${JSON.stringify({type: 'open-in-new-window', path: route})})`, awaitPromise: true});
+        if (creation.exceptionDetails) throw Error('Native anchor creation failed');
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
     } catch { this.phase = 'unavailable'; await this.close(); }
     finally { this.busy = false; }
   }
-  async evaluate(expression, awaitPromise = false) {
+  async evaluate(expression, awaitPromise = false, contextId) {
     if (!this.anchorSession || !this.sessions.has(this.anchorSession)) throw Error('Mobile anchor unavailable');
-    const result = await this.command(this.anchorSession, 'Runtime.evaluate', {expression, returnByValue: true, awaitPromise});
+    const result = await this.command(this.anchorSession, 'Runtime.evaluate', {expression, returnByValue: true, awaitPromise, ...contextId !== undefined ? {contextId} : {}});
     if (result.exceptionDetails) throw Error('Mobile anchor failed'); return result.result.value;
   }
   async startGateway() {

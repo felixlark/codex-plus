@@ -322,13 +322,16 @@ async function main(){
     sessions.set(sessionId,session);state.attached++;
     try{
       if(targetInfo.type==='page'&&!stopping){
-        const work=[command(sessionId,'Runtime.enable'),command(sessionId,'Page.enable')];
+        const work=[command(sessionId,'Page.enable')];
         if(resources.length||mobile){work.push(command(sessionId,'Fetch.enable',{patterns:[...resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),...mobile?[{urlPattern:'app://-/index.html*',resourceType:'Document',requestStage:'Response'}]:[]]}),command(sessionId,'Network.enable'),command(sessionId,'Network.setCacheDisabled',{cacheDisabled:true}));}
         if(suggestionSupported)work.push(command(sessionId,'Runtime.addBinding',{name:backgroundGuardBinding}));
         if(sidebarSupported)work.push(command(sessionId,'Runtime.addBinding',{name:sidebarBinding}));
         if(featureSupported){work.push(command(sessionId,'Runtime.addBinding',{name:featureBinding}),command(sessionId,'Page.addScriptToEvaluateOnNewDocument',{source:featureSource}).then(result=>{session.script=result.identifier;}));}
         await Promise.all(work);
         await command(sessionId,'Runtime.runIfWaitingForDebugger');
+        // Runtime.enable may wait for a context that a paused renderer cannot create.
+        // Keep Fetch and new-document hooks installed first, then release startup.
+        await command(sessionId,'Runtime.enable');
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
         if(session.main){
           if(suggestionSupported)await updateSuggestionPolicy();
@@ -337,7 +340,7 @@ async function main(){
           if(runtime.result.value===8)state.projectOrder.phase='active';
           else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
         }
-        state.lastAttach={waitingForDebugger,fetchBeforeResume:true};state.phase='active';
+        state.lastAttach={waitingForDebugger,fetchBeforeResume:true,runtimeAfterResume:true};state.phase='active';
       }
     }finally{
       await command(sessionId,'Runtime.runIfWaitingForDebugger').catch(()=>{});state.resumed++;await publish();

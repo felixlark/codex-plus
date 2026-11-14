@@ -80,3 +80,77 @@ test('revoked binding installation and old fatal cannot replace or release its s
   await manager.onBinding({sessionId: 'anchor', params: {name: '__codexPlusMobileOutbound', executionContextId: 1, payload: JSON.stringify({kind: 'fatal', connection: 'A-connection'})}});
   assert.equal(manager.clients.get('B'), b);
 });
+
+test('a missed first document waits for a new loader before starting the gateway', async () => {
+  const config = {threadId: 'thread', anchor: 'anchor'}, url = new URL('app://-/index.html');
+  url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
+  const commands = []; let starts = 0, loader = 'old', probes = 0;
+  let document = {complete: true, preload: true, isolated: false, ui: true};
+  const manager = new MobileAccess(config, {
+    cdp: {call: async () => ({targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]})},
+    command: async (session, method, params) => {
+      commands.push({session, method, params});
+      return method === 'Page.getFrameTree' ? {frameTree: {frame: {id: 'root', loaderId: loader}}} : {};
+    },
+    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts: new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]])}]]),
+    stateFile: '/unused', publish: async () => {},
+  });
+  manager.evaluate = async () => { probes++; return document; };
+  manager.startGateway = async () => { starts++; manager.gateway = {}; manager.phase = 'listening'; };
+  await manager.tick();
+  assert.equal(starts, 0); assert.equal(manager.status().anchorReady, false);
+  assert.deepEqual(commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), [url.href]);
+  // Navigation can ACK while the old complete document is still committed.
+  await manager.tick(); assert.equal(probes, 1); assert.equal(starts, 0); assert.equal(manager.stopped, false);
+  loader = 'new'; document = {complete: false, preload: true, isolated: false, ui: false};
+  await manager.tick(); assert.equal(starts, 0);
+  assert.equal(await manager.interceptDocument('anchor-session', {request: {url: url.href}, resourceType: 'Document', requestId: 'first'}), true);
+  const fulfilled = commands.find(c => c.method === 'Fetch.fulfillRequest');
+  assert.ok(Buffer.from(fulfilled.params.body, 'base64').toString().includes('name="codex-plus-mobile-anchor" content="anchor"'));
+  document = {complete: true, preload: true, isolated: true, ui: false};
+  await manager.tick(); await manager.tick();
+  assert.equal(starts, 1); assert.equal(manager.status().anchorReady, true);
+  assert.equal(commands.filter(c => c.method === 'Page.navigate').length, 1);
+  assert.equal(commands.filter(c => c.method === 'Runtime.evaluate').length, 0);
+});
+
+test('a new loader that remains unisolated closes without replaying navigation or creating a second window', async () => {
+  const config = {threadId: 'thread', anchor: 'anchor'}, url = new URL('app://-/index.html');
+  url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
+  let navigations = 0, closes = 0, starts = 0, loader = 'old';
+  const manager = new MobileAccess(config, {
+    cdp: {call: async method => { if (method === 'Target.closeTarget') { closes++; return {}; } return {targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]}; }},
+    command: async (_, method) => { if (method === 'Page.getFrameTree') return {frameTree: {frame: {id: 'root', loaderId: loader}}}; assert.equal(method, 'Page.navigate'); navigations++; return {}; },
+    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts: new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]])}]]),
+    stateFile: '/unused', publish: async () => {},
+  });
+  manager.evaluate = async () => ({complete: true, preload: true, isolated: false, ui: true});
+  manager.startGateway = async () => { starts++; };
+  await manager.tick(); loader = 'new'; await manager.tick(); await manager.tick();
+  assert.equal(navigations, 1); assert.equal(closes, 1); assert.equal(starts, 0);
+  assert.equal(manager.stopped, true); assert.equal(manager.status().anchorReady, false);
+});
+
+test('anchor probes use the new context when navigation commits during frame-tree lookup', async () => {
+  const url = new URL('app://-/index.html'); url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
+  const contexts = new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]]);
+  let swap = false, loader = 'old', starts = 0;
+  const manager = new MobileAccess({threadId: 'thread', anchor: 'anchor'}, {
+    cdp: {call: async () => ({targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]})},
+    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts}]]), stateFile: '/unused', publish: async () => {},
+    command: async (_, method) => {
+      if (method === 'Page.getFrameTree') {
+        if (swap) { contexts.clear(); contexts.set(2, {id: 2, auxData: {isDefault: true, frameId: 'root'}}); loader = 'new'; }
+        return {frameTree: {frame: {id: 'root', loaderId: loader}}};
+      }
+      assert.equal(method, 'Page.navigate'); return {};
+    },
+  });
+  manager.evaluate = async (_, __, contextId) => {
+    assert.equal(contextId, swap ? 2 : 1);
+    return {complete: true, preload: true, isolated: swap, ui: !swap};
+  };
+  manager.startGateway = async () => { starts++; manager.gateway = {}; };
+  await manager.tick(); swap = true; await manager.tick();
+  assert.equal(starts, 1); assert.equal(manager.stopped, false);
+});
