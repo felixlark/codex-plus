@@ -123,7 +123,7 @@ export function adaptSidebarLayout(original,adapted=original.toString()) {
   return {supported:true,source:adapted};
 }
 
-export function needsSidebarReconnect(background,sidebar,required=true){return background?.protocol!==5||!(background.registered>0)||required&&(sidebar?.protocol!==1||sidebar.bound!==true);}
+export function needsSidebarReconnect(background,sidebar,required=true,order){return order!==7||background?.protocol!==5||!(background.registered>0)||required&&(sidebar?.protocol!==1||sidebar.bound!==true);}
 
 export class SidebarProfiles {
   constructor(file,fs){this.file=file;this.fs=fs;this.profiles={};this.storageReady=true;this.writes=Promise.resolve();}
