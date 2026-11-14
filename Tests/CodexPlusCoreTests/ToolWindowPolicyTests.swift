@@ -74,4 +74,11 @@ final class ToolWindowPolicyTests: XCTestCase {
         let unverified = ToolWindowPolicy.parkTransaction(original: original, target: target, write: { _ in }, read: { nil })
         XCTAssertEqual(unverified, .recoveryRequired(nil))
     }
+    func testLateDocumentCannotMarkReusedManualRequestAsParked() {
+        let a = URL(fileURLWithPath: "/tmp/a.txt")
+        XCTAssertTrue(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "A", actualDocument: a))
+        // A is pending; B returns early as already open; A then appears.
+        XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "B", actualDocument: a))
+        XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: nil, resource: nil, latestRequestID: "B", actualDocument: a))
+    }
 }

@@ -35,6 +35,7 @@ final class ToolWindowRouter {
     private var tokens: [NSObjectProtocol] = []
     private var lastOpen: [String: Any] = [:]
     private var currentOpenDocument: URL?
+    private var currentOpenID: String?
     private var observationErrors: [pid_t: Int] = [:]
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
@@ -205,7 +206,8 @@ final class ToolWindowRouter {
         case .parked(let actual):
             managed[i].lastKnownFrame = actual; managed[i].result = "parked"
             if lastOpen["pid"] as? Int == Int(pid),
-               (currentOpenDocument != nil && document(window) == currentOpenDocument || lastOpen["windowID"] as? UInt32 == id) {
+               (ToolWindowPolicy.canReportParked(requestID: currentOpenID, resource: currentOpenDocument,
+                   latestRequestID: lastOpen["id"] as? String, actualDocument: document(window)) || lastOpen["windowID"] as? UInt32 == id) {
                 lastOpen["state"] = "parked"
             }
             return true
@@ -290,7 +292,7 @@ final class ToolWindowRouter {
             guard enabled, !stopping, let original = frame(window),
                   !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return error("Protected or unavailable Agent window") }
             let requestID = UUID().uuidString, epoch = observationEpoch
-            currentOpenDocument = nil
+            currentOpenDocument = nil; currentOpenID = nil
             lastOpen = ["id": requestID, "pid": Int(identity.pid), "windowID": identity.windowID, "state": "preparing-display"]
             prepareDisplay(id: requestID, epoch: epoch) { [weak self] in
                 guard let self else { return }
@@ -309,7 +311,12 @@ final class ToolWindowRouter {
     }
 
     func setEnabled(_ flag: Bool) {
-        if !flag { observationEpoch = UUID() }
+        if !flag {
+            observationEpoch = UUID(); currentOpenDocument = nil; currentOpenID = nil
+            if ["preparing-display", "requested", "waiting-for-window", "waiting-for-accessibility"].contains(lastOpen["state"] as? String ?? "") {
+                lastOpen["state"] = "routing-cancelled"
+            }
+        }
         stopping = false
         enabled = flag
         UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
@@ -365,7 +372,7 @@ final class ToolWindowRouter {
         let id = UUID().uuidString, epoch = observationEpoch
         if bundle.bundleIdentifier == CodexWorkspacePreference.domain {
             guard let openOwnSettings else { return error("Agent Settings entry unavailable") }
-            currentOpenDocument = nil
+            currentOpenDocument = nil; currentOpenID = nil
             lastOpen = ["id": id, "state": "preparing-display"]
             prepareDisplay(id: id, epoch: epoch) { [weak self] in
                 guard let self else { return }
@@ -380,12 +387,13 @@ final class ToolWindowRouter {
         guard let raw = request["url"] as? String, let resource = URL(string: raw), resource.isFileURL,
               FileManager.default.fileExists(atPath: resource.path) else { return error("A current local file URL is required; other tools need an exact window ID") }
         let appURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        currentOpenDocument = nil; currentOpenID = nil
         if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.resolvingSymlinksInPath() == appURL }),
            windows(app).compactMap(document).contains(resource.standardizedFileURL.resolvingSymlinksInPath()) {
             lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(app.processIdentifier)]
             return ["ok": true, "state": "opened-in-existing-window"]
         }
-        currentOpenDocument = resource.standardizedFileURL.resolvingSymlinksInPath()
+        currentOpenDocument = resource.standardizedFileURL.resolvingSymlinksInPath(); currentOpenID = id
         lastOpen = ["id": id, "state": "preparing-display"]
         prepareDisplay(id: id, epoch: epoch) { [weak self] in self?.openFile(appURL: appURL, resource: resource, id: id, requestEpoch: epoch) }
         return ["ok": true, "requestID": id, "state": "requested"]

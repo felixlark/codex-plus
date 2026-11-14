@@ -15,6 +15,10 @@ public enum ToolWindowPolicy {
         let normalized = resource.standardizedFileURL.resolvingSymlinksInPath()
         return existingDocuments.contains(normalized) ? .none : .document(normalized)
     }
+    public static func canReportParked(requestID: String?, resource: URL?, latestRequestID: String?, actualDocument: URL?) -> Bool {
+        guard let requestID, let resource else { return false }
+        return requestID == latestRequestID && resource == actualDocument
+    }
     public static func remainingClaims(_ claims: Set<URL>, knownDocuments: Set<URL>) -> Set<URL> {
         claims.subtracting(knownDocuments)
     }
