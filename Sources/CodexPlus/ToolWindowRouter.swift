@@ -89,7 +89,11 @@ final class ToolWindowRouter {
     }
 
     @discardableResult
-    private func watch(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?) -> Bool {
+    private func watch(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
+                       remainder: ((Set<URL>?) -> Void)? = nil) -> Bool {
+        func reportRemainder(_ watch: Watch) {
+            remainder?(documents.map { $0.intersection(watch.documents ?? []) })
+        }
         guard enabled, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
         if let existing = watches[app.processIdentifier] {
@@ -100,7 +104,7 @@ final class ToolWindowRouter {
                 AXObserverAddNotification(existing.observer, window, kAXTitleChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
             }
             if let documents { existing.documents?.formUnion(documents) }
-            scan(existing); return true
+            scan(existing); reportRemainder(existing); return true
         }
         var observer: AXObserver?
         let creation = AXObserverCreate(app.processIdentifier, { _, _, _, context in
@@ -124,6 +128,7 @@ final class ToolWindowRouter {
             // Existing windows can still be placed even when this application
             // does not publish window notifications. Do not claim observation.
             scan(watch)
+            reportRemainder(watch)
             watches.removeValue(forKey: app.processIdentifier); return false
         }
         observationErrors.removeValue(forKey: app.processIdentifier)
@@ -132,6 +137,7 @@ final class ToolWindowRouter {
             AXObserverAddNotification(observer, window, kAXTitleChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
         }
         scan(watch)
+        reportRemainder(watch)
         return true
     }
 
@@ -258,17 +264,18 @@ final class ToolWindowRouter {
                                   id: String, epoch: UUID, remaining: Int = 8) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, self.enabled, self.observationEpoch == epoch, !app.isTerminated else { return }
-            let observed = self.watch(app, baseline: baseline, documents: documents)
+            var pending = documents
+            let observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 })
             let placed = self.windows(app).contains { w in
                 !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
             }
-            let retry = !observed && !placed && remaining > 1
+            let retry = !observed && !placed && pending?.isEmpty != true && remaining > 1
                 && self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue)
             if self.lastOpen["id"] as? String == id {
-                self.lastOpen["state"] = placed ? "placed" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
+                self.lastOpen["state"] = placed ? "placed" : pending?.isEmpty == true ? "opened-in-existing-window" : observed ? "waiting-for-window" : retry ? "waiting-for-accessibility" : "observation-unavailable"
                 self.lastOpen["observing"] = self.watches[app.processIdentifier] != nil
             }
-            if retry { self.retryObservation(app, baseline: baseline, documents: documents, id: id, epoch: epoch, remaining: remaining - 1) }
+            if retry { self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: epoch, remaining: remaining - 1) }
         }
     }
 
@@ -308,11 +315,16 @@ final class ToolWindowRouter {
         let id = UUID().uuidString
         lastOpen = ["id": id, "state": "requested"]
         if let existing { lastOpen["pid"] = Int(existing.processIdentifier) }
+        let requestEpoch = observationEpoch
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
         let completion: (NSRunningApplication?, Error?) -> Void = { [weak self] app, failure in
             DispatchQueue.main.async {
                 guard let self else { return }
+                guard self.enabled, self.observationEpoch == requestEpoch else {
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
+                    return
+                }
                 if let failure {
                     if let documents, let existing, let watch = self.watches[existing.processIdentifier], watch.documents != nil {
                         watch.documents?.subtract(documents)
@@ -322,6 +334,7 @@ final class ToolWindowRouter {
                 }
                 guard let app else { self.lastOpen = ["id": id, "state": "failed"]; return }
                 if let watch = self.watches[app.processIdentifier] { self.scan(watch) }
+                var pending = documents
                 let observed: Bool
                 if scope != .none {
                     // Never recreate a pre-open claim that was already consumed
@@ -329,8 +342,8 @@ final class ToolWindowRouter {
                     if preObserved { observed = self.watches[app.processIdentifier] != nil }
                     else if let documents,
                             ToolWindowPolicy.remainingClaims(documents, knownDocuments: Set(baseline.compactMap(self.document))).isEmpty {
-                        observed = false
-                    } else { observed = self.watch(app, baseline: baseline, documents: documents) }
+                        pending = []; observed = false
+                    } else { observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 }) }
                 } else {
                     // Temporal coincidence is not evidence of tool ownership.
                     // Browser/non-file windows need an explicit window ID.
@@ -345,10 +358,10 @@ final class ToolWindowRouter {
                 self.lastOpen = ["id": id, "state": state,
                                  "pid": Int(app.processIdentifier), "observing": observed,
                                  "newProcess": existing == nil]
-                if scope != .none && !observed && !placed && self.enabled,
+                if scope != .none && !observed && !placed && pending?.isEmpty != true,
                    self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue) {
                     self.lastOpen["state"] = "waiting-for-accessibility"
-                    self.retryObservation(app, baseline: baseline, documents: documents, id: id, epoch: self.observationEpoch)
+                    self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: requestEpoch)
                 }
             }
         }
