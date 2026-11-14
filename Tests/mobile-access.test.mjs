@@ -50,7 +50,9 @@ test('revoked asynchronous encoding cannot emit into the next connection', async
   context.__codexPlusMobileEndpoint.receive(JSON.stringify({connection: 'A', kind: 'worker-subscribe', worker: 'git'}));
   await new Promise(resolve => setTimeout(resolve, 5));
   callback({reply: 'old'}); await encoded;
-  context.__codexPlusMobileEndpoint.close(); delete context.__codexPlusMobileEndpoint;
+  // Match the real controller: revoke and delete inside the renderer context.
+  // Node 24 can retain a contextified global after host-side property deletion.
+  vm.runInContext('globalThis.__codexPlusMobileEndpoint.close(); delete globalThis.__codexPlusMobileEndpoint', context);
   install('B'); release();
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(sent, []);
