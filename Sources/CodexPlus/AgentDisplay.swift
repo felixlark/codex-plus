@@ -11,42 +11,68 @@ final class AgentDisplay {
     var bounds: CGRect? { id != 0 && CGDisplayIsOnline(id) != 0 ? CGDisplayBounds(id) : nil }
     var supported: Bool { cp_virtual_display_is_supported() != 0 }
 
-    func ensure() -> CGRect? {
-        if handle != nil {
-            let online = Self.displays()
-            let valid = ToolWindowPolicy.isIsolatedDisplay(id: id, before: online.filter { $0.key != id }, after: online,
-                primaryBefore: CGMainDisplayID(), primaryAfter: CGMainDisplayID(),
-                mirrored: CGDisplayIsInMirrorSet(id) != 0 || CGDisplayMirrorsDisplay(id) != 0)
-            guard valid else { error = "virtual-display-no-longer-isolated"; return nil }
-            error = nil; return bounds
-        }
-        let before = Self.displays()
-        let primary = CGMainDisplayID()
-        let codex = Self.codexFrames()
-        guard supported else { error = "virtual-display-unavailable"; return nil }
+    private(set) var isPreparing = false
+    private var validated = false
+    private var waiting: [(CGRect?) -> Void] = []
+    private(set) var diagnostics: [String: Any] = [:]
+
+    /// Read-only topology validation for an already prepared display.
+    func currentBounds() -> CGRect? {
+        guard handle != nil, validated, !isPreparing else { return nil }
+        let online = Self.displays()
+        let valid = ToolWindowPolicy.isIsolatedDisplay(id: id, before: online.filter { $0.key != id }, after: online,
+            primaryBefore: CGMainDisplayID(), primaryAfter: CGMainDisplayID(),
+            mirrored: CGDisplayIsInMirrorSet(id) != 0 || CGDisplayMirrorsDisplay(id) != 0)
+        guard valid else { error = "virtual-display-no-longer-isolated"; return nil }
+        return bounds
+    }
+
+    /// Never wait for main-queue CGVirtualDisplay callbacks while blocking main.
+    func prepare(_ completion: @escaping (CGRect?) -> Void) {
+        if isPreparing { waiting.append(completion); return }
+        if handle != nil { completion(currentBounds()); return }
+        let before = Self.displays(), primary = CGMainDisplayID(), codex = Self.codexFrames()
+        guard supported else { error = "virtual-display-unavailable"; completion(nil); return }
         var created: UnsafeMutableRawPointer?
         let display = cp_virtual_display_create("Codex Plus Agent", 1920, 1080, 60, &created)
-        guard display != 0, let created else { error = "virtual-display-create-failed"; return nil }
-        handle = created; id = display
-        // OCU's upstream display readiness budget. No GUI input or focus changes.
-        let deadline = Date().addingTimeInterval(3)
-        while CGDisplayBounds(display).isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        guard preservePriorMain(primary, original: before) else {
-            error = "virtual-display-main-preservation-failed"
-            cp_virtual_display_destroy(created); handle = nil; id = 0
-            return nil
+        guard display != 0, let created else { error = "virtual-display-create-failed"; completion(nil); return }
+        handle = created; id = display; isPreparing = true; validated = false
+        waiting = [completion]; error = nil; diagnostics = [:]
+        poll(before: before, primary: primary, codex: codex, deadline: Date().addingTimeInterval(3))
+    }
+
+    private func poll(before: [UInt32: CGRect], primary: UInt32, codex: [UInt32: CGRect], deadline: Date) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            guard let self, self.isPreparing, self.handle != nil else { return }
+            if self.bounds?.isEmpty == false, self.preservePriorMain(primary, original: before) {
+                let after = Self.displays()
+                if ToolWindowPolicy.isIsolatedDisplay(id: self.id, before: before, after: after,
+                       primaryBefore: primary, primaryAfter: CGMainDisplayID(),
+                       mirrored: CGDisplayIsInMirrorSet(self.id) != 0 || CGDisplayMirrorsDisplay(self.id) != 0),
+                   codex == Self.codexFrames() {
+                    self.validated = true; self.finish(self.bounds); return
+                }
+            }
+            if Date() < deadline { self.poll(before: before, primary: primary, codex: codex, deadline: deadline); return }
+            self.error = "virtual-display-topology-unverified"
+            self.diagnostics = ["primaryBefore": primary, "primaryAfter": CGMainDisplayID(),
+                "ownedID": self.id, "online": CGDisplayIsOnline(self.id),
+                "before": Self.framesJSON(before), "after": Self.framesJSON(Self.displays()),
+                "codexBefore": Self.framesJSON(codex), "codexAfter": Self.framesJSON(Self.codexFrames())]
+            if let handle = self.handle { cp_virtual_display_destroy(handle) }
+            self.handle = nil; self.id = 0; self.validated = false
+            self.finish(nil)
         }
-        let after = Self.displays()
-        guard ToolWindowPolicy.isIsolatedDisplay(id: display, before: before, after: after,
-                  primaryBefore: primary, primaryAfter: CGMainDisplayID(),
-                  mirrored: CGDisplayIsInMirrorSet(display) != 0 || CGDisplayMirrorsDisplay(display) != 0),
-              codex == Self.codexFrames() else {
-            error = "virtual-display-topology-unverified"
-            cp_virtual_display_destroy(created); handle = nil; id = 0
-            return nil
-        }
-        error = nil
-        return bounds
+    }
+
+    private func finish(_ bounds: CGRect?) {
+        isPreparing = false
+        let callbacks = waiting; waiting.removeAll()
+        callbacks.forEach { $0(bounds) }
+    }
+
+    private static func framesJSON(_ frames: [UInt32: CGRect]) -> [String: [String: CGFloat]] {
+        Dictionary(uniqueKeysWithValues: frames.map { (String($0.key), ["x": $0.value.minX, "y": $0.value.minY, "width": $0.value.width, "height": $0.value.height]) })
     }
 
     // Same login-session-only main-screen protection as OCU's installed
@@ -72,6 +98,7 @@ final class AgentDisplay {
 
     /// Call only after all owned windows are restored or closed.
     func release() -> Bool {
+        guard !isPreparing else { error = "virtual-display-preparing"; return false }
         guard let handle else { return true }
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]], let area = bounds else {
             error = "display-window-query-unavailable"; return false
@@ -88,7 +115,7 @@ final class AgentDisplay {
         let primary = CGMainDisplayID()
         let codex = Self.codexFrames()
         cp_virtual_display_destroy(handle)
-        self.handle = nil; id = 0
+        self.handle = nil; id = 0; validated = false
         let after = Self.displays()
         let unchanged = before.allSatisfy { after[$0.key] == $0.value }
             && primary == CGMainDisplayID() && codex == Self.codexFrames()

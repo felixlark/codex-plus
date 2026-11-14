@@ -17,7 +17,7 @@
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-restore --pid PID --window-id ID
 ```
 
-命令要求 Plus 已运行，连接失败不启动或重放工具；`requested` 只表示接收请求，须从状态确认 `parked`。虚拟屏不可用时不回退物理屏；`--tool-open` 对外部 App 要求实际本地文件，非文件窗口使用准确窗口 ID。暂停取消尚未认领的请求，已隔离窗口继续保留；正常退出会无激活地恢复仍受管的窗口。恢复失败时保留虚拟屏并报告状态。设计见[Agent 窗口隔离](docs/designs/quiet-tool-windows.md)。
+命令要求 Plus 已运行，连接失败不启动或重放工具；`requested` 只表示接收请求，屏幕准备与开窗都异步进行，须从状态确认 `parked` 或 `opened-agent-settings`。虚拟屏不可用时不回退物理屏；`--tool-open` 对外部 App 要求实际本地文件，非文件窗口使用准确窗口 ID。暂停取消尚未认领的请求，已隔离窗口继续保留；正常退出会无激活地恢复仍受管的窗口。恢复失败时保留虚拟屏并报告状态。设计见[Agent 窗口隔离](docs/designs/quiet-tool-windows.md)。
 
 0.8.0 为每个 Codex 窗口独立保存侧栏展开与折叠状态，覆盖自定义分区、Projects 等内置分区和项目内聊天列表。一个窗口收起 Smart Shadow，不会影响另一个窗口；原生项目与聊天内容仍然共享。
 

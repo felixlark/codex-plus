@@ -34,6 +34,7 @@ final class ToolWindowRouter {
     private var managed: [Managed] = []
     private var tokens: [NSObjectProtocol] = []
     private var lastOpen: [String: Any] = [:]
+    private var currentOpenDocument: URL?
     private var observationErrors: [pid_t: Int] = [:]
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
@@ -191,7 +192,7 @@ final class ToolWindowRouter {
         // New documents can inherit the previous Agent window's virtual location.
         // They are still exact file claims; never invent a physical restore target.
         let bornOnAgentDisplay = display.bounds.map { ToolWindowPolicy.contained(original, in: $0) } ?? false
-        guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.ensure() else { lastError = display.error ?? "original-display-unavailable"; return false }
+        guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.currentBounds() else { lastError = display.error ?? "original-display-unavailable"; return false }
         let area = bounds.insetBy(dx: 20, dy: 20)
         let target = ToolWindowPolicy.destination(frame: original, area: area)
         managed.append(Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
@@ -203,7 +204,10 @@ final class ToolWindowRouter {
         switch outcome {
         case .parked(let actual):
             managed[i].lastKnownFrame = actual; managed[i].result = "parked"
-            if lastOpen["pid"] as? Int == Int(pid) { lastOpen["state"] = "parked" }
+            if lastOpen["pid"] as? Int == Int(pid),
+               (currentOpenDocument != nil && document(window) == currentOpenDocument || lastOpen["windowID"] as? UInt32 == id) {
+                lastOpen["state"] = "parked"
+            }
             return true
         case .rolledBack: managed.remove(at: i)
         case .recoveryRequired(let actual): managed[i].lastKnownFrame = actual; managed[i].result = "rollback-failed"
@@ -283,7 +287,22 @@ final class ToolWindowRouter {
             }
             guard let app = NSRunningApplication(processIdentifier: identity.pid),
                   let window = exactWindow(app, id: identity.windowID) else { return error("No exact live AX window for this PID/window ID") }
-            return ["ok": place(window, pid: identity.pid), "status": status()]
+            guard enabled, !stopping, let original = frame(window),
+                  !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return error("Protected or unavailable Agent window") }
+            let requestID = UUID().uuidString, epoch = observationEpoch
+            currentOpenDocument = nil
+            lastOpen = ["id": requestID, "pid": Int(identity.pid), "windowID": identity.windowID, "state": "preparing-display"]
+            prepareDisplay(id: requestID, epoch: epoch) { [weak self] in
+                guard let self else { return }
+                guard let exact = self.exactWindow(app, id: identity.windowID),
+                      let current = self.frame(exact), ToolWindowPolicy.sameFrame(current, original) else {
+                    if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = "window-changed-routing-cancelled" }
+                    return
+                }
+                let parked = self.place(exact, pid: identity.pid)
+                if self.lastOpen["id"] as? String == requestID { self.lastOpen["state"] = parked ? "parked" : "failed" }
+            }
+            return ["ok": true, "requestID": requestID, "state": "requested"]
         case "tool-open": return open(request)
         default: return error("Unsupported tool command")
         }
@@ -310,7 +329,8 @@ final class ToolWindowRouter {
             var pending = documents
             let observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 })
             let placed = self.windows(app).contains { w in
-                !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
+                !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
+                    && self.managed.contains(where: { CFEqual($0.element, w) })
             }
             let retry = !observed && !placed && pending?.isEmpty != true && remaining > 1
                 && self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue)
@@ -322,29 +342,60 @@ final class ToolWindowRouter {
         }
     }
 
+    private func prepareDisplay(id: String, epoch: UUID, operation: @escaping () -> Void) {
+        display.prepare { [weak self] bounds in
+            guard let self else { return }
+            guard self.enabled, !self.stopping, self.observationEpoch == epoch else {
+                if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
+                return
+            }
+            guard bounds != nil else {
+                if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed"; self.lastOpen["error"] = self.display.error ?? "display-unavailable" }
+                return
+            }
+            operation()
+        }
+    }
+
     private func open(_ request: [String: Any]) -> [String: Any] {
         guard enabled, !stopping else { return error("Agent window routing is paused") }
         guard AXIsProcessTrusted() else { return error("Codex Plus Accessibility permission is required") }
         guard let path = request["appPath"] as? String, path.hasPrefix("/"),
-              let bundle = Bundle(path: path), path.hasSuffix(".app") else { return error("Use an absolute, non-protected app bundle path") }
+              let bundle = Bundle(path: path), path.hasSuffix(".app") else { return error("An absolute app bundle is required") }
+        let id = UUID().uuidString, epoch = observationEpoch
         if bundle.bundleIdentifier == CodexWorkspacePreference.domain {
-            guard let openOwnSettings, display.ensure() != nil else { return error(display.error ?? "Agent Settings entry unavailable") }
-            openOwnSettings()
-            lastOpen = ["state": "opened-agent-settings", "windowID": ownAgentWindow?.windowNumber ?? 0]
-            return ["ok": ownAgentWindow?.isVisible == true, "state": "opened-agent-settings",
-                    "windowID": ownAgentWindow?.windowNumber ?? 0]
+            guard let openOwnSettings else { return error("Agent Settings entry unavailable") }
+            currentOpenDocument = nil
+            lastOpen = ["id": id, "state": "preparing-display"]
+            prepareDisplay(id: id, epoch: epoch) { [weak self] in
+                guard let self else { return }
+                openOwnSettings()
+                if self.lastOpen["id"] as? String == id {
+                    self.lastOpen = ["id": id, "state": self.ownAgentWindow?.isVisible == true ? "opened-agent-settings" : "failed", "windowID": self.ownAgentWindow?.windowNumber ?? 0]
+                }
+            }
+            return ["ok": true, "requestID": id, "state": "requested"]
         }
         guard !ToolWindowPolicy.protectedBundles.contains(bundle.bundleIdentifier ?? "") else { return error("Protected user application") }
+        guard let raw = request["url"] as? String, let resource = URL(string: raw), resource.isFileURL,
+              FileManager.default.fileExists(atPath: resource.path) else { return error("A current local file URL is required; other tools need an exact window ID") }
         let appURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.resolvingSymlinksInPath() == appURL }),
+           windows(app).compactMap(document).contains(resource.standardizedFileURL.resolvingSymlinksInPath()) {
+            lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(app.processIdentifier)]
+            return ["ok": true, "state": "opened-in-existing-window"]
+        }
+        currentOpenDocument = resource.standardizedFileURL.resolvingSymlinksInPath()
+        lastOpen = ["id": id, "state": "preparing-display"]
+        prepareDisplay(id: id, epoch: epoch) { [weak self] in self?.openFile(appURL: appURL, resource: resource, id: id, requestEpoch: epoch) }
+        return ["ok": true, "requestID": id, "state": "requested"]
+    }
+
+    private func openFile(appURL: URL, resource: URL, id: String, requestEpoch: UUID) {
         let existing = NSWorkspace.shared.runningApplications.first { $0.bundleURL?.resolvingSymlinksInPath() == appURL }
         let baseline = existing.map(windows) ?? []
-        let resource: URL?
-        if let raw = request["url"] as? String {
-            guard let url = URL(string: raw), url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return error("A current local file URL is required; other tools need an explicit window ID") }
-            resource = url
-        } else { return error("A local file URL is required; use tool-place for a known Agent window") }
         let existingDocuments = Set(baseline.compactMap { document($0) })
-        let scope = ToolWindowPolicy.scope(bundleID: bundle.bundleIdentifier ?? "", resource: resource, existingDocuments: existingDocuments)
+        let scope = ToolWindowPolicy.scope(bundleID: Bundle(url: appURL)?.bundleIdentifier ?? "", resource: resource, existingDocuments: existingDocuments)
         // File document identity is public AX metadata. Web/tab identity is left
         // to the official browser tool, followed by exact tool-place if needed.
         let documents: Set<URL>?
@@ -353,17 +404,14 @@ final class ToolWindowRouter {
         case .none: documents = []
         }
         if scope == .none {
-            lastOpen = ["state": "opened-in-existing-window", "pid": Int(existing?.processIdentifier ?? 0)]
-            return ["ok": true, "state": "opened-in-existing-window"]
+            if lastOpen["id"] as? String == id { lastOpen["state"] = "opened-in-existing-window" }
+            return
         }
-        guard display.ensure() != nil else { return error(display.error ?? "Agent display unavailable") }
         let preObserved: Bool
         if let existing, documents?.isEmpty == false { preObserved = watch(existing, baseline: baseline, documents: documents) }
         else { preObserved = false }
-        let id = UUID().uuidString
-        lastOpen = ["id": id, "state": "requested"]
+        if lastOpen["id"] as? String == id { lastOpen["state"] = "requested" }
         if let existing { lastOpen["pid"] = Int(existing.processIdentifier) }
-        let requestEpoch = observationEpoch
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
         let completion: (NSRunningApplication?, Error?) -> Void = { [weak self] app, failure in
@@ -378,9 +426,9 @@ final class ToolWindowRouter {
                         watch.documents?.subtract(documents)
                         if watch.documents?.isEmpty == true { self.removeWatch(existing.processIdentifier) }
                     }
-                    self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription]; return
+                    if self.lastOpen["id"] as? String == id { self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription] }; return
                 }
-                guard let app else { self.lastOpen = ["id": id, "state": "failed"]; return }
+                guard let app else { if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed" }; return }
                 if let watch = self.watches[app.processIdentifier] { self.scan(watch) }
                 var pending = documents
                 let observed: Bool
@@ -398,26 +446,22 @@ final class ToolWindowRouter {
                     observed = false
                 }
                 let placed = self.windows(app).contains { w in
-                    !baseline.contains(where: { CFEqual($0, w) }) && self.managed.contains(where: { CFEqual($0.element, w) })
+                    !baseline.contains(where: { CFEqual($0, w) }) && documents?.contains(self.document(w) ?? URL(fileURLWithPath: "/")) == true
+                    && self.managed.contains(where: { CFEqual($0.element, w) })
                 }
-                let reused = resource?.isFileURL == true && baseline.compactMap(self.document).contains(resource!.standardizedFileURL)
+                let reused = baseline.compactMap(self.document).contains(resource.standardizedFileURL.resolvingSymlinksInPath())
                 let state = placed ? "parked" : reused ? "opened-in-existing-window" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
-                self.lastOpen = ["id": id, "state": state,
-                                 "pid": Int(app.processIdentifier), "observing": observed,
-                                 "newProcess": existing == nil]
+                if self.lastOpen["id"] as? String == id {
+                    self.lastOpen = ["id": id, "state": state, "pid": Int(app.processIdentifier), "observing": observed, "newProcess": existing == nil]
+                }
                 if scope != .none && !observed && !placed && pending?.isEmpty != true,
                    self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue) {
-                    self.lastOpen["state"] = "waiting-for-accessibility"
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "waiting-for-accessibility" }
                     self.retryObservation(app, baseline: baseline, documents: pending, id: id, epoch: requestEpoch)
                 }
             }
         }
-        if let url = resource {
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: completion)
-        } else {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: completion)
-        }
-        return ["ok": true, "requestID": id, "state": "requested"]
+        NSWorkspace.shared.open([resource], withApplicationAt: appURL, configuration: config, completionHandler: completion)
     }
 
     private func windowInfo(_ id: UInt32) -> [String: Any]? {
@@ -432,7 +476,8 @@ final class ToolWindowRouter {
     }
 
     private func status() -> [String: Any] {
-        var target: [String: Any] = ["type": "agent-virtual-display", "supported": display.supported]
+        var target: [String: Any] = ["type": "agent-virtual-display", "supported": display.supported, "preparing": display.isPreparing]
+        if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
         if let bounds = display.bounds {
             target["id"] = display.id; target["name"] = "Codex Plus Agent"
             target["frame"] = jsonFrame(bounds)
@@ -460,7 +505,7 @@ final class ToolWindowRouter {
     }
 
     func prepareAgentWindow(_ window: NSWindow) -> Bool {
-        guard enabled, !stopping, let bounds = display.ensure() else { return false }
+        guard enabled, !stopping, let bounds = display.currentBounds() else { return false }
         let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
         let current = CGRect(x: window.frame.minX, y: primaryHeight - window.frame.maxY, width: window.frame.width, height: window.frame.height)
         if window.isVisible && !ToolWindowPolicy.contained(current, in: bounds) {
