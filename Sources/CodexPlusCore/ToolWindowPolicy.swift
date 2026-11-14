@@ -6,7 +6,8 @@ public enum ToolWindowPolicy {
     public static let enabledKey = "quietToolWindowsEnabled"
     public static let protectedBundles: Set<String> = [
         "com.openai.codex", "com.webcatalog.juli.x-chat",
-        "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf"
+        "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
+        "com.google.Chrome.app.ehpoaimemjameeijlpblkfpomemadkke"
     ]
     public static let utilityBundles: Set<String> = [
         "me.longbiaochen.dock-switch.settings", "me.longbiaochen.codex-plus",

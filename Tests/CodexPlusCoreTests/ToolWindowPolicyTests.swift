@@ -11,7 +11,9 @@ final class ToolWindowPolicyTests: XCTestCase {
             XCTAssertEqual(ToolWindowPolicy.scope(bundleID: bundle, dedicated: false, resource: resource, existingDocuments: [resource]), .none)
         }
         XCTAssertEqual(ToolWindowPolicy.scope(bundleID: "my.generated.tool", dedicated: true, resource: nil, existingDocuments: []), .dedicated)
-        XCTAssertEqual(ToolWindowPolicy.scope(bundleID: "com.openai.codex", dedicated: true, resource: nil, existingDocuments: []), .none)
+        for bundle in ToolWindowPolicy.protectedBundles {
+            XCTAssertEqual(ToolWindowPolicy.scope(bundleID: bundle, dedicated: true, resource: resource, existingDocuments: []), .none)
+        }
     }
     func testReusingAManualWindowConsumesTheFileClaimBeforeLaterReopen() {
         let a = URL(fileURLWithPath: "/tmp/tool-a.txt")

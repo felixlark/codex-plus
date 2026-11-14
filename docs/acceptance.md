@@ -261,3 +261,15 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 本候选同时集成既有界面任务的 footer 尺寸与先清理界面再等待在途请求补丁；可见退出/尺寸验收归原任务，不以本次建议续轮代替。宿主为更新后 PID64999，未为本次验收强退。
 
 - [x] build18敏感字符串建议停在待审，展示行动/对象/范围；OCU拒绝后submitted保持1。已退出仅测试UUID会话并正常重启，保留更新后检测到的日常偏好；未将测试开关写回日常偏好。
+
+
+## 0.9.0 build 25 状态优先排序（2026-11-14）
+
+原排序只按最近活动时间排列项目，项目内沿用原生时间顺序，导致较新的闲置任务穿插在旧的进行中任务前面。现在项目与完整任务列表都优先显示需要输入／批准／报错、进行中、未读、其余；项目同类按活动时间，任务同类保留原生排序。投影位于原生预览截取和导航生成之前。
+
+- [x] 排序候选 `0211af6` 的64项Node、42项Swift检查及远端CI通过；与布局验收文档集成后的候选树保持不变。PR #8以保留祖先的merge方式合入，merge为 `df94e81b515ca02ad216b24edd87df95d2810da0`。
+- [x] build24签名构建通过但未单独安装；实际验收使用统一安装版 `/Applications/Codex Plus.app` 0.9.0 build25、Plus PID16753、controller17096，宿主PID64999保持。安装版排序脚本SHA256 `07da289a5052b6da345989d3d35b4320520efcbb56608038258f14e14d8412ec`，与候选源码一致。
+- [x] OCU在设置页临时关闭自动发送并执行重新接入。首次因当前聊天有输入而拒绝；通过原生导航切至本案空编辑器后，所有页面安全检查通过并完成接入。随后恢复自动发送true、watching、pageReady=true、unknown=0，并返回先前聊天。验收没有编辑或发送输入内容。
+- [x] 两主窗口排序协议均为7、projectOrder及sidebarLayout均active；每窗57个项目的优先级倒置均为0，旧现场有3处。OCU可见error项目quant-trading位于Projects第一，smart-shadow中的两个Working任务先于闲置任务，wechat-use中的旧Working任务也移到闲置任务之前。Pinned和自定义分区继续显示。
+
+本次证明本地Codex项目；不外推远程或ChatGPT来源。证据目录：`~/Library/Logs/codex-plus/sidebar-priority-20261114/`，包括tests.log、build.log、signing.log、candidate-hashes.txt、merge-tree.json、pr-merge.json、before-order.json、after-order.json、after-ocu.png/txt及final-status.json。
