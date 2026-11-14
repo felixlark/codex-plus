@@ -137,7 +137,7 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
   mergeStored();
   const states = new Map();
   let stats = null;
-  const runtime = { protocol: 7, get stats() { return stats; }, sort(groups, recency, updated, status) {
+  const runtime = { protocol: 8, get stats() { return stats; }, sort(groups, recency, updated, status) {
     const clocks = new Map();
     const priorities = new Map();
     let changed = false;
@@ -150,7 +150,7 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
         times[key] = Math.max(Number.isFinite(times[key]) ? times[key] : 0, now()); ownTimes[key] = times[key]; changed = true;
       }
       if (current !== undefined) states.set(key, current);
-      priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'active' ? 1 : current === 'unread' ? 2 : 3);
+      priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'unread' ? 1 : current === 'active' ? 2 : 3);
       const a = recency(key), b = updated(key), c = times[key];
       const values = [a,b,c].filter(Number.isFinite);
       clocks.set(key, values.length ? Math.max(...values) : undefined);

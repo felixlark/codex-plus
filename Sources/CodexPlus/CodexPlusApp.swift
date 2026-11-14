@@ -9,12 +9,27 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static var retainedDelegate: CodexPlusApp?
     private let observer = CodexWorkspaceObserver()
     private let statusServer = StatusServer()
+    private let toolWindows = ToolWindowRouter()
+    private let toolServer = ToolControlServer()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private let settings = SettingsModel()
     private let launcher = CodexLauncher()
 
     static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.first?.hasPrefix("--tool-") == true {
+            do {
+                let request = try ToolCommand.parse(arguments)!
+                let data = try ToolControlChannel.request(request)
+                FileHandle.standardOutput.write(data)
+                if let result = try JSONSerialization.jsonObject(with: data) as? [String: Any], result["ok"] as? Bool == false { exit(1) }
+            } catch {
+                fputs("Codex Plus tool command failed: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--status") {
             do {
                 FileHandle.standardOutput.write(try StatusChannel.readStatus())
@@ -25,7 +40,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.8.0\nUsage: CodexPlus [--status | --help]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("Codex Plus 0.9.0\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] [--dedicated] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-exempt | --tool-recover]\nF6 opens Codex. Settings are available in the menu bar.")
             return
         }
         guard SuggestionAcceptance.isValidOrAbsent else {
@@ -56,6 +71,10 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
+        toolWindows.openOwnSettings = { [weak self] in self?.presentSettings(activate: false) }
+        toolWindows.start()
+        do { try toolServer.start { [weak self] in self?.toolWindows.command($0) ?? ["ok": false] } }
+        catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
@@ -74,6 +93,11 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
+        let quiet = NSMenuItem(title: "工具窗口集中到右屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
+        quiet.target = self
+        menu.addItem(quiet)
+        menu.addItem(NSMenuItem(title: "当前窗口保留原位", action: #selector(exemptToolWindow), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "找回屏外工具窗口", action: #selector(recoverToolWindows), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -93,11 +117,12 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.8.0",
+                return ["ok": true, "app": "Codex Plus", "version": "0.9.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "launchAtLogin": SMAppService.mainApp.status == .enabled,
-                        "workspace": self.observer.status(), "launcher": self.launcher.status()]
+                        "workspace": self.observer.status(), "launcher": self.launcher.status(),
+                        "toolWindows": self.toolWindows.command(["command": "tool-status"])]
             }
         } catch {
             settings.error = "状态接口启动失败。\(error.localizedDescription)"
@@ -120,13 +145,23 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         observer.stop()
         statusServer.stop()
+        toolServer.stop()
+        toolWindows.stop()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        for item in menu.items where item.action == #selector(toggleToolWindows(_:)) { item.state = toolWindows.enabled ? .on : .off }
         settings.refresh()
     }
 
-    @objc private func showSettings() {
+    @objc private func toggleToolWindows(_ item: NSMenuItem) {
+        toolWindows.setEnabled(!toolWindows.enabled)
+        item.state = toolWindows.enabled ? .on : .off
+    }
+    @objc private func exemptToolWindow() { toolWindows.exemptFocused() }
+    @objc private func recoverToolWindows() { toolWindows.recover() }
+    @objc private func showSettings() { presentSettings(activate: true) }
+    private func presentSettings(activate: Bool) {
         settings.refresh()
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
@@ -135,11 +170,13 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: 500, height: 340)
             window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
-            window.center()
+            toolWindows.prepareOwnWindow(window)
             settingsWindow = window
         }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if activate {
+            settingsWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else { settingsWindow?.orderFront(nil) }
     }
 
     @objc private func quit() { NSApp.terminate(nil) }

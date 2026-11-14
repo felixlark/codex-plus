@@ -261,3 +261,42 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 本候选同时集成既有界面任务的 footer 尺寸与先清理界面再等待在途请求补丁；可见退出/尺寸验收归原任务，不以本次建议续轮代替。宿主为更新后 PID64999，未为本次验收强退。
 
 - [x] build18敏感字符串建议停在待审，展示行动/对象/范围；OCU拒绝后submitted保持1。已退出仅测试UUID会话并正常重启，保留更新后检测到的日常偏好；未将测试开关写回日常偏好。
+
+
+## 0.9.0 build 25 状态优先排序（2026-11-14）
+
+原排序只按最近活动时间排列项目，项目内沿用原生时间顺序，导致较新的闲置任务穿插在旧的进行中任务前面。现在项目与完整任务列表都优先显示需要输入／批准／报错、进行中、未读、其余；项目同类按活动时间，任务同类保留原生排序。投影位于原生预览截取和导航生成之前。
+
+- [x] 排序候选 `0211af6` 的64项Node、42项Swift检查及远端CI通过；与布局验收文档集成后的候选树保持不变。PR #8以保留祖先的merge方式合入，merge为 `df94e81b515ca02ad216b24edd87df95d2810da0`。
+- [x] build24签名构建通过但未单独安装；实际验收使用统一安装版 `/Applications/Codex Plus.app` 0.9.0 build25、Plus PID16753、controller17096，宿主PID64999保持。安装版排序脚本SHA256 `07da289a5052b6da345989d3d35b4320520efcbb56608038258f14e14d8412ec`，与候选源码一致。
+- [x] OCU在设置页临时关闭自动发送并执行重新接入。首次因当前聊天有输入而拒绝；通过原生导航切至本案空编辑器后，所有页面安全检查通过并完成接入。随后恢复自动发送true、watching、pageReady=true、unknown=0，并返回先前聊天。验收没有编辑或发送输入内容。
+- [x] 两主窗口排序协议均为7、projectOrder及sidebarLayout均active；每窗57个项目的优先级倒置均为0，旧现场有3处。OCU可见error项目quant-trading位于Projects第一，smart-shadow中的两个Working任务先于闲置任务，wechat-use中的旧Working任务也移到闲置任务之前。Pinned和自定义分区继续显示。
+
+本次证明本地Codex项目；不外推远程或ChatGPT来源。证据目录：`~/Library/Logs/codex-plus/sidebar-priority-20261114/`，包括tests.log、build.log、signing.log、candidate-hashes.txt、merge-tree.json、pr-merge.json、before-order.json、after-order.json、after-ocu.png/txt及final-status.json。
+
+
+## 0.9.0 build 27 未读优先于进行中（2026-11-14）
+
+用户明确对调原“进行中→未读”的顺序。项目和完整任务列表现为：需输入／批准／错误 → 未读 → 进行中 → 其余；同类原生顺序保留。当前排序协议8，旧协议7须沿既有guarded reconnect接入。
+
+- [x] 候选933b860，64 Node与51 Swift检查通过；项目、完整任务列表和状态转换断言均明确验证未读先于active。Developer ID签名构建build27并通过scripts/install正式安装，旧版保留回退备份。
+- [x] OCU从正式设置页临时关闭自动发送、点击重新接入，安全检查通过并显示已重新接入；随后恢复自动发送true。Plus PID46103、宿主PID64999保持，两个主窗口均protocol8、projectOrder active；最终autoSend enabled=true/pageReady=true。
+- [x] 只读原生模型运行证据：两窗均有unread=2、active=13，按新优先级的项目倒置均为0。OCU确认新设置文案与原生侧栏正常；未读标签在截图采样时未稳定出现，不将截图外推为未读行视觉证明。
+- [x] 通过原生Mark as unread尝试对已完成本项目聊天取样，随后官方list_threads对账中间按钮任务与设置清理任务isUnread均false，未遗留测试标记；没有编辑或发送输入，也未操作X Chat草稿。
+
+证据：~/Library/Logs/codex-plus/unread-priority-20261114/，含tests.log、build.log、install.log、before-reconnect.json、reconnected.json、final-status.json、after-order.json；源码PR12。安装与GUI已交还迁移owner，后续编号/工具窗口功能仍由其各自负责人办理。
+
+
+## 0.9.0 build 28 工具窗口迁移（2026-11-14）
+
+工具窗口管理从 Dock Switch 迁入 Codex Plus；原案转为 Codex Plus #10。正式 `/Applications/Codex Plus.app` 0.9.0 build28，Plus PID62464、宿主64999保持，包含已验收的protocol8排序。Dock Switch正式1.1.1，清扫PR65已合并。
+
+- [x] 移入精确文件/窗口认领与右屏归集，复用Plus显示器目录。Dock Switch的旧源码、菜单、策略、测试及工具CLI移除；直接向旧control.sock请求tool-status返回Unsupported command。两项偏好仅在Plus未设置时迁入，随后清除旧域对应键；其他设置和安装备份保留。
+- [x] 迁移64项Node/51项Swift通过，Dock最终105项Node/56项Swift通过。独立定向审查确认原始PID溢出、可用工作区缺失、暂停后迟到请求、已消费文件认领及socket关闭生命周期修补完成。
+- [x] 安装交互发现并修复非阻塞listener的accepted socket继承问题，以及冷启动AX不能立即完成的问题。真实安装版延迟分片请求及连续100次tool-status通过；冷CLI在Plus未运行时失败且未启动应用。AX只为同一明确资源短暂重试，暂停/stop使原请求失效，不重放open。
+- [x] 官方OCU在新独立X Chat的空Message输入框放入未发送临时标记。连续激活通知和前台采样覆盖冷TextEdit文件A、暖文件B及Plus自身设置打开；全程无激活事件，前后台快照均为同一X Chat PID49764的AXTextArea、17字符标记及同一鼠标位置。文件A/B均实际placed，观察错误为空。
+- [x] 公开窗口几何确认主Codex窗口13524仍在中间DELL屏；A/B为右屏Mi Monitor (2)内的656×422，Plus设置为右屏内560×548。另一既有Codex辅助窗口15317保留其原右屏位置，没有把用户既有窗口强行重排。
+- [x] 再开已打开A返回opened-in-existing-window；暂停observer计数归零，恢复正常。原人工窗口/标签复用保护沿用未改变的原算法真实证据及策略测试，新AX重试的单调消费边界独立复核通过。
+- [x] OCU清空临时标记且未发送消息，关闭A/B与本轮Plus设置，TextEdit恢复原先未运行状态。Plus保持正常运行、既有自动发送true和页面增强接入保留。新X Chat的独立bundle已加入保护名单，产品入口实测拒绝认领。
+
+证据：`~/Library/Logs/codex-plus/tool-window-migration-20261114/`，含interaction28.json、focus28.jsonl、geometry28-*.json、regression28.json、socket28-acceptance.json、textedit28-ocu.png/txt、cold-cli.json、installed-identity*.json、测试/构建/安装日志。原人工窗口验收保留于`~/Library/Logs/dock-switch/quiet-tools-20261114/`。物理热插拔和实体F6未在本轮重复验证。
