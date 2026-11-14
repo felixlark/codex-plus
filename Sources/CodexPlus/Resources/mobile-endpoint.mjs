@@ -8,12 +8,17 @@ export function installMobileEndpoint(config, encode, decode) {
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
     if (closed) return;
-    outbound = outbound.then(() => globalThis[binding](JSON.stringify(message))).catch(() => close());
+    outbound = outbound.then(() => { if (!closed) globalThis[binding](JSON.stringify({...message, connection: config.connection})); }).catch(() => close());
   }
   function sendValue(message, value) {
     if (closed) return;
-    outbound = outbound.then(async () => globalThis[binding](JSON.stringify({...message, value: await encode(value)}))).catch(() => close());
+    outbound = outbound.then(async () => {
+      if (closed) return;
+      const encoded = await encode(value);
+      if (!closed) globalThis[binding](JSON.stringify({...message, value: encoded, connection: config.connection}));
+    }).catch(() => close());
   }
+  function fatal() { if (!closed) globalThis[binding](JSON.stringify({kind: 'fatal', connection: config.connection})); close(); }
   function invoke(method, args) {
     if (closed) return Promise.reject(Error('Connection closed; reconcile any submitted action before retrying'));
     const id = `${config.connection}:${++sequence}`;
@@ -24,9 +29,9 @@ export function installMobileEndpoint(config, encode, decode) {
     ports.set(id, port);
     port.onmessage = event => {
       sendValue({kind: 'port-frame', id}, event.data);
-      if (event.data === null && appPort === id) { send({kind: 'fatal'}); close(); }
+      if (event.data === null && appPort === id) fatal();
     };
-    port.addEventListener('close', () => { if (appPort === id) { send({kind: 'fatal'}); close(); } });
+    port.addEventListener('close', () => { if (appPort === id) fatal(); });
     port.onmessageerror = () => close();
     port.start();
   }
@@ -36,6 +41,7 @@ export function installMobileEndpoint(config, encode, decode) {
   const methods = new Set(['sendMessageFromView', 'acknowledgeChunkedMessage', 'sendWorkerMessageFromView', 'connectGitWorker', 'getFastModeRolloutMetrics']);
   async function receive(message) {
     if (closed) return;
+    if (message.connection !== config.connection) return;
     switch (message.kind) {
       case 'call': {
         if (phone || !methods.has(message.method) || typeof message.id !== 'string') throw Error('Unsupported mobile call');
@@ -138,7 +144,7 @@ export function installMobileEndpoint(config, encode, decode) {
         const transfers = typeof target === 'object' ? target.transfer : transfer;
         if (targetOrigin !== location.origin || !(message.port instanceof MessagePort) || transfers?.length !== 1 || transfers[0] !== message.port) throw Error('Invalid local app-host handoff');
         const id = `${config.connection}:app:${++sequence}`;
-        if (appPort) { send({kind: 'fatal'}); close(); throw Error('App-host already connected'); }
+        if (appPort) { fatal(); throw Error('App-host already connected'); }
         appPort = id;
         send({kind: 'port-open', id}); attachPort(message.port, id); return;
       }
@@ -154,12 +160,12 @@ export function installMobileEndpoint(config, encode, decode) {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
     calls.clear(); ids.clear();
-    for (const port of ports.values()) port.close(); ports.clear();
+    for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();
     window.removeEventListener('message', onMessage);
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
-  globalThis.__codexPlusMobileEndpoint = {receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(() => { close(); globalThis[binding](JSON.stringify({kind: 'fatal'})); }); }, close, inspect: () => ({closed, ports: ports.size, pendingCalls: calls.size})};
-  window.addEventListener('pagehide', () => { send({kind: 'fatal'}); close(); }, {once: true});
+  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size})};
+  window.addEventListener('pagehide', fatal, {once: true});
 }

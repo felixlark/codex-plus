@@ -47,6 +47,7 @@ export class MobileAccess {
     this.config = config; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
     this.stateFile = stateFile; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
     this.stopped = false; this.creationAttempted = false; this.busy = false;
+    this.anchorQueue = Promise.resolve();
   }
   status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && !!this.anchorSession, port: this.port ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
@@ -111,42 +112,61 @@ export class MobileAccess {
     } else if (event.type === 'connected') {
       // Exclusive anchor ownership, not a concurrency/resource quota.
       if (this.clients.size || !isTailIPv4(event.peer)) { this.drop(event.id); return; }
-      const client = {id: event.id, phase: 'authenticating'}; this.clients.set(event.id, client);
-      const {stdout} = await run('/usr/local/bin/tailscale', ['whois', '--json', event.peer]);
-      const who = JSON.parse(stdout);
-      if (String(who.Node?.StableID) !== String(this.config.nodeId) || String(who.UserProfile?.ID) !== String(this.config.userId)) { await this.release(event.id); return; }
-      if (this.stopped || this.clients.get(event.id) !== client) return;
-      await this.command(this.anchorSession, 'Runtime.addBinding', {name: binding});
-      const connection = randomUUID(); client.connection = connection;
-      const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
-      const snapshot = await this.evaluate(source, true);
-      if (this.stopped || this.clients.get(event.id) !== client) return;
-      client.phase = 'active'; this.phase = 'connected';
-      this.send(event.id, {kind: 'bootstrap', connection, hostVersion: mobileHost.version, snapshot});
+      const session = this.sessions.get(this.anchorSession);
+      const context = [...session?.contexts.values() ?? []].find(c => c.auxData?.isDefault && c.auxData.frameId === session.frame);
+      if (!context) { this.drop(event.id); return; }
+      const client = {id: event.id, phase: 'authenticating', connection: randomUUID(), session: this.anchorSession, context: context.id, buffered: []}; this.clients.set(event.id, client);
+      try {
+        const {stdout} = await run('/usr/local/bin/tailscale', ['whois', '--json', event.peer]);
+        const who = JSON.parse(stdout);
+        if (who.Node?.StableID !== this.config.nodeId || String(who.UserProfile?.ID) !== String(this.config.userId)) { await this.release(event.id); return; }
+        await this.activate(client);
+      } catch { if (this.clients.get(event.id) === client) await this.release(event.id); }
     } else if (event.type === 'frame') {
       const client = this.clients.get(event.id);
       if (client?.phase !== 'active') { this.drop(event.id); return; }
       const value = JSON.parse(event.text);
+      if (value.connection !== client.connection) return;
       if (value.kind === 'fatal') { await this.release(event.id); return; }
-      await this.evaluate(`globalThis.__codexPlusMobileEndpoint.receive(${JSON.stringify(event.text)})`);
+      await this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)})e.receive(${JSON.stringify(event.text)});})()`);
     } else if (event.type === 'closed') await this.release(event.id);
     else if (event.type === 'failed') throw Error('Mobile gateway failed');
     await this.publish();
   }
+  anchorWork(operation) { const result = this.anchorQueue.catch(() => {}).then(operation); this.anchorQueue = result.catch(() => {}); return result; }
+  current(client) { return !this.stopped && this.clients.get(client.id) === client && this.anchorSession === client.session && this.sessions.get(client.session)?.contexts.has(client.context); }
+  async activate(client) {
+    return this.anchorWork(async () => {
+      if (!this.current(client)) return;
+      await this.command(client.session, 'Runtime.addBinding', {name: binding});
+      if (!this.current(client)) return;
+      client.phase = 'binding';
+      const connection = client.connection;
+      const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
+      const snapshot = await this.evaluate(source, true);
+      if (!this.current(client)) return;
+      client.phase = 'active'; this.phase = 'connected';
+      this.send(client.id, {kind: 'bootstrap', connection, hostVersion: mobileHost.version, snapshot});
+      for (const value of client.buffered ?? []) this.send(client.id, value);
+      client.buffered = [];
+    });
+  }
+  ownsThread(threadId) { return !this.stopped && this.config.threadId === threadId && [...this.clients.values()].some(c => c.phase === 'active'); }
   async onBinding(message) {
     if (this.stopped || message.params.name !== binding || message.sessionId !== this.anchorSession) return;
     const session = this.sessions.get(message.sessionId), context = session?.contexts.get(message.params.executionContextId);
     if (!context?.auxData?.isDefault || context.auxData.frameId !== session.frame) return;
-    const client = [...this.clients.values()].find(c => c.phase === 'active'); if (!client) return;
     const value = JSON.parse(message.params.payload);
+    const client = [...this.clients.values()].find(c => c.connection === value.connection && ['binding', 'active'].includes(c.phase)); if (!client) return;
     if (value.kind === 'fatal') { await this.release(client.id); return; }
+    if (client.phase === 'binding') { client.buffered.push(value); return; }
     this.send(client.id, value);
   }
   drop(id) { if (this.gateway?.stdin.writable) this.gateway.stdin.write(JSON.stringify({type: 'close', id}) + '\n'); }
   async release(id) {
     const client = this.clients.get(id); if (!client) return;
     this.clients.delete(id); this.drop(id);
-    await this.evaluate('globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint').catch(() => {});
+    await this.anchorWork(() => this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)}){e.close();delete globalThis.__codexPlusMobileEndpoint;}})()`)).catch(() => {});
     if (!this.stopped) this.phase = 'listening';
   }
   contextLost(id) { if (id === this.anchorSession && this.gateway) { this.phase = 'anchor-lost'; void this.close(); } }

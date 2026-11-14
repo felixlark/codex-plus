@@ -101,7 +101,8 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         web.load(URLRequest(url: url.url!))
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "app", message.frameInfo.securityOrigin.host == "-" else { return }
+        guard message.webView === web, message.frameInfo.isMainFrame,
+              let frameURL = message.frameInfo.request.url, frameURL.scheme == "app", frameURL.host == "-", frameURL.path == "/index.html" else { return }
         if message.name == "diagnostic" {
             // No chat contents, payloads, identities or credentials in diagnostics.
             if let value = message.body as? [String: Any], let event = value["event"] as? String { print("CodexMobile diagnostic: \(event)") }
