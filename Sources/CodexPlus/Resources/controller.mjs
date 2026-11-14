@@ -86,7 +86,7 @@ async function reconnectEnhancements(){
   };
   try{
     if(!allIds.length)throw Error('unavailable');
-    for(const id of allIds){const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot()})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported))ids.push(id);}
+    for(const id of allIds){const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot(),order:globalThis.__codexPlusProjectOrder?.protocol})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported,state.order))ids.push(id);}
     for(const id of allIds)await evaluate(id,`(()=>{globalThis.__codexPlusReconnectGuard?.dispose();globalThis.__codexPlusReconnectGuard=(${createReconnectGuard.toString()})(${JSON.stringify(operation)},${inspectReconnectSafety.toString()},${canReconnectPage.toString()});return true;})()`);
     for(const id of ids){
       if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
@@ -102,7 +102,7 @@ async function reconnectEnhancements(){
     while(Date.now()<deadline){
       if(before!==windowSet()||stopping||suggestions.enabled)throw Error('state-changed');
       let ready=true;
-      for(const id of allIds){try{const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot()})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported))ready=false;}catch{ready=false;}}
+      for(const id of allIds){try{const state=await evaluate(id,'({background:globalThis.__codexPlusBackgroundSuggestions?.inspect(),sidebar:globalThis.__codexPlusSidebarLayout?.snapshot(),order:globalThis.__codexPlusProjectOrder?.protocol})');if(needsSidebarReconnect(state.background,state.sidebar,sidebarSupported,state.order))ready=false;}catch{ready=false;}}
       if(ready){ok=true;reason='reconnected';break;}
       await new Promise(resolve=>setTimeout(resolve,100));
     }
@@ -254,7 +254,8 @@ async function main(){
           if(suggestionSupported)await updateSuggestionPolicy();
           if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
-          if(runtime.result.value===6)state.projectOrder.phase='active';
+          if(runtime.result.value===7)state.projectOrder.phase='active';
+          else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
         }
         state.lastAttach={waitingForDebugger,fetchBeforeResume:true};state.phase='active';
       }
@@ -289,6 +290,12 @@ async function main(){
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping)return;inspecting=true;
     try{
+      if(state.projectOrder.supported){
+        const pages=[];
+        for(const [id,s]of sessions)if(s.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});pages.push({protocol:r.result.value??null});}
+        const status={supported:true,protocol:7,phase:pages.length&&pages.every(p=>p.protocol===7)?'active':pages.some(p=>p.protocol!==null)?'page-reload-required':'waiting',pages};
+        if(JSON.stringify(status)!==JSON.stringify(state.projectOrder)){state.projectOrder=status;await publish();}
+      }
       if(sidebarSupported){
         for(const [id,s]of sessions)if(s.main)await queueSidebar(id);
         const pages=[...sessions.values()].filter(s=>s.main).map(s=>s.sidebarStatus??{phase:'waiting'});

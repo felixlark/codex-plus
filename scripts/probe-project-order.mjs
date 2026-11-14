@@ -467,7 +467,7 @@ async function host() {
         const beforeReload = current.generation;
         await current.cdp.call('Page.reload', { ignoreCache: true });
         await eventually(() => current.generation > beforeReload, 'host frame navigation');
-        await eventually(() => current.cdp.evaluate('globalThis.__codexPlusProjectOrder?.protocol === 6'), 'host adapted script execution');
+        await eventually(() => current.cdp.evaluate('globalThis.__codexPlusProjectOrder?.protocol === 7'), 'host adapted script execution');
         result.status = 'adapted-awaiting-visible-acceptance';
       }
     }

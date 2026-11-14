@@ -14,11 +14,46 @@ test('background completion beats a later foreground message despite unchanged n
   const render=()=>ids(runtime.sort(groups,key=>times[key],key=>times[key],key=>states[key]));
   assert.deepEqual(render(),['C','B','A']);assert.equal(disk.length,0);
   states.B='active';now=10;assert.deepEqual(render(),['B','C','A']);
-  times.C=20;assert.deepEqual(render(),['C','B','A']);
+  times.C=20;assert.deepEqual(render(),['B','C','A']);
   states.B='unread';now=30;assert.deepEqual(render(),['B','C','A']);
   states.B='idle';now=40;render();assert.equal(runtime.stats.groups[1].activity[0],30);
   const reloaded=createProjectActivityRuntime(disk,()=>50,sortProjectGroups);
   assert.deepEqual(ids(reloaded.sort(groups,key=>times[key],key=>times[key],key=>states[key])),['B','C','A']);
+});
+test('attention, active and unread projects precede newer idle projects on first render',()=>{
+  const runtime=createProjectActivityRuntime(storage(),()=>999,sortProjectGroups);
+  const input=['idle','unread','active','input','approval','error'].map((state,index)=>({projectId:state,threadKeys:[state],timestamp:100-index}));
+  const times=Object.fromEntries(input.map(g=>[g.projectId,g.timestamp]));
+  assert.deepEqual(ids(runtime.sort(input,key=>times[key],key=>times[key],key=>key)),['input','approval','error','active','unread','idle']);
+  assert.ok(runtime.stats.groups.every(g=>g.activity[0]===0),'initial status sampling must not fabricate activity');
+});
+test('complete thread model promotes old work before previews and keyboard navigation are derived',()=>{
+  const runtime=createProjectActivityRuntime(storage(),()=>999,sortProjectGroups);
+  const keys=['idle-new','idle-2','idle-3','idle-4','idle-5','active-old','unread-old','approval-old','error-old','input-old'];
+  const input=[{projectId:'mixed',threadKeys:keys}];
+  const state=key=>key.split('-')[0];
+  const result=runtime.sort(input,()=>1,()=>1,state);
+  assert.deepEqual(result[0].threadKeys,['approval-old','error-old','input-old','active-old','unread-old',...keys.slice(0,5)]);
+  assert.deepEqual(result[0].threadKeys.slice(0,5),['approval-old','error-old','input-old','active-old','unread-old']);
+  assert.strictEqual(input[0].threadKeys,keys);assert.equal(keys[0],'idle-new');
+  assert.deepEqual(runtime.stats.order,[0]);
+  assert.strictEqual(runtime.sort(result,()=>1,()=>1,state),result,'unchanged order keeps model identity');
+});
+test('highest priority task determines project class even when metadata is incomplete',()=>{
+  const input=[{projectId:'unknown-idle',threadKeys:['unknown']},{projectId:'idle',threadKeys:['idle']},{projectId:'mixed',threadKeys:['idle','active']},{projectId:'attention',threadKeys:['input']}];
+  const runtime=createProjectActivityRuntime(storage(),()=>1,sortProjectGroups);
+  assert.deepEqual(ids(runtime.sort(input,key=>key==='unknown'?undefined:1,key=>key==='unknown'?undefined:1,key=>key)),['attention','mixed','unknown-idle','idle']);
+  const old=[{threadKeys:['A']},{threadKeys:['B']},{threadKeys:['C']}];
+  assert.deepEqual(sortProjectGroups(old,key=>({A:1,C:3})[key]),[old[2],old[1],old[0]],'unknown clocks retain slots within a class');
+});
+test('finishing and reading a task removes its priority; unknown status does not become attention',()=>{
+  const runtime=createProjectActivityRuntime(storage(),()=>100,sortProjectGroups);
+  const input=[{projectId:'A',threadKeys:['idle','task']},{projectId:'B',threadKeys:['active']}];
+  let task='approval';
+  const render=()=>runtime.sort(input,()=>1,()=>1,key=>key==='task'?task:key==='active'?'active':undefined);
+  assert.deepEqual(ids(render()),['A','B']);task='unread';assert.deepEqual(ids(render()),['B','A']);
+  task='idle';assert.deepEqual(render()[1].threadKeys,['idle','task']);
+  task=undefined;assert.deepEqual(ids(render()),['B','A']);
 });
 test('independent windows preserve both activity ledgers through reload',()=>{
   const disk=storage();let time=10;

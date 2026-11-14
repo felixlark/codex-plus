@@ -93,21 +93,26 @@ function contains(node, match) {
   return found;
 }
 
-export function sortProjectGroups(groups, getRecencyAt) {
-  const known = [];
-  const unknown = new Set();
+export function sortProjectGroups(groups, getRecencyAt, getPriority = () => 3) {
+  const buckets = new Map();
   groups.forEach((group, index) => {
-    let timestamp = 0;
+    let timestamp = 0, priority = 3, unknown = false;
     for (const key of group.threadKeys) {
+      priority = Math.min(priority, getPriority(key));
       const value = getRecencyAt(key);
-      if (!Number.isFinite(value)) { unknown.add(index); break; }
-      timestamp = Math.max(timestamp, value);
+      if (!Number.isFinite(value)) unknown = true;
+      else timestamp = Math.max(timestamp, value);
     }
-    if (!unknown.has(index)) known.push({ group, index, timestamp });
+    if (!buckets.has(priority)) buckets.set(priority, []);
+    buckets.get(priority).push({ group, index, timestamp, unknown });
   });
-  known.sort((a, b) => b.timestamp - a.timestamp || a.index - b.index);
-  let next = 0;
-  const result = groups.map((group, index) => unknown.has(index) ? group : known[next++].group);
+  const result = [...buckets].sort(([a], [b]) => a - b).flatMap(([, bucket]) => {
+    const known = bucket.filter(item => !item.unknown).sort((a, b) => b.timestamp - a.timestamp || a.index - b.index);
+    let next = 0;
+    // Missing clocks retain their slots within their status class, so an idle
+    // project with incomplete metadata cannot pin itself above active work.
+    return bucket.map(item => item.unknown ? item.group : known[next++].group);
+  });
   return result.every((group, index) => group === groups[index]) ? groups : result;
 }
 
@@ -132,8 +137,9 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
   mergeStored();
   const states = new Map();
   let stats = null;
-  const runtime = { protocol: 6, get stats() { return stats; }, sort(groups, recency, updated, status) {
+  const runtime = { protocol: 7, get stats() { return stats; }, sort(groups, recency, updated, status) {
     const clocks = new Map();
+    const priorities = new Map();
     let changed = false;
     mergeStored();
     for (const group of groups) for (const key of group.threadKeys) {
@@ -144,6 +150,7 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
         times[key] = Math.max(Number.isFinite(times[key]) ? times[key] : 0, now()); ownTimes[key] = times[key]; changed = true;
       }
       if (current !== undefined) states.set(key, current);
+      priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'active' ? 1 : current === 'unread' ? 2 : 3);
       const a = recency(key), b = updated(key), c = times[key];
       const values = [a,b,c].filter(Number.isFinite);
       clocks.set(key, values.length ? Math.max(...values) : undefined);
@@ -151,8 +158,15 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
     // Each document writes only its own ledger. Concurrent windows never replace
     // each other's entries; all readers merge task timestamps with max().
     if (changed) { try { storage?.setItem(storageKey, JSON.stringify({version:1,times:ownTimes})); } catch {} }
-    const result = sortGroups(groups,key=>clocks.get(key));
-    stats = {calls:(stats?.calls??0)+1, order:result.map(group=>groups.indexOf(group)),groups:groups.map(group=>({threads:group.threadKeys.length,recency:group.threadKeys.map(recency),updated:group.threadKeys.map(updated),status:group.threadKeys.map(key=>states.get(key)),activity:group.threadKeys.map(key=>times[key]??0)}))};
+    // Sort the complete model before native preview truncation and navigation
+    // are derived. Preserve native order (including manual order) within a class.
+    let projected = groups.map(group => {
+      const threadKeys = [...group.threadKeys].sort((a,b) => priorities.get(a) - priorities.get(b));
+      return threadKeys.every((key,index) => key === group.threadKeys[index]) ? group : {...group,threadKeys};
+    });
+    if (projected.every((group,index) => group === groups[index])) projected = groups;
+    const result = sortGroups(projected,key=>clocks.get(key),key=>priorities.get(key));
+    stats = {calls:(stats?.calls??0)+1, order:result.map(group=>projected.indexOf(group)),groups:groups.map(group=>({threads:group.threadKeys.length,recency:group.threadKeys.map(recency),updated:group.threadKeys.map(updated),status:group.threadKeys.map(key=>states.get(key)),activity:group.threadKeys.map(key=>times[key]??0)}))};
     return result;
   }};
   return Object.freeze(runtime);
