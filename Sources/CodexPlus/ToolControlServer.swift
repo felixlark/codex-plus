@@ -65,7 +65,7 @@ final class ToolControlServer {
                         let finish: @Sendable () -> Void = { [weak self] in
                             DispatchQueue.main.async {
                                 self?.clients.removeValue(forKey: connection.id)
-                                response.afterWrite?()
+                                RunLoop.main.perform(inModes: [.common]) { response.afterWrite?() }
                             }
                         }
                         DispatchQueue.global().async {

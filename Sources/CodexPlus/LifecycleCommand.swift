@@ -18,7 +18,8 @@ enum LifecycleCommand {
                     guard let field, !seen.contains(field), field == "request_id" || request[field] == nil else { throw ManagementProtocol.failure("invalid_option") }
                     seen.insert(field); request[field] = args[i+1]; i += 2
                 }
-                _ = try ManagementProtocol.Request.parse(request)
+                let parsed = try ManagementProtocol.Request.parse(request)
+                request["request_id"] = parsed.id.uuidString
                 // Authenticate the original respondent before sending any lifecycle effect.
                 if operation != "status" {
                     let probe: [String: Any] = ["command":ManagementProtocol.command,"protocol":1,"request_id":UUID().uuidString,"operation":"status"]

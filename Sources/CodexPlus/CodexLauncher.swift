@@ -310,7 +310,7 @@ final class CodexLauncher: ObservableObject {
             }
         }
         process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] exited in DispatchQueue.main.async {
+        process.terminationHandler = { [weak self] exited in RunLoop.main.perform(inModes: [.common]) {
             guard let self, self.controller === exited else { return }
             self.controllerOutput?.fileHandleForReading.readabilityHandler = nil
             self.controllerOutput = nil
