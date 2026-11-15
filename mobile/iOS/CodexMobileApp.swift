@@ -46,7 +46,7 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         // Invalidate every old attempt before configuration, cleanup or bootstrap.
         generation &+= 1; let epoch = generation
         socket?.stateUpdateHandler = nil; socket?.cancel(); socket = nil
-        web?.evaluateJavaScript("globalThis.__codexPlusMobileEndpoint?.close()")
+        web?.evaluateJavaScript("globalThis.__codexPlusMobileDrafts?.close();globalThis.__codexPlusMobileEndpoint?.close()")
         for name in ["native", "diagnostic", "lifecycle"] { web?.configuration.userContentController.removeScriptMessageHandler(forName: name) }
         web?.navigationDelegate = nil; web?.removeFromSuperview(); web = nil
         pending.removeAll(); ready = false; didNavigate = false; connectionID = ""
@@ -141,17 +141,65 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
             return
         }
         if message.name == "lifecycle" {
-            guard let value = message.body as? [String: Any], value["connection"] as? String == connectionID,
-                  let route = value["route"] as? String, validRoute(route) else { return }
+            guard let value = message.body as? [String: Any], value["connection"] as? String == connectionID else { return }
+            if value["operation"] != nil { handleAttachmentRequest(value, epoch); return }
+            guard let route = value["route"] as? String, validRoute(route) else { return }
             UserDefaults.standard.set(route, forKey: routeKey); return
         }
         guard let text = message.body as? String else { return }
-        if text == "page-ready" { ready = true; connectionUI.isHidden = true; for value in pending { deliver(value, epoch) }; pending.removeAll(); return }
+        if text == "page-ready" { guard socket != nil else { return }; ready = true; connectionUI.isHidden = true; for value in pending { deliver(value, epoch) }; pending.removeAll(); return }
         guard let socket, current(epoch, socket) else { return }
         let context = NWConnection.ContentContext(identifier: "frame", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
         socket.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
             if error != nil { DispatchQueue.main.async { guard let self, self.current(epoch, socket) else { return }; self.disconnect("发送链路断开。请先在原会话核对结果，勿重复提交。", epoch) } }
         })
+    }
+    private func attachmentRefs(_ value: Any) throws -> [String: Any] {
+        guard let refs = value as? [String: Any], Set(refs.keys) == Set(["files", "added", "images", "order"]),
+              let files = refs["files"] as? [[String: Any]], let added = refs["added"] as? [[String: Any]],
+              let images = refs["images"] as? [[String: Any]], refs["order"] is [String] else { throw NSError(domain: "MobileDrafts", code: 1) }
+        for file in files + added {
+            guard Set(file.keys).isSubset(of: Set(["label", "path", "fsPath", "startLine", "endLine"])),
+                  ["label", "path", "fsPath"].allSatisfy({ file[$0] is String }),
+                  ["startLine", "endLine"].allSatisfy({ file[$0] == nil || file[$0] is Int }) else { throw NSError(domain: "MobileDrafts", code: 2) }
+        }
+        for image in images {
+            guard Set(image.keys).isSubset(of: Set(["id", "localPath", "filename"])), image["id"] is String, image["localPath"] is String,
+                  image["filename"] == nil || image["filename"] is String else { throw NSError(domain: "MobileDrafts", code: 3) }
+        }
+        return refs
+    }
+    private func handleAttachmentRequest(_ value: [String: Any], _ epoch: UInt64) {
+        guard let operation = value["operation"] as? String, let id = value["id"] as? String, let key = value["key"] as? String else { return }
+        var reply: [String: Any] = ["id": id, "ok": false]
+        do {
+            if operation == "refs-warning" {
+                let alert = UIAlertController(title: "附件草稿未能保存或恢复", message: "请保留当前会话并重新选择附件。", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "好", style: .default))
+                var parent: UIViewController = self
+                while let next = parent.presentedViewController { parent = next }
+                if !(parent is UIAlertController) { parent.present(alert, animated: true) }
+            } else {
+                let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("CodexMobileDrafts", isDirectory: true)
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                let name = SHA256.hash(data: Data((routeKey + "\n" + key).utf8)).map { String(format: "%02x", $0) }.joined()
+                let file = root.appendingPathComponent(name + ".json")
+                if operation == "refs-get" {
+                    let refs: [String: Any]
+                    if FileManager.default.fileExists(atPath: file.path) { refs = try attachmentRefs(JSONSerialization.jsonObject(with: Data(contentsOf: file))) }
+                    else { refs = ["files": [], "added": [], "images": [], "order": []] }
+                    reply["refs"] = refs
+                } else if operation == "refs-save" {
+                    let refs = try attachmentRefs(value["refs"] as Any)
+                    // A completed atomic write is the ACK boundary, including
+                    // an empty record. App termination cannot revive an older file.
+                    try JSONSerialization.data(withJSONObject: refs).write(to: file, options: .atomic)
+                } else { throw NSError(domain: "MobileDrafts", code: 4) }
+            }
+            reply["ok"] = true
+        } catch { reply["ok"] = false }
+        guard let web, generation == epoch, let bytes = try? JSONSerialization.data(withJSONObject: [reply]), let literal = String(data: bytes, encoding: .utf8) else { return }
+        web.evaluateJavaScript("globalThis.__codexPlusMobileDrafts?.resolve(\(literal)[0])")
     }
     private func deliver(_ text: String, _ epoch: UInt64) {
         guard generation == epoch, let web, let data = try? JSONSerialization.data(withJSONObject: [text]), let literal = String(data: data, encoding: .utf8) else { return }
@@ -162,7 +210,9 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
     }
     private func disconnect(_ message: String, _ epoch: UInt64) {
         guard generation == epoch else { return }
-        generation &+= 1
+        // Keep this document's local draft writes alive while offline. All
+        // socket callbacks fail the identity check; reconnect invalidates the
+        // entire old document generation before any cleanup or new bootstrap.
         socket?.stateUpdateHandler = nil; socket?.cancel(); socket = nil; ready = false; pending.removeAll()
         web?.evaluateJavaScript("globalThis.__codexPlusMobileEndpoint?.close()")
         web?.isUserInteractionEnabled = false; status.text = message; connectionUI.isHidden = false

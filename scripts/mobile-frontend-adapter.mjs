@@ -36,5 +36,15 @@ export async function adaptMobileFrontend(relative, bytes) {
   const source = bytes.toString('utf8');
   const before = 'let bB,bF=!fn&&"cloud"!==sG&&hJ!==nP.fI;';
   if (source.split(before).length !== 2) throw Error('Original attachment picker binding changed');
-  return Buffer.from(source.replace(before, 'let bB=gk,bF=!fn&&"cloud"!==sG&&hJ!==nP.fI;'));
+  const attachmentHook = 'hJ="worktree"===sG?mH:u3,pf=(0,nP.Qz)(hJ);';
+  if (source.split(attachmentHook).length !== 2) throw Error('Original composer attachment scope changed');
+  const fields = get => `({files:${get}(ok.PA),images:${get}(ok.gy),added:${get}(ok.a$),order:${get}(ok.CH),generation:${get}(ok.kV)})`;
+  const effect = `(0,f.useEffect)(()=>globalThis.__codexPlusMobileDrafts?.bind({
+    key:(0,tI.eL)(lL.value),read:()=>${fields('lL.get')},
+    watch:callback=>lL.watch(({get})=>callback(${fields('get')})),
+    fileKey:(file,kind)=>oA.Jz(file,kind),imageKey:id=>oA.Xq("image",id),
+    loadImages:async refs=>{const loaded=await hV.m(refs.map(ref=>({label:ref.filename??ref.localPath,fsPath:ref.localPath,path:ref.localPath})));if(loaded.some(item=>item==null))throw Error("Attachment file unavailable");return loaded.map((item,i)=>({...refs[i],src:item.dataUrl,uploadStatus:"idle"}));},
+    apply:value=>(0,ok.Kk)(lL,draft=>{draft.fileAttachments=value.files;draft.imageAttachments=value.images;draft.addedFiles=value.added;draft.attachmentOrder=value.order;})
+  }),[lL,(0,tI.eL)(lL.value)]);`;
+  return Buffer.from(source.replace(before, 'let bB=gk,bF=!fn&&"cloud"!==sG&&hJ!==nP.fI;').replace(attachmentHook, attachmentHook + effect));
 }

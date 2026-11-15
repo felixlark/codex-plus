@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
+import {installMobileDrafts} from '../Sources/CodexPlus/Resources/mobile-drafts.mjs';
 const cache = path.join(os.homedir(), 'Library/Caches/codex-plus/mobile');
 await fs.mkdir(cache, {recursive: true});
 const source = `(()=>{
@@ -17,6 +18,7 @@ globalThis.__codexPlusMobileLifecycle = {routeChanged(location) {
   window.webkit.messageHandlers.lifecycle.postMessage({connection:b.connection, route});
   globalThis.__codexPlusMobileEndpoint.reportRoute(location.pathname);
 }};
+(${installMobileDrafts.toString()})(b.connection);
 globalThis.__codexPlusMobileNativeSend('page-ready');
 window.addEventListener('error',()=>window.webkit.messageHandlers.diagnostic.postMessage({event:'script-error'}));
 window.addEventListener('unhandledrejection',()=>window.webkit.messageHandlers.diagnostic.postMessage({event:'unhandled-rejection'}));
