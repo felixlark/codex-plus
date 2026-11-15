@@ -136,11 +136,13 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
   }
   mergeStored();
   const states = new Map();
+  let deferredReadKey = null;
   let stats = null;
-  const runtime = { protocol: 8, get stats() { return stats; }, sort(groups, recency, updated, status) {
+  const runtime = { protocol: 9, get stats() { return stats; }, sort(groups, recency, updated, status, selectedKey = null) {
     const clocks = new Map();
     const priorities = new Map();
     let changed = false;
+    if (deferredReadKey !== selectedKey) deferredReadKey = null;
     mergeStored();
     for (const group of groups) for (const key of group.threadKeys) {
       let current;
@@ -150,7 +152,11 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
         times[key] = Math.max(Number.isFinite(times[key]) ? times[key] : 0, now()); ownTimes[key] = times[key]; changed = true;
       }
       if (current !== undefined) states.set(key, current);
-      priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'unread' ? 1 : current === 'active' ? 2 : 3);
+      // Reading updates native state immediately, but keeps this window's open
+      // task in the unread sorting class until navigation selects another task.
+      if (key === selectedKey && previous === 'unread' && current === 'idle') deferredReadKey = key;
+      if (key === deferredReadKey && current !== undefined && current !== 'idle') deferredReadKey = null;
+      priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'unread' || key === deferredReadKey ? 1 : current === 'active' ? 2 : 3);
       const a = recency(key), b = updated(key), c = times[key];
       const values = [a,b,c].filter(Number.isFinite);
       clocks.set(key, values.length ? Math.max(...values) : undefined);
@@ -166,7 +172,7 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
     });
     if (projected.every((group,index) => group === groups[index])) projected = groups;
     const result = sortGroups(projected,key=>clocks.get(key),key=>priorities.get(key));
-    stats = {calls:(stats?.calls??0)+1, order:result.map(group=>projected.indexOf(group)),groups:groups.map(group=>({threads:group.threadKeys.length,recency:group.threadKeys.map(recency),updated:group.threadKeys.map(updated),status:group.threadKeys.map(key=>states.get(key)),activity:group.threadKeys.map(key=>times[key]??0)}))};
+    stats = {calls:(stats?.calls??0)+1, selectedKey, deferredReadKey, order:result.map(group=>projected.indexOf(group)),groups:groups.map(group=>({threads:group.threadKeys.length,recency:group.threadKeys.map(recency),updated:group.threadKeys.map(updated),status:group.threadKeys.map(key=>states.get(key)),activity:group.threadKeys.map(key=>times[key]??0)}))};
     return result;
   }};
   return Object.freeze(runtime);
@@ -257,11 +263,16 @@ export async function adaptSidebar(source, { host = false, resourcePath } = {}) 
     });
     if (initializers.length !== 1 || !contains(owner.body, child =>
       property(child, 'projectGroups') && property(child, 'navigationThreadKeys'))) return;
-    candidates.push({ start: call.start, end: call.end, groups: node.left.name, clock: [...clocks][0], owner });
+    const selectionModules = host ? parents.filter(parent => /Function/.test(parent.type) && parent.body?.type === 'BlockStatement')
+      .flatMap(parent => parent.body.body.filter(statement => statement.type === 'VariableDeclaration').flatMap(statement => statement.declarations))
+      .filter(declaration => declaration.id.type === 'Identifier' && declaration.init?.type === 'CallExpression' && declaration.init.arguments[0]?.value === 'RFDv') : [];
+    candidates.push({ start: call.start, end: call.end, groups: node.left.name, clock: [...clocks][0], owner,
+      selectionModule: selectionModules.length === 1 ? selectionModules[0].id.name : null });
   });
   if (candidates.length !== 1) return { supported: false, reason: 'model-match-count', matches: candidates.length };
   if (layouts.length !== 1) return { supported: false, reason: 'layout-match-count', matches: layouts.length };
   const { owner: modelOwner, ...match } = candidates[0];
+  if (host && !match.selectionModule) return { supported: false, reason: 'native-selection-contract' };
   const { owner: layoutOwner, ...layout } = layouts[0];
   if (!host && !directFixtureChain(ast, modelOwner, layoutOwner, layout.input, match.groups)) return { supported: false, reason: 'model-layout-data-chain' };
   const clocks = [];
@@ -278,7 +289,11 @@ export async function adaptSidebar(source, { host = false, resourcePath } = {}) 
   if (clocks.length !== 1) return { supported: false, reason: 'native-clock-contract' };
   const clock = clocks[0];
   const runtime = `;globalThis.__codexPlusProjectOrder??=(${createProjectActivityRuntime.toString()})((()=>{try{return globalThis.localStorage}catch{return null}})(),Date.now,(${sortProjectGroups.toString()}));\n`;
-  const replacement = `globalThis.__codexPlusProjectOrder.sort(${source.slice(match.start, match.end)},${match.clock},key=>${clock.get}(${clock.module}.RD,key),key=>${clock.get}(${clock.module}.qM,key))`;
+  // oN is the reviewed native route's thread-key selector. Reading it in this
+  // reactive model makes navigation release a deferred read even without a
+  // status/timestamp change; the fixture has no native selection module.
+  const selection = host ? `${clock.get}(${match.selectionModule}.oN)` : 'null';
+  const replacement = `globalThis.__codexPlusProjectOrder.sort(${source.slice(match.start, match.end)},${match.clock},key=>${clock.get}(${clock.module}.RD,key),key=>${clock.get}(${clock.module}.qM,key),${selection})`;
   let adapted = source;
   const edits = [
     { start: match.start, end: match.end, replacement },

@@ -66,6 +66,50 @@ test('independent windows preserve both activity ledgers through reload',()=>{
   assert.deepEqual(ids(render(reloaded,stateB)),['B','A','C']);
   assert.equal(disk.length,2);
 });
+test('reading the selected task defers demotion until selection changes, without changing read state or activity',()=>{
+  const disk=storage(),runtime=createProjectActivityRuntime(disk,()=>100,sortProjectGroups);
+  const input=[{projectId:'reading',threadKeys:['idle','read-first']},{projectId:'working',threadKeys:['active']}];
+  const states={idle:'idle','read-first':'unread',active:'active'};
+  const render=selected=>runtime.sort(input,()=>1,()=>1,key=>states[key],selected);
+  assert.deepEqual(ids(render('active')),['reading','working']);
+  states['read-first']='idle';
+  for(let i=0;i<3;i++){
+    const result=render('read-first');
+    assert.deepEqual(ids(result),['reading','working']);
+    assert.deepEqual(result[0].threadKeys,['read-first','idle']);
+    assert.deepEqual(runtime.stats.groups[0].status,['idle','idle']);
+    assert.equal(runtime.stats.deferredReadKey,'read-first');
+  }
+  assert.equal(disk.length,0,'reading must not fabricate activity or persist a priority');
+  const next=render('active');
+  assert.deepEqual(ids(next),['working','reading']);
+  assert.deepEqual(next[1].threadKeys,['idle','read-first']);
+  assert.equal(runtime.stats.deferredReadKey,null);
+  assert.deepEqual(ids(render('read-first')),['working','reading'],'returning to an already-read task does not promote it');
+});
+test('rapidly reading the next task releases the previous hold and returning home releases the last one',()=>{
+  const runtime=createProjectActivityRuntime(null,()=>100,sortProjectGroups);
+  const input=[{projectId:'mixed',threadKeys:['active','A','B']}];
+  const states={active:'active',A:'unread',B:'unread'};
+  const render=selected=>runtime.sort(input,()=>1,()=>1,key=>states[key],selected)[0].threadKeys;
+  assert.deepEqual(render('active'),['A','B','active']);
+  states.A='idle';assert.deepEqual(render('A'),['A','B','active']);
+  states.B='idle';assert.deepEqual(render('B'),['B','active','A']);
+  assert.equal(runtime.stats.deferredReadKey,'B');
+  assert.deepEqual(render(null),['active','A','B']);
+});
+test('deferred reads are window-local, and new work replaces the deferred priority immediately',()=>{
+  const disk=storage(),a=createProjectActivityRuntime(disk,()=>100,sortProjectGroups),b=createProjectActivityRuntime(disk,()=>100,sortProjectGroups);
+  const input=[{projectId:'mixed',threadKeys:['active','task']}];
+  let task='unread';
+  const render=(runtime,selected)=>runtime.sort(input,()=>1,()=>1,key=>key==='task'?task:'active',selected)[0].threadKeys;
+  render(a,'active');render(b,'active');task='idle';
+  assert.deepEqual(render(a,'task'),['task','active']);
+  assert.deepEqual(render(b,'active'),['active','task']);
+  task='approval';assert.deepEqual(render(a,'task'),['task','active']);
+  assert.equal(a.stats.deferredReadKey,null);
+  task='idle';assert.deepEqual(render(a,'task'),['active','task']);
+});
 test('chat route restoration follows sidebar navigation and clears only its own stale route',()=>{
   const previousWindow=globalThis.window,previousStorage=globalThis.sessionStorage;
   globalThis.sessionStorage=storage();
