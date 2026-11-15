@@ -197,6 +197,15 @@ export class MobileAccess {
       const {frameTree} = await this.command(sessionId, 'Page.getFrameTree');
       this.documentCheck.currentRoot = event.frameId === frameTree.frame.id;
     } catch { this.documentCheck.inspectionFailed = true; }
+    // The original page may still have an external iframe request queued when
+    // interception is armed. Block that child without cancelling the owned
+    // main-frame replacement. Neither the old nor the new root can use this
+    // branch, and no child Document is ever continued.
+    if (!this.stopped && event.frameId !== this.documentFrame && this.documentCheck.currentRoot === false &&
+        typeof event.requestId === 'string') {
+      await this.command(sessionId, 'Fetch.failRequest', {requestId: event.requestId, errorReason: 'BlockedByClient'});
+      return true;
+    }
     if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
         event.request?.url === this.documentURL && event.responseStatusCode === undefined && typeof event.requestId === 'string') {
       this.documentRequestId = event.requestId; this.documentArmed = false;

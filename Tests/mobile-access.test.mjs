@@ -124,7 +124,7 @@ function anchorHarness({fulfillError = false} = {}) {
       if (method === 'Fetch.fulfillRequest' && fulfillError) throw Error('Controlled document failure');
       if (method === 'Page.getFrameTree') {
         state.onFrameTree?.();
-        return {frameTree: {frame: {id: 'root', loaderId: state.loader, url: state.frameURL}}};
+        return {frameTree: {frame: {id: state.rootFrame ?? 'root', loaderId: state.loader, url: state.frameURL}}};
       }
       return {};
     },
@@ -171,6 +171,7 @@ test('the owned document waits for Fetch acknowledgement, fulfillment and a new 
 test('unexpected Documents and failed fulfillment never resume the original UI', async () => {
   for (const variant of ['url', 'frame', 'response-stage', 'fulfill']) {
     const h = anchorHarness({fulfillError: variant === 'fulfill'}); await h.manager.tick();
+    if (variant === 'frame') h.state.rootFrame = 'other';
     const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: 200} : {});
     assert.equal(await h.manager.handleDocument('anchor', event), true);
     await h.manager.tick();
@@ -187,6 +188,19 @@ test('a fulfilled owned page cannot reload the vendor Document while a phone is 
   assert.equal(await h.manager.handleDocument('anchor', h.document({requestId: 'reload'})), true);
   assert.equal(h.manager.stopped, true); assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
   assert.equal(h.commands.filter(c => c.method === 'Fetch.fulfillRequest').length, 1);
+});
+
+test('queued child Documents are blocked while the exact owned root still completes', async () => {
+  const h = anchorHarness(); await h.manager.tick();
+  const child = h.document({frameId: 'child', requestId: 'child-1', request: {url: 'https://external.invalid/private'}});
+  assert.equal(await h.manager.handleDocument('anchor', child), true);
+  assert.equal(h.manager.stopped, false); assert.equal(h.manager.documentArmed, true);
+  assert.equal(h.manager.status().documentCheck.currentRoot, false);
+  assert.equal(JSON.stringify(h.manager.status()).includes('external.invalid'), false);
+  assert.deepEqual(h.commands.filter(c => c.method === 'Fetch.failRequest').map(c => c.params.requestId), ['child-1']);
+  assert.equal(h.commands.filter(c => c.method === 'Fetch.continueRequest').length, 0);
+  await h.manager.handleDocument('anchor', h.document()); h.commit(); h.state.ready = true; await h.manager.tick();
+  assert.equal(h.state.starts, 1); assert.equal(h.manager.anchorPrepared, true);
 });
 
 test('foreign sessions remain untouched and a replaced sticky target is never adopted', async () => {
