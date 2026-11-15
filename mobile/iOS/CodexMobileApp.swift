@@ -113,7 +113,9 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         guard generation == epoch, web == nil, bootstrap["hostVersion"] as? String == configuration["hostVersion"] as? String,
               let connectionID = bootstrap["connection"] as? String else { throw NSError(domain: "Mobile", code: 5) }
         self.connectionID = connectionID
-        let encoded = try JSONSerialization.data(withJSONObject: bootstrap)
+        var localBootstrap = bootstrap
+        localBootstrap["localState"] = try MobileUIState(identity: routeKey).read()
+        let encoded = try JSONSerialization.data(withJSONObject: localBootstrap)
         let literal = String(data: encoded, encoding: .utf8)!
         let source = try String(contentsOf: Bundle.main.url(forResource: "mobile-preload", withExtension: "js")!, encoding: .utf8)
         let controller = WKUserContentController()
@@ -142,7 +144,11 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         }
         if message.name == "lifecycle" {
             guard let value = message.body as? [String: Any], value["connection"] as? String == connectionID else { return }
-            if value["operation"] != nil { handleAttachmentRequest(value, epoch); return }
+            if let operation = value["operation"] as? String {
+                if operation.hasPrefix("local-") || operation.hasPrefix("clipboard-") { handleLocalRequest(value, epoch) }
+                else { handleAttachmentRequest(value, epoch) }
+                return
+            }
             guard let route = value["route"] as? String, validRoute(route) else { return }
             UserDefaults.standard.set(route, forKey: routeKey); return
         }
@@ -153,6 +159,30 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         socket.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
             if error != nil { DispatchQueue.main.async { guard let self, self.current(epoch, socket) else { return }; self.disconnect("发送链路断开。请先在原会话核对结果，勿重复提交。", epoch) } }
         })
+    }
+    private func handleLocalRequest(_ value: [String: Any], _ epoch: UInt64) {
+        guard let operation = value["operation"] as? String, let id = value["id"] as? String else { return }
+        var reply: [String: Any] = ["id": id, "ok": false]
+        var navigate = false
+        do {
+            switch operation {
+            case "local-state-save": try MobileUIState(identity: routeKey).write(value["state"] as Any)
+            case "clipboard-read": reply["value"] = UIPasteboard.general.string ?? ""
+            case "clipboard-write":
+                guard let text = value["text"] as? String else { throw NSError(domain: "MobileLocal", code: 1) }
+                UIPasteboard.general.string = text
+            case "local-navigate":
+                guard let route = value["route"] as? String, validRoute(route) else { throw NSError(domain: "MobileLocal", code: 2) }
+                UserDefaults.standard.set(route, forKey: routeKey); reply["value"] = true; navigate = true
+            default: throw NSError(domain: "MobileLocal", code: 3)
+            }
+            reply["ok"] = true
+        } catch { reply["ok"] = false }
+        guard let web, generation == epoch, let bytes = try? JSONSerialization.data(withJSONObject: [reply]), let literal = String(data: bytes, encoding: .utf8) else { return }
+        web.evaluateJavaScript("globalThis.__codexPlusMobileLocal?.resolve(\(literal)[0])") { [weak self, weak web] _, error in
+            guard navigate, error == nil, let self, self.generation == epoch, self.web === web else { return }
+            self.startConnection()
+        }
     }
     private func attachmentRefs(_ value: Any) throws -> [String: Any] {
         guard let refs = value as? [String: Any], Set(refs.keys) == Set(["files", "added", "images", "order"]),

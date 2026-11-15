@@ -19,6 +19,8 @@ targets:
     platform: iOS
     sources:
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/iOS
+      - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Shared/MobileStateKeys.json
+        buildPhase: resources
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Shared/MobileAddress.swift
       - path: ${CODEX_PLUS_MOBILE_CACHE}/frontend
         type: folder
@@ -29,4 +31,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.longbiaochen.codex-plus.mobile
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 7
+        CURRENT_PROJECT_VERSION: 8

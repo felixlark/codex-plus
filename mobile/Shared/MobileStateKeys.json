@@ -1,0 +1,14 @@
+{
+  "atoms": [
+    "composer-prompt-drafts-v2", "composer-prompt-drafts-v1",
+    "chatgpt-conversation-prompt-drafts-v2", "chatgpt-conversation-prompt-drafts-v1",
+    "draft-thread-identities-v1", "composer-retained-documents-v1",
+    "composer-pull-request-attachment-drafts-v1", "composer-response-annotation-drafts-v1",
+    "composer-presentation-suggestion-drafts-v1", "thread-workspace-draft-tabs-v1",
+    "composer-auto-context-enabled", "composer-recent-model-configurations-v1",
+    "composer-model-picker-selection-mode-v1", "chatgpt-home-model-picker-selection-mode-v1",
+    "chatgpt-work-model-picker-selection-mode-v1", "home-composer-mode-v1"
+  ],
+  "atomPrefixes": ["thread-client-id-v1:local%3A"],
+  "application": ["selected-project", "selected-remote-host-id", "active-remote-project-id"]
+}

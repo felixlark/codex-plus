@@ -136,7 +136,15 @@ export function installMobileEndpoint(config, encode, decode) {
         workers.get(worker).add(callback);
         return () => { const set = workers.get(worker); set?.delete(callback); if (set?.size === 0) { workers.delete(worker); send({kind: 'worker-unsubscribe', worker}); } };
       },
-      ...Object.fromEntries([...methods].map(method => [method, (...args) => invoke(method, args)])),
+      ...Object.fromEntries([...methods].map(method => [method, (...args) => {
+        if (method === 'sendMessageFromView' && globalThis.__codexPlusMobileLocal) {
+          const local = globalThis.__codexPlusMobileLocal.handleMessage(args[0]);
+          if (local.handled) return Promise.resolve(local.value);
+          const allowed = new Set(['mcp-request', 'mcp-response', 'mcp-notification', 'mcp-request-abandon', 'thread-prewarm-start', 'fetch', 'cancel-fetch']);
+          if (!allowed.has(args[0]?.type)) return Promise.reject(Error(`Unsupported phone host message: ${args[0]?.type}`));
+        }
+        return invoke(method, args);
+      }])),
     };
     const post = window.postMessage.bind(window);
     window.postMessage = function(message, target, transfer) {

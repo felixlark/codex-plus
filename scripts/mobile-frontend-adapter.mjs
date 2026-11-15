@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {adaptReloadRoute, reviewedRouteResource} from './inspect-sidebar-model.mjs';
+import {adaptReloadRoute, reviewedRouteResource, parser, walk} from './inspect-sidebar-model.mjs';
 
 // Enable the original browser File/Blob path only in the personal iOS bundle.
 // Keep the Mac vendor application and all other frontend resources unchanged.
@@ -23,7 +23,7 @@ export async function adaptMobileFrontend(relative, bytes) {
     if (createHash('sha256').update(bytes).digest('hex') !== 'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c') throw Error('Unreviewed mobile sidebar state resource');
     const source = bytes.toString('utf8'), before = 'function ea(){return!0}function es(){return!0}';
     if (source.split(before).length !== 2) throw Error('Original sidebar default changed');
-    return Buffer.from(source.replace(before, 'function ea(){return window.matchMedia("(min-width: 768px)").matches}function es(){return!0}'));
+    return Buffer.from(await adaptPhoneServices(source.replace(before, 'function ea(){return window.matchMedia("(min-width: 768px)").matches}function es(){return!0}')));
   }
   if (relative === 'assets/async/149364.fd50fe6b4a.js') {
     if (createHash('sha256').update(bytes).digest('hex') !== '5ecc1fb9f5ff213542696289e2f8ec37006be3b5aee8df3c460ce68853fb8f67') throw Error('Unreviewed mobile sidebar trigger resource');
@@ -47,4 +47,30 @@ export async function adaptMobileFrontend(relative, bytes) {
     apply:value=>(0,ok.Kk)(lL,draft=>{draft.fileAttachments=value.files;draft.imageAttachments=value.images;draft.addedFiles=value.added;draft.attachmentOrder=value.order;})
   }),[lL,(0,tI.eL)(lL.value)]);`;
   return Buffer.from(source.replace(before, 'let bB=gk,bF=!fn&&"cloud"!==sG&&hJ!==nP.fI;').replace(attachmentHook, attachmentHook + effect));
+}
+
+
+async function adaptPhoneServices(source) {
+  const {parse} = await parser();
+  const ast = parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
+  const modules = [];
+  walk(ast, node => { if (node.type === 'Property' && (node.key.name ?? node.key.value) === 'wRZ2' && node.value.type === 'FunctionExpression') modules.push(node); });
+  if (modules.length !== 1) throw Error('Original AppView module changed');
+  const module = modules[0], imports = [], installs = [];
+  walk(module.value.body, (node, parents) => {
+    if (node.type === 'VariableDeclarator' && node.init?.type === 'CallExpression' && node.init.arguments[0]?.value === 'ZG9f') imports.push({alias: node.id.name, at: parents.at(-1).end});
+    if (node.type === 'CallExpression' && node.callee.type === 'SequenceExpression') {
+      const callee = node.callee.expressions.at(-1), argument = node.arguments[0];
+      if (callee?.type === 'MemberExpression' && callee.property.name === 'setAppServices' && argument?.type === 'AwaitExpression' && argument.argument?.property?.name === 'services') installs.push({at: node.end, module: callee.object.name});
+    }
+  });
+  if (imports.length !== 1 || installs.length !== 1 || source.includes('__codexPlusPhoneRPC')) throw Error('Original AppView services binding changed');
+  const requireName = module.value.params[2].name, load = imports[0], install = installs[0];
+  const edits = [
+    {at: load.at, text: `const __codexPlusPhoneRPC=${load.alias},__codexPlusPhoneRecord=${requireName}("waIq").m;`},
+    {at: install.at, text: `,await globalThis.__codexPlusMobileLocal.install(${install.module},__codexPlusPhoneRPC,__codexPlusPhoneRecord)`},
+  ];
+  for (const edit of edits.sort((a,b) => b.at - a.at)) source = source.slice(0, edit.at) + edit.text + source.slice(edit.at);
+  parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
+  return source;
 }
