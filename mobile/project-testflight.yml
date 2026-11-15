@@ -8,6 +8,15 @@ targets:
       properties:
         CFBundleDisplayName: Smart Shadow
         ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     sources:
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Release/Assets.xcassets
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Release/PrivacyInfo.xcprivacy
