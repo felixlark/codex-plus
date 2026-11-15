@@ -2,7 +2,7 @@
 
 0.9.1 在每个窗口左下角的 Codex Plus 圆形按钮中央显示窗口编号（1、2……），点击仍打开设置。编号跟随窗口，切换聊天、移屏、页面重载或重启 Plus 时保持；关闭窗口后编号可以供新窗口使用。无需新增侧栏按钮或重载已有页面。设计见[窗口编号](docs/designs/window-number.md)。
 
-build69候选按本人最新决定把 Agent 派生窗口放到最右侧物理屏，退役 OCU 虚拟屏及自动恢复。人工 Codex 窗口、X 和 X Chat 保留原位；只认领明确文件或准确 PID/窗口 ID，不按整个应用认领，Chrome 新人工窗也不自动迁移。实际安装与验收另记。
+build71按本人最新决定把 Agent 派生窗口放到最右侧物理屏，退役 OCU 虚拟屏及自动恢复。人工 Codex 窗口、X 和 X Chat 保留原位；只认领明确文件或准确 PID/窗口 ID，不按整个应用认领，Chrome 新人工窗也不自动迁移。已签名安装并验证手机真实断线/手动重连；分项范围见验收记录。
 
 ```sh
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-status
