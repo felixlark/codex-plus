@@ -33,6 +33,15 @@ final class ToolWindowRouter {
     private var ownershipTimer: Timer?
 
     private var stopping = false
+    private var quiesced = false
+    private var openRequests = 0
+    func prepareLifecycle() throws {
+        quiesced = true
+        observationEpoch = UUID()
+        for pid in Array(watches.keys) { removeWatch(pid) }
+        guard placementRequests == 0, openRequests == 0 else { throw ManagementProtocol.failure("tool_window_pending") }
+    }
+    func resumeLifecycle() { quiesced = false }
     private var terminationScheduled = false
     private var lastError: String?
     private var watches: [pid_t: Watch] = [:]
@@ -141,7 +150,7 @@ final class ToolWindowRouter {
         func reportRemainder(_ watch: Watch) {
             remainder?(documents.map { $0.intersection(watch.documents ?? []) })
         }
-        guard enabled, !stopping, AXIsProcessTrusted(), app.processIdentifier > 0,
+        guard enabled, !stopping, !quiesced, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
         if let existing = watches[app.processIdentifier], existing.app.launchDate != app.launchDate {
             removeWatch(app.processIdentifier)
@@ -192,7 +201,7 @@ final class ToolWindowRouter {
     }
 
     private func scan(_ watch: Watch) {
-        guard enabled, !stopping, watches[watch.app.processIdentifier] === watch,
+        guard enabled, !stopping, !quiesced, watches[watch.app.processIdentifier] === watch,
               let launchDate = watch.app.launchDate,
               let live = NSRunningApplication(processIdentifier: watch.app.processIdentifier),
               !live.isTerminated, live.launchDate == launchDate else { return }
@@ -214,7 +223,7 @@ final class ToolWindowRouter {
 
     @discardableResult
     private func place(_ window: AXUIElement, pid: pid_t, mobileAnchor: Bool = false) -> Bool {
-        guard enabled, !stopping, let app = NSRunningApplication(processIdentifier: pid),
+        guard enabled, !stopping, !quiesced, let app = NSRunningApplication(processIdentifier: pid),
               (mobileAnchor && app.bundleIdentifier == "com.openai.codex") || !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? ""),
               app.bundleIdentifier != "com.google.Chrome" || chromeUsesAgentDisplay,
               let launchDate = app.launchDate,
@@ -257,7 +266,7 @@ final class ToolWindowRouter {
     }
 
     func routeMobileAnchor(_ host: NSRunningApplication, request: [String: Any]) -> [String: Any]? {
-        guard enabled, !stopping, host.bundleIdentifier == "com.openai.codex",
+        guard enabled, !stopping, !quiesced, host.bundleIdentifier == "com.openai.codex",
               host.bundleURL?.path == "/Applications/ChatGPT.app",
               let nonce = request["anchor"] as? String, UUID(uuidString: nonce) != nil,
               let instance = request["instance"] as? String, UUID(uuidString: instance) != nil else { return nil }
@@ -352,7 +361,7 @@ final class ToolWindowRouter {
             }
             guard let app = NSRunningApplication(processIdentifier: identity.pid),
                   let window = exactWindow(app, id: identity.windowID) else { return error("No exact live AX window for this PID/window ID") }
-            guard enabled, !stopping, let original = frame(window),
+            guard enabled, !stopping, !quiesced, let original = frame(window),
                   !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return error("Protected or unavailable Agent window") }
             let requestID = UUID().uuidString, epoch = observationEpoch
             currentOpenDocument = nil; currentOpenID = nil
@@ -388,7 +397,7 @@ final class ToolWindowRouter {
     private func retryObservation(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
                                   id: String, epoch: UUID, remaining: Int = 8) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, self.enabled, !self.stopping, self.observationEpoch == epoch, !app.isTerminated else { return }
+            guard let self, self.enabled, !self.stopping, !self.quiesced, self.observationEpoch == epoch, !app.isTerminated else { return }
             var pending = documents
             let observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 })
             let placed = self.windows(app).contains { w in
@@ -406,14 +415,14 @@ final class ToolWindowRouter {
     }
 
     private func prepareDisplay(id: String, epoch: UUID, operation: @escaping () -> Void) {
-        guard enabled, !stopping, observationEpoch == epoch else { return }
+        guard enabled, !stopping, !quiesced, observationEpoch == epoch else { return }
         display.prepare { [weak self] area in
             guard let self else { return }
             guard area != nil else {
                 self.lastOpen = ["id": id, "state": "failed", "error": "right-physical-display-unavailable"]; return
             }
             self.ocu.call { [weak self] outcome in
-                guard let self, self.enabled, !self.stopping, self.observationEpoch == epoch else { return }
+                guard let self, self.enabled, !self.stopping, !self.quiesced, self.observationEpoch == epoch else { return }
                 guard case .accepted = outcome else {
                     self.lastOpen = ["id": id, "state": "failed", "error": "ocu-right-display-interface-unavailable"]; return
                 }
@@ -423,7 +432,7 @@ final class ToolWindowRouter {
     }
 
     private func open(_ request: [String: Any]) -> [String: Any] {
-        guard enabled, !stopping else { return error("Agent window routing is paused") }
+        guard enabled, !stopping, !quiesced else { return error("Agent window routing is paused") }
         guard AXIsProcessTrusted() else { return error("Codex Plus Accessibility permission is required") }
         guard let path = request["appPath"] as? String, path.hasPrefix("/"),
               let bundle = Bundle(path: path), path.hasSuffix(".app") else { return error("An absolute app bundle is required") }
@@ -461,6 +470,7 @@ final class ToolWindowRouter {
     }
 
     private func openFile(appURL: URL, resource: URL, id: String, requestEpoch: UUID) {
+        guard !quiesced, !stopping else { return }
         // Capture all instances again after display preparation. LaunchServices
         // may select any running instance; array order is not an identity.
         guard let snapshots = fileOpenSnapshots(appURL) else {
@@ -493,10 +503,12 @@ final class ToolWindowRouter {
         config.activates = false
         config.allowsRunningApplicationSubstitution = false
         let openCalledAt = Date()
+        openRequests += 1
         NSWorkspace.shared.open([resource], withApplicationAt: appURL, configuration: config) { [weak self] app, failure in
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard self.enabled, !self.stopping, self.observationEpoch == requestEpoch else {
+                self.openRequests -= 1
+                guard self.enabled, !self.stopping, !self.quiesced, self.observationEpoch == requestEpoch else {
                     if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "routing-cancelled" }
                     return
                 }
@@ -590,7 +602,7 @@ final class ToolWindowRouter {
     }
 
     func prepareAgentWindow(_ window: NSWindow) -> Bool {
-        guard enabled, !stopping, let area = display.currentBounds() else { return false }
+        guard enabled, !stopping, !quiesced, let area = display.currentBounds() else { return false }
         if window.isVisible && !ownAgentWindowIsParked(window) { ownAgentWindow = nil; lastError = "agent-settings-handed-to-user"; return false }
         let target = ToolWindowPolicy.destination(frame: window.frame, area: area)
         window.setFrame(NSRect(x: target.minX, y: CGDisplayBounds(CGMainDisplayID()).height - target.maxY, width: target.width, height: target.height), display: false)

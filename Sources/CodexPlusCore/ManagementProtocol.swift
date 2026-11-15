@@ -8,7 +8,7 @@ public enum ManagementProtocol {
     public static let command = "management-v1"
     public static let runtimeBundleID = "me.longbiaochen.codex-plus"
     public static let runtimePath = "/Applications/Codex Plus.app"
-    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write" }
+    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", prepareStop = "lifecycle.prepare-stop", stop = "lifecycle.stop", resume = "lifecycle.resume" }
     public enum Rejection: String { case unsupported, conflict }
     /// Only these protocol codes attest a pre-effect rejection. Arbitrary
     /// failures may follow an effect and must remain unknown to the client.
@@ -22,6 +22,7 @@ public enum ManagementProtocol {
         public let expectedRuntime: UUID?
         public let expectedRevision: String?
         public let changes: [String: Any]?
+        public let expectedScope: String?
         public static func parse(_ value: [String: Any]) throws -> Self {
             let base: Set<String> = ["command", "protocol", "request_id", "operation"]
             guard value["command"] as? String == command, integer(value["protocol"]) == version,
@@ -31,18 +32,22 @@ public enum ManagementProtocol {
             case .status: allowed.formUnion(["expected_runtime"])
             case .settingsRead: break
             case .settingsWrite: allowed.formUnion(["expected_runtime", "expected_settings_revision", "changes"])
+            case .prepareStop, .resume: allowed.insert("expected_runtime")
+            case .stop: allowed.formUnion(["expected_runtime", "expected_scope_revision"])
             }
             guard Set(value.keys).isSubset(of: allowed) else { throw failure("unexpected_field") }
             let runtime = uuid(value["expected_runtime"])
             if value["expected_runtime"] != nil && runtime == nil { throw failure("invalid_runtime") }
-            if op == .settingsWrite { guard runtime != nil else { throw failure("runtime_required") } }
+            if [.settingsWrite, .prepareStop, .stop, .resume].contains(op) { guard runtime != nil else { throw failure("runtime_required") } }
+            let scope = value["expected_scope_revision"] as? String
+            if op == .stop { guard let scope, isDigest(scope) else { throw failure("scope_required") } }
             let revision = value["expected_settings_revision"] as? String
             let changes = value["changes"] as? [String: Any]
             if op == .settingsWrite {
                 guard let revision, isDigest(revision), let changes, !changes.isEmpty else { throw failure("settings_required") }
                 try Settings.validateChanges(changes)
             }
-            return Self(id: id, operation: op, expectedRuntime: runtime, expectedRevision: revision, changes: changes)
+            return Self(id: id, operation: op, expectedRuntime: runtime, expectedRevision: revision, changes: changes, expectedScope: scope)
         }
     }
     public struct RuntimeIdentity: Codable, Equatable {

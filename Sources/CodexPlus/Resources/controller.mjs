@@ -33,19 +33,24 @@ let cdp;
 let mobile, mobileSupported=false;
 const sessions=new Map();
 const inFlight=new Set();
-let stopping=false;
+let stopping=false,quiesced=false;
+const lifecycleOperations=new Set();
+let monitorWork=Promise.resolve();
+let startupWork;
+function trackLifecycle(work){lifecycleOperations.add(work);void work.finally(()=>lifecycleOperations.delete(work)).catch(()=>{});return work;}
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
 let featureSupported=false,suggestionSupported=false,sidebarSupported=false;
 let displays=[];let humanNativeSupported=false;
 const humanCreations=new Map();
 let humanFrames=[];
 async function createHumanWindow(nonce){
-  if(typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||humanCreations.has(nonce))return;
+  if(stopping||quiesced||typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||humanCreations.has(nonce))return;
   humanCreations.set(nonce,{phase:'creating'});
   try{
     const source=[...sessions].find(([,s])=>s.main);
     if(!source)throw Error('No native main renderer');
     const probe=await command(source[0],'Runtime.evaluate',{expression:'new URL(location.href).searchParams.get("initialRoute")',returnByValue:true});
+    if(stopping||quiesced){humanCreations.delete(nonce);return;}
     const previous=probe.result.value;
     // Root + query is rejected by the host's route validator. The accepted
     // plugins route carries the token until the owned new target is navigated home.
@@ -57,8 +62,9 @@ async function createHumanWindow(nonce){
 }
 function humanMarker(value){try{const u=new URL(value);return u.searchParams.get('codexPlusHumanWindow')??new URL(u.searchParams.get('initialRoute')??'/','https://codex.invalid').searchParams.get('codexPlusHumanWindow');}catch{return null;}}
 async function settleHumanCreations(){
+  if(stopping||quiesced)return;
   if(![...humanCreations.values()].some(r=>r.phase==='requested'))return;
-  const {targetInfos}=await cdp.call('Target.getTargets');
+  const {targetInfos}=await cdp.call('Target.getTargets');if(stopping||quiesced)return;
   for(const [nonce,request] of humanCreations){
     if(request.phase!=='requested')continue;
     const matching=targetInfos.filter(t=>t.type==='page'&&mainURL(t.url)&&humanMarker(t.url)===nonce);
@@ -74,6 +80,7 @@ async function settleHumanCreations(){
     // drafts and navigation are never used as a reload surface.
     const url=new URL('app://-/index.html');url.searchParams.set('initialRoute','/');url.searchParams.set('codexPlusHumanWindow',nonce);
     humanCreations.set(nonce,{phase:'created',target:target.targetId});session[1].human=true;
+    if(stopping||quiesced)return;
     await command(session[0],'Page.navigate',{url:url.href});
   }
 }
@@ -81,7 +88,7 @@ async function repairNativeWindowDefaults(){
   if(!humanFrames.length||!humanNativeSupported)return;
   const destination=humanFrames.find(f=>f.number===1)??humanFrames[0];
   const source=[...sessions].find(([,s])=>s.main);
-  if(!source)return;
+  if(!source||quiesced||stopping)return;
   const bounds={x:destination.x,y:destination.y,width:destination.width,height:destination.height};
   const evaluate=async(operation)=>{
     const result=await command(source[0],'Runtime.evaluate',{expression:`(${nativeWindowDefaults.toString()})(${JSON.stringify(operation)},${JSON.stringify(bounds)})`,awaitPromise:true,returnByValue:true});
@@ -118,7 +125,7 @@ async function probeSuggestions(target){
 }
 async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  if(stopping||quiesced||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
   let request;try{request=JSON.parse(event.payload);}catch{return;}
   if(request.protocol!==5||typeof request.requestId!=='string'||request.requestId.length>100)return;
   const p=suggestions.pending;
@@ -186,7 +193,7 @@ function suggestionSettings(line){try{const message=JSON.parse(line);if(message.
 const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{try{const m=JSON.parse(line);if(m.type==='lifecycle'){void lifecycleCommand(m);return;}}catch{}if(quiesced||stopping)return;suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void trackLifecycle(createHumanWindow(reply.nonce));return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -215,7 +222,7 @@ async function syncSidebar(id,event){
 }
 async function sidebarAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==sidebarBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  if(stopping||quiesced||event.name!==sidebarBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
   let value;try{value=JSON.parse(event.payload);}catch{return;}
   if(value.version!==1||typeof value.pageId!=='string'||!Number.isSafeInteger(value.sequence)||value.sequence<1||typeof value.change?.key!=='string'||!sanitizeSidebarValues({[value.change.key]:value.change.value}))return;
   await queueSidebar(message.sessionId,{...value,context:event.executionContextId});
@@ -223,7 +230,7 @@ async function sidebarAction(message){
 function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
 async function nativeAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==featureBinding||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame||!session.main)return;
+  if(stopping||quiesced||event.name!==featureBinding||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame||!session.main)return;
   let action;try{action=JSON.parse(event.payload);}catch{return;}
   if(!validateNativeAction(action))return;
   if([...requests.values()].some(r=>r.session===message.sessionId&&r.context===event.executionContextId&&r.pageID===action.requestId))return;
@@ -289,13 +296,15 @@ async function main(){
     if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;sidebarSupported=false;state.sidebarLayout={supported:false,phase:'unsupported-host'};}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
-  if(stopping)return;
+  if(stopping||quiesced)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
+    if(stopping||quiesced)return;
     state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},humanTargets:saved.humanTargets??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     state.phase='launching';state.launchMethod='launch-services';await publish();
+    if(stopping||quiesced)return;
     const launched=await launchHost({app:values.app,profile:values.profile});
     state.pid=launched.pid;state.endpoint=launched.endpoint;
     await publish();
@@ -303,7 +312,9 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
+  if(stopping||quiesced)return;
   try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
+  if(quiesced&&mobile)mobile.quiesced=true;
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
@@ -324,16 +335,16 @@ async function main(){
     const session={target:targetInfo.targetId,contexts:new Map(),main:false,human:!!humanMarker(targetInfo.url)};
     sessions.set(sessionId,session);state.attached++;
     try{
-      if(targetInfo.type==='page'&&!stopping){
+      if(targetInfo.type==='page'&&!stopping&&!quiesced){
         session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
           patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
           bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
           source:featureSupported?featureSource:undefined,
         });
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
-        if(session.main){
+        if(session.main&&!quiesced&&!stopping){
           if(suggestionSupported)await updateSuggestionPolicy();
-          if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
+          if(featureSupported&&!quiesced&&!stopping)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
           if(runtime.result.value===9)state.projectOrder.phase='active';
           else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
@@ -348,12 +359,12 @@ async function main(){
     let body,finished=false;
     const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await command(sessionId,'Fetch.continueRequest',{requestId:event.requestId});finished=true;};
     try{
-      if(stopping){await original();return;}
+      if(stopping||quiesced){await original();return;}
       const {frameTree}=await command(sessionId,'Page.getFrameTree');
       const resource=resources.find(resource=>resource.url===event.request.url);
       if(!mainURL(frameTree.frame.url)||frameTree.frame.id!==event.frameId||!resource||event.resourceType!=='Script'||event.responseStatusCode!==200){await original();return;}
       body=await command(sessionId,'Fetch.getResponseBody',{requestId:event.requestId});
-      if(stopping){await original();return;}
+      if(stopping||quiesced){await original();return;}
       const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
       if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
       await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';if(resource.kind==='project-order')state.projectOrder.phase='active';
@@ -361,18 +372,20 @@ async function main(){
     finally{await publish();}
   }
   if(stopping){cdp.close();return;}
+  if(quiesced)return;
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();
-  const suggestionHeartbeat=setInterval(()=>{if(!stopping)void updateSuggestionPolicy();},1000);
+  const suggestionHeartbeat=setInterval(()=>{if(!stopping&&!quiesced)void trackLifecycle(updateSuggestionPolicy());},1000);
   let inspecting=false;
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID||!parentIsAlive(parentPID)){clearInterval(monitor);void shutdown();return;}
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
-    if(inspecting||stopping)return;inspecting=true;
+    if(inspecting||stopping||quiesced)return;inspecting=true;
+    let monitorDone;monitorWork=new Promise(resolve=>{monitorDone=resolve;});
     try{
       if(mobile){await mobile.tick();const current=mobile.status();if(JSON.stringify(current)!==JSON.stringify(state.mobile)){state.mobile=current;await publish();}}
-      await settleHumanCreations();
+      await trackLifecycle(settleHumanCreations());
       await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
         const pages=[];
@@ -397,18 +410,43 @@ async function main(){
 
         const readiness=reviewedBackgroundPages(pages);
         await suggestions.tick(readiness.ready.map(page=>({...page,snapshot:{...page.snapshot,candidates:(page.snapshot.candidates??[]).filter(c=>!acceptanceThread||c.target.threadId===acceptanceThread)}})),{probe:probeSuggestions,submit:async(id,arg)=>{
-          if(stopping||!cdp.open)throw Error('Controller disconnected');
+          if(stopping||quiesced||!cdp.open)throw Error('Controller disconnected');
           const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.submit(${JSON.stringify(arg)})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
         }});
         const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,mode:'background-native-reviewed',review:{pending:pages.reduce((n,p)=>n+(p.snapshot.review?.pending??0),0),reviewing:pages.reduce((n,p)=>n+(p.snapshot.review?.reviewing??0),0),captured:pages.reduce((n,p)=>n+(p.snapshot.review?.captured??0),0),reasons:[...new Set(pages.map(p=>p.snapshot.review?.reason).filter(Boolean))]},pageReady:readiness.pageReady,legacyPages:readiness.legacyPages};
         if(!snapshot.pageReady)snapshot.reason='page-reload-required';
         if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
       }
-    }catch{}finally{inspecting=false;}
+    }catch{}finally{inspecting=false;monitorDone();}
   },1000);
 }
 function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
 function fail(error){state.errors.push(error.message);void publish();}
+async function lifecycleCommand(message){
+ if(typeof message.requestId!=='string')return;
+ try{
+  if(message.action==='verify'){
+   if(!quiesced)throw Error('Not prepared');
+   const status=mobile?.status()??null;
+   if(status?.targetId){const {targetInfos}=await cdp.call('Target.getTargets');if(!targetInfos.some(t=>t.targetId===status.targetId))throw Error('Anchor gone');}
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:status})+'\n');
+  }else if(message.action==='prepare'){
+   const preparingDuringStartup=!startupReady;
+   quiesced=true;if(mobile)mobile.quiesced=true;
+   await startupWork;
+   if(preparingDuringStartup)throw Error('Startup was still in progress');
+   await monitorWork;
+   if(inFlight.size)await Promise.allSettled([...inFlight]);
+   if(lifecycleOperations.size)await Promise.allSettled([...lifecycleOperations]);
+   if([...humanCreations.values()].some(r=>r.phase==='creating'||r.phase==='requested'))throw Error('Window creation pending');
+   const mobileScope=await mobile?.prepareStop();
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:mobileScope??null})+'\n');
+  }else if(message.action==='resume'){
+   if(stopping)throw Error('Stopping');mobile?.resume();quiesced=false;
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true})+'\n');
+  }
+ }catch{process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:false})+'\n');}
+}
 async function shutdown(){
   if(stopping)return;stopping=true;suggestions.configure(false);
   // Cleanup is best effort after leases and admissions are revoked. Reuse the
@@ -437,4 +475,6 @@ async function shutdown(){
 }
 
 process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
-main().catch(async error=>{state.phase='failed';state.error=error.message;if(cdp)cdp.close();await publish();process.exit(1);});
+let startupReady=false;
+startupWork=main().then(()=>{startupReady=true;});
+startupWork.catch(async error=>{state.phase='failed';state.error=error.message;if(cdp)cdp.close();await publish();process.exit(1);});

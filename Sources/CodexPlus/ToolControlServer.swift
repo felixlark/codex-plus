@@ -5,7 +5,7 @@ import CodexPlusCore
 /// Command I/O stays off main; the router itself executes on main.
 /// The original StatusServer remains read-only and unchanged.
 final class ToolControlServer {
-    private final class Connection {
+    private final class Connection: @unchecked Sendable {
         let id = UUID()
         let fd: Int32
         private let lock = NSLock()
@@ -26,7 +26,12 @@ final class ToolControlServer {
     private var clients: [UUID: Connection] = [:]
     private var epoch = UUID()
 
-    func start(handle: @escaping ([String: Any]) -> [String: Any]) throws {
+    struct Reply {
+        let value: [String: Any]
+        let afterWrite: (() -> Void)?
+        init(_ value: [String: Any], afterWrite: (() -> Void)? = nil) { self.value = value; self.afterWrite = afterWrite }
+    }
+    func start(handle: @escaping ([String: Any]) async -> Reply) throws {
         let directory = URL(fileURLWithPath: ToolControlChannel.path).deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         unlink(ToolControlChannel.path)
@@ -48,19 +53,30 @@ final class ToolControlServer {
                 self.clients[connection.id] = connection
                 let epoch = self.epoch
                 DispatchQueue.global().async { [weak self] in
-                    defer {
+                    guard let frame = try? ToolControlChannel.readFrame(from: fd),
+                          let request = try? JSONSerialization.jsonObject(with: frame) as? [String: Any] else {
                         connection.finish()
                         DispatchQueue.main.async { [weak self] in self?.clients.removeValue(forKey: connection.id) }
+                        return
                     }
-                    guard let frame = try? ToolControlChannel.readFrame(from: fd),
-                          let request = try? JSONSerialization.jsonObject(with: frame) as? [String: Any] else { return }
-                    let response: [String: Any]? = DispatchQueue.main.sync {
-                        guard let self, self.epoch == epoch, self.clients[connection.id] != nil else { return nil }
-                        return handle(request)
+                    Task { @MainActor [weak self] in
+                        guard let self, self.epoch == epoch, self.clients[connection.id] != nil else { connection.finish(); return }
+                        let response = await handle(request)
+                        let finish: @Sendable () -> Void = { [weak self] in
+                            DispatchQueue.main.async {
+                                self?.clients.removeValue(forKey: connection.id)
+                                response.afterWrite?()
+                            }
+                        }
+                        DispatchQueue.global().async {
+                            if var data = try? JSONSerialization.data(withJSONObject: response.value) {
+                                data.append(0x0A)
+                                try? ToolControlChannel.writeAll(data, to: fd)
+                            }
+                            connection.finish()
+                            finish()
+                        }
                     }
-                    guard let response, var data = try? JSONSerialization.data(withJSONObject: response) else { return }
-                    data.append(0x0A)
-                    try? ToolControlChannel.writeAll(data, to: fd)
                 }
             }
             listener = source

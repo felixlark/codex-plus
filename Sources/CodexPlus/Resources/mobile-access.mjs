@@ -95,11 +95,11 @@ export class MobileAccess {
   constructor(config, {cdp, command, sessions, stateFile, publish, requestWindowPlacement, instance = randomUUID()}) {
     this.config = {...config, instance}; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
     this.stateFile = stateFile; this.claimRevision = 0; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
-    this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
+    this.quiesced = false; this.operations = new Set(); this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
     this.requestWindowPlacement = requestWindowPlacement;
   }
-  status() { return {phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  status() { return {anchor:this.config.anchor, instance:this.config.instance, creationAttempted:this.creationAttempted, gatewayPID:this.gateway?.pid??null, phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
   windowPlacementResult(message) {
     if (!this.windowPlacementRequested || this.stopped || this.windowPlaced || message.anchor !== this.config.anchor || message.instance !== this.config.instance || message.targetId !== this.anchorTarget) return;
     if (this.windowPlacementUnknown && message.windowID !== this.windowID) return;
@@ -112,12 +112,14 @@ export class MobileAccess {
     }
   }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
-  async tick() {
-    if (this.busy || this.stopped) return;
+  tick() { const work = this.tickWork(); this.operations.add(work); void work.finally(() => this.operations.delete(work)).catch(() => {}); return work; }
+  async tickWork() {
+    if (this.busy || this.stopped || this.quiesced) return;
     this.busy = true;
     try {
       this.stage = 'targets';
       const {targetInfos} = await this.cdp.call('Target.getTargets');
+      if (this.stopped || this.quiesced) return;
       const candidates = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
       if (candidates.length > 1 || this.anchorTarget && candidates.some(t => t.targetId !== this.anchorTarget)) throw Error('Ambiguous mobile anchor');
       // Ownership is sticky after the original nonce URL identifies the native
@@ -141,7 +143,7 @@ export class MobileAccess {
         if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
         this.stage = 'frame-tree';
         const {frameTree} = await this.command(session[0], 'Page.getFrameTree');
-        if (this.stopped) return;
+        if (this.stopped || this.quiesced) return;
         if (this.preparationAttempted && frameTree.frame.loaderId === this.preparingFromLoader) { this.phase = 'anchor-loading'; return; }
         if (!this.preparationAttempted) {
           // The native sender stays registered; main-frame navigation tears down
@@ -179,6 +181,7 @@ export class MobileAccess {
         if (!context) return;
         this.phase = 'waiting-for-host-startup'; this.stage = 'startup';
         const readiness = await this.command(source[0], 'Runtime.evaluate', {expression: `(${mobileStartupReadiness.toString()})(${JSON.stringify(this.config.anchor)})`, contextId: context.id, returnByValue: true});
+        if (this.stopped || this.quiesced) return;
         if (readiness.exceptionDetails || readiness.result?.value === 'failed') throw Error('Native anchor startup failed');
         if (readiness.result?.value !== 'ready') return;
         this.creationAttempted = true; this.phase = 'creating-anchor';
@@ -204,6 +207,7 @@ export class MobileAccess {
     execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus.mobile-gateway" and certificate leaf[subject.OU] = "HJG65XBC25"', gatewayPath], {stdio: 'pipe'});
     // Identify the adapter and verified gateway actually loaded by this runtime.
     this.version = 'sha256:' + createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).update(await fs.readFile(gatewayPath)).digest('hex');
+    if (this.stopped || this.quiesced) return;
     this.gateway = spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
     this.gateway.stderr.resume();
     this.gateway.once('exit', () => { if (!this.stopped) { this.phase = 'gateway-exited'; void this.close(); } });
@@ -216,7 +220,8 @@ export class MobileAccess {
     if (this.stopped || !this.gateway?.stdin.writable) return;
     this.gateway.stdin.write(JSON.stringify({type: 'send', id, text: JSON.stringify(message)}) + '\n');
   }
-  async gatewayEvent(line) {
+  gatewayEvent(line) { const work = this.gatewayEventWork(line); this.operations.add(work); void work.finally(() => this.operations.delete(work)).catch(() => {}); return work; }
+  async gatewayEventWork(line) {
     const event = JSON.parse(line);
     if (this.stopped) return;
     if (event.type === 'listening') {
@@ -226,6 +231,7 @@ export class MobileAccess {
       await fs.mkdir(path.dirname(file), {recursive: true, mode: 0o700});
       await fs.writeFile(file + '.tmp', JSON.stringify(client), {mode: 0o600}); await fs.rename(file + '.tmp', file);
     } else if (event.type === 'connected') {
+      if (this.quiesced) { this.drop(event.id); return; }
       // Exclusive anchor ownership, not a concurrency/resource quota.
       if (this.clients.size || !isTailIPv4(event.peer)) { this.drop(event.id); return; }
       const session = this.sessions.get(this.anchorSession);
@@ -259,14 +265,14 @@ export class MobileAccess {
   current(client) { return !this.stopped && this.clients.get(client.id) === client && this.anchorSession === client.session && this.sessions.get(client.session)?.contexts.has(client.context); }
   async activate(client) {
     return this.anchorWork(async () => {
-      if (!this.current(client)) return;
+      if (this.quiesced || !this.current(client)) return;
       await this.command(client.session, 'Runtime.addBinding', {name: binding});
-      if (!this.current(client)) return;
+      if (this.quiesced || !this.current(client)) return;
       client.phase = 'binding';
       const connection = client.connection;
       const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection, anchor: this.config.anchor, instance: this.config.instance})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
       const snapshot = await this.evaluate(source, true);
-      if (!this.current(client)) return;
+      if (this.quiesced || !this.current(client)) return;
       client.threadId = this.config.threadId; client.phase = 'active'; this.claimRevision++; this.phase = 'connected';
       this.send(client.id, {kind: 'bootstrap', connection, hostVersion: mobileHost.version, snapshot});
       for (const value of client.buffered ?? []) this.send(client.id, value);
@@ -297,6 +303,21 @@ export class MobileAccess {
       this.phase = 'anchor-lost'; void this.close();
     }
   }
+  async prepareStop() {
+    this.quiesced = true;
+    if ([...this.clients.values()].some(c => c.phase !== 'active')) throw Error('Mobile handshake pending');
+    if (this.operations.size) await Promise.allSettled([...this.operations]);
+    await this.anchorQueue;
+    if (this.creationAttempted && !this.anchorTarget) {
+      const {targetInfos} = await this.cdp.call('Target.getTargets');
+      const matches = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
+      if (matches.length !== 1) throw Error('Mobile anchor creation outcome unknown');
+      this.anchorTarget = matches[0].targetId;
+    }
+    if (this.stopped) throw Error('Mobile stopped while preparing');
+    return this.status();
+  }
+  resume() { if (!this.stopped) this.quiesced = false; }
   async close() {
     if (this.stopped) return; this.stopped = true;
     try {

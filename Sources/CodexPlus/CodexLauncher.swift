@@ -1,5 +1,6 @@
 import AppKit
 import CodexPlusCore
+import CryptoKit
 
 /// The accessory app owns one external controller. It never terminates Codex.
 final class CodexLauncher: ObservableObject {
@@ -19,6 +20,8 @@ final class CodexLauncher: ObservableObject {
     private var controller: Process?
     private var timer: Timer?
     private var stopping = false
+    private var quiesced = false
+    private var lifecycleWait: (id: UUID, continuation: CheckedContinuation<[String: Any], Error>)?
     private var recovering = false
     private var snapshot: [String: Any] = [:]
     private var stopped: (() -> Void)?
@@ -48,7 +51,7 @@ final class CodexLauncher: ObservableObject {
 
     func start() {
         humanWindows.createWindow = { [weak self] nonce in
-            guard let input = self?.controllerInput,
+            guard self?.quiesced == false, self?.stopping == false, let input = self?.controllerInput,
                   let data = try? JSONSerialization.data(withJSONObject: ["type": "create-human-window", "nonce": nonce]) else { return false }
             do { try input.write(contentsOf: data + Data([10])); return true } catch { return false }
         }
@@ -58,6 +61,7 @@ final class CodexLauncher: ObservableObject {
     }
 
     func open(source: String = "menu") {
+        guard !quiesced, !stopping else { return }
         entryRequests += 1
         lastEntrySource = source
         needsPlacement = true
@@ -88,6 +92,59 @@ final class CodexLauncher: ObservableObject {
         return false
     }
 
+    func prepareLifecycle() async throws -> [String: Any] {
+        quiesced = true
+        let expectedController = controller?.processIdentifier
+        let reply = try await controllerLifecycle("prepare")
+        guard controller?.processIdentifier == expectedController else { throw ManagementProtocol.failure("controller_changed") }
+        var scope: [String: Any] = ["native":ProcessIdentity.read(getpid()) as Any? ?? NSNull(),
+                                  "controller":controller.flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
+                                  "host":ownedHost().flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
+                                  "mobile":reply["mobile"] ?? NSNull()]
+        if let mobile = reply["mobile"] as? [String: Any], let number = ManagementProtocol.integer(mobile["gatewayPID"]), let pid = Int32(exactly:number) {
+            guard let identity = ProcessIdentity.read(pid) else { throw ManagementProtocol.failure("gateway_identity_unknown") }
+            scope["gateway"] = identity
+        } else { scope["gateway"] = NSNull() }
+        let canonical = try JSONSerialization.data(withJSONObject: scope, options:.sortedKeys)
+        let digest = SHA256.hash(data: canonical).map { String(format:"%02x", $0) }.joined()
+        return ["state":"prepared", "owned_scope":scope, "scope_revision":digest, "scope_canonical_base64":canonical.base64EncodedString()]
+    }
+    func resumeLifecycle() async throws {
+        _ = try await controllerLifecycle("resume")
+        quiesced = false
+    }
+    func verifyLifecycleScope(_ prepared: [String: Any]) async -> Bool {
+        guard quiesced, let scope = prepared["owned_scope"] as? [String: Any] else { return false }
+        for key in ["native", "controller", "gateway", "host"] {
+            if scope[key] is NSNull { continue }
+            guard let saved = scope[key] as? [String: Any], let pid = ManagementProtocol.integer(saved["pid"]),
+                  let actual = ProcessIdentity.read(pid_t(pid)), NSDictionary(dictionary:saved).isEqual(to:actual) else { return false }
+        }
+        do {
+            let current = try await controllerLifecycle("verify")
+            let saved = scope["mobile"] as? [String: Any]
+            let mobile = current["mobile"] as? [String: Any]
+            for key in ["anchor", "instance", "targetId", "gatewayPID"] {
+                if String(describing:saved?[key]) != String(describing:mobile?[key]) { return false }
+            }
+            return true
+        } catch { return false }
+    }
+    private func controllerLifecycle(_ action: String) async throws -> [String: Any] {
+        guard lifecycleWait == nil else { throw ManagementProtocol.failure("lifecycle_in_progress") }
+        guard let controller, controller.isRunning, let input = controllerInput else {
+            if controller == nil && snapshot.isEmpty { return ["mobile":NSNull()] }
+            throw ManagementProtocol.failure("controller_unknown")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            let id = UUID(); lifecycleWait = (id, continuation)
+            do {
+                let data = try JSONSerialization.data(withJSONObject:["type":"lifecycle", "action":action, "requestId":id.uuidString])
+                try input.write(contentsOf:data + Data([10]))
+            } catch { lifecycleWait = nil; continuation.resume(throwing:error) }
+        }
+    }
+
     func setAutoSendSuggestions(_ enabled: Bool) {
         autoSendEnabled = enabled
         let message: [String: Any] = ["type": "suggestion-settings", "version": 1, "enabled": enabled]
@@ -109,6 +166,9 @@ final class CodexLauncher: ObservableObject {
 
     func status() -> [String: Any] {
         ["hotKey": "F6", "hotKeySource": "Karabiner", "dockItem": false,
+         "native_identity":ProcessIdentity.read(getpid()) as Any? ?? NSNull(),
+         "controller_identity":controller.flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
+         "quiesced":quiesced,
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
          "entryRequests": entryRequests, "lastEntrySource": lastEntrySource, "placement": placementStatus,
          "placementSource": "codex-plus-dual-window", "placementRule": "external-1-right-2",
@@ -155,12 +215,12 @@ final class CodexLauncher: ObservableObject {
     }
 
     private func refresh() {
-        if let host = ownedHost() { humanWindows.update(host) }
+        if !quiesced, !stopping, let host = ownedHost() { humanWindows.update(host) }
         publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
         }
-        if let host = ownedHost(), let request = mobileWindowRequest,
+        if !quiesced, let host = ownedHost(), let request = mobileWindowRequest,
            let placement = onPlaceMobileWindow?(host, request) {
             if let id = placement["windowID"] { mobileWindowRequest?["windowID"] = id }
             let phase = placement["phase"] as? String
@@ -217,7 +277,7 @@ final class CodexLauncher: ObservableObject {
     }
 
     private func place(_ host: NSRunningApplication) {
-        guard needsPlacement else { return }
+        guard needsPlacement, !quiesced, !stopping else { return }
         needsPlacement = false
         humanWindows.open(host)
         placementStatus = "dual-window"
@@ -225,7 +285,7 @@ final class CodexLauncher: ObservableObject {
 
     private func startController(attach: Bool) {
         guard SuggestionAcceptance.isValidOrAbsent else { summary = "验收任务标识无效，自动发送保持关闭"; return }
-        guard controller == nil, !stopping else { return }
+        guard controller == nil, !stopping, !quiesced else { return }
         let resources = Bundle.main.resourceURL!
         let process = Process()
         process.executableURL = appURL.appendingPathComponent("Contents/Resources/cua_node/bin/node")
@@ -258,8 +318,9 @@ final class CodexLauncher: ObservableObject {
             self.mobileWindowRequest = nil
             self.outputBuffer.removeAll()
             self.controller = nil; self.refresh()
+            if let wait = self.lifecycleWait { self.lifecycleWait = nil; wait.continuation.resume(throwing:ManagementProtocol.failure("controller_exited")) }
             if self.stopping { self.stopped?(); self.stopped = nil; return }
-            guard !self.stopping else { return }
+            guard !self.stopping, !self.quiesced else { return }
             if self.ownedHost() != nil && !self.recovering {
                 self.recovering = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
@@ -280,6 +341,13 @@ final class CodexLauncher: ObservableObject {
             let line = outputBuffer.prefix(upTo: newline)
             outputBuffer.removeSubrange(...newline)
             guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+            if value["type"] as? String == "lifecycle-result", let id = value["requestId"] as? String,
+               let wait = lifecycleWait, wait.id.uuidString == id {
+                lifecycleWait = nil
+                if value["ok"] as? Bool == true { wait.continuation.resume(returning:value) }
+                else { wait.continuation.resume(throwing:ManagementProtocol.failure("scope_not_ready")) }
+                continue
+            }
             if value["type"] as? String == "mobile-window-request", value["version"] as? Int == 1 {
                 guard !stopping, mobileWindowRequest == nil else { continue }
                 mobileWindowRequest = value
