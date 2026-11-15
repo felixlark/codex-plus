@@ -21,7 +21,13 @@ export async function adaptMobileFrontend(relative, bytes) {
     if (source.split('</head>').length !== 2) throw Error('Original document head changed');
     // Keep touch editing readable without WebKit focus zoom. User pinch zoom
     // and the original input, selection, composition and submit handlers remain.
-    const style = '<style data-codex-mobile-input-size>@media(pointer:coarse){html body input,html body textarea,html body [contenteditable="true"]{font-size:max(16px,1em)}}</style>';
+    const style = `<style data-codex-mobile-input-size>
+@media(pointer:coarse){html body input,html body textarea,html body [contenteditable="true"]{font-size:max(16px,1em)}}
+@media(pointer:coarse) and (orientation:landscape) and (max-height:240px){
+body:has([contenteditable="true"]:focus) [data-window-titlebar],body:has([contenteditable="true"]:focus) [data-app-shell-header-layout]{display:none}
+html body [contenteditable="true"]{min-height:1.5em;max-height:3em;overflow-y:auto}
+}
+</style>`;
     return Buffer.from(source.replace('</head>', style + '</head>'));
   }
   if (`webview/${relative}` === reviewedRouteResource.path) {

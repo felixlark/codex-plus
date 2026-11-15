@@ -155,6 +155,20 @@ test('only reviewed repository and Space metadata seed formats persist', async (
   } finally { f.cleanup(); }
 });
 
+test('Codex project expansion keeps the original executor-folder identity reduction', async () => {
+  const f = setup();
+  try {
+    const valid = ['sidebar-project-expanded-v1-codex:project:original', 'sidebar-project-expanded-v1-codex:executor-folder:["environment","/own/project"]', 'sidebar-project-expanded-v1-codex:executor-folder:["",""]'];
+    for (const key of valid) f.api.handleMessage({type: 'persisted-atom-update', key, value: true});
+    await flush(); await flush(); await flush();
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, valid.length);
+    for (const key of ['sidebar-project-expanded-v1-codex:', 'sidebar-project-expanded-v1-codex:executor-folder:[]', 'sidebar-project-expanded-v1-codex:executor-folder:["e",1]', 'sidebar-project-expanded-v1-codex:executor-folder:["e","p","a","u"]', 'sidebar-project-expanded-v1-chatgpt:project']) f.api.handleMessage({type: 'persisted-atom-update', key, value: true});
+    await flush(); await flush(); await flush();
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, valid.length);
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-warning').length, 5);
+  } finally { f.cleanup(); }
+});
+
 test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
   const rpc = await rpcLibrary(t); if (!rpc) return;
   const f = setup(), wire = new MessageChannel();

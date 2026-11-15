@@ -68,5 +68,8 @@
   "identityColonAtomPrefixes": [
     "query-seed:space-list-v2:",
     "query-seed:space-pages-v1:"
+  ],
+  "projectExpansionAtomPrefixes": [
+    "sidebar-project-expanded-v1-codex:"
   ]
 }

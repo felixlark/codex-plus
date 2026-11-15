@@ -13,6 +13,13 @@ struct MobileUIState {
               atoms.keys.allSatisfy({ key in
                   (keys["atoms"] ?? []).contains(key) || (keys["atomPrefixes"] ?? []).contains(where: { prefix in
                       key.hasPrefix(prefix) && String(key.dropFirst(prefix.count)).range(of: #"^[a-zA-Z0-9_-]+$"#, options: .regularExpression) != nil
+                  }) || (keys["projectExpansionAtomPrefixes"] ?? []).contains(where: { prefix in
+                      guard key.hasPrefix(prefix) else { return false }
+                      let project = String(key.dropFirst(prefix.count))
+                      guard project.hasPrefix("executor-folder:") else { return !project.isEmpty }
+                      guard let bytes = String(project.dropFirst("executor-folder:".count)).data(using: .utf8),
+                            let scope = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
+                      return scope.count == 2
                   }) || (keys["identityPathAtomPrefixes"] ?? []).contains(where: { prefix in
                       guard key.hasPrefix(prefix) else { return false }
                       let ids = key.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)

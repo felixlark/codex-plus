@@ -10,7 +10,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 ## 接入边界
 
 - 原厂网页资源只提取到个人 Library/Caches，按 ASAR 声明摘要逐文件校验，不入 Git。
-- iOS 在原页面启动前注入兼容 preload；同步 getter 来自已取得的原宿主快照。触摸输入控件保留至少16px字号以避免聚焦缩放，保留用户缩放和原输入事件；原错误边界仅追加静态代码位置诊断，不记录异常正文或页面内容。
+- iOS 在原页面启动前注入兼容 preload；同步 getter 来自已取得的原宿主快照。触摸输入控件保留至少16px字号以避免聚焦缩放；横屏键盘占用后的短视口在编辑期间收起原标题栏并让编辑区内部滚动，保留用户缩放和原输入事件；原错误边界仅追加静态代码位置诊断，不记录异常正文或页面内容。
 - 原 app-host RPC 的结构化帧由有类型的 carrier 搬运，保持端口、回调、二进制、关闭和顺序。
 - 独立原生宿主窗口作为手机锚点；不能在人工窗口第二次注册 AppView。
 - 创建前先读取原宿主 `startup.whenReady()` 的真实就绪状态；等待沿既有 controller tick，不把单向 IPC 返回当作窗口创建回执。
@@ -25,6 +25,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 账户摘要沿原后台 `accountInfo.readAccountInfo()` 读取；`accessInputs.readLocalChatGptAuth()` 不开放给手机，Mac 访问令牌不随摘要转发。
 - 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
 - 权限默认值就绪沿原 `statsigEvaluations.subscribe()` 的真实 publication 三态与可释放订阅确定，发送链只读查询 `hasReadyExecutionAssignments()`；不以空对象替代快照、不开放评估写入。缺少该订阅会使原界面停在配置延迟队列，Mac 投递函数返回不能证明消息已提交。
+- 原 Codex 项目展开偏好保留普通项目 ID 与原 `executor-folder:[environmentId,path]` 身份缩减格式，不补入原实现已去掉的账户字段。
 - 原模型缓存只允许 `chatgpt-work-models-v1/` 后两个非空编码身份段；输入历史、会话活动时间与摘要按准确静态键登记，均留手机私有原子文件。身份段和缓存值不进诊断日志。
 - 原会话页的输入自动解决服务以可传值对象提供真实 `snooze`，不声明两个平台可选的 Mac surface/focus 方法。手机展示与输入不冒充 Mac 专用窗口焦点；Mac 原自动解决时序保留，手机活动抑制定时器尚未接入。
 - 原 query warm seed 只登记仓库 metadata 的身份/仓库 JSON 三元组和两类 Space metadata 的身份双段；沿原投影移除 `checkpoint`，不开放通用 query key。最近个人文件只存原列表元数据，不下载正文。原 `heartbeat-thread-permissions-by-id` 保存真实权限投影，参与恢复 fallback，保留原真实权限优先与服务端默认分支，不生成新授权或提升权限。

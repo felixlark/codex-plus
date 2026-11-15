@@ -9,6 +9,16 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   function allowedAtom(key) {
     if (typeof key !== 'string') return false;
     if (atomKeys.has(key) || (keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) return true;
+    if ((keys.projectExpansionAtomPrefixes ?? []).some(prefix => {
+      if (!key.startsWith(prefix)) return false;
+      const project = key.slice(prefix.length);
+      try {
+        if (!project.startsWith('executor-folder:')) { encodeURIComponent(project); return project.length > 0; }
+        const scope = JSON.parse(project.slice('executor-folder:'.length));
+        return Array.isArray(scope) && scope.length === 2 && scope.every(value => typeof value === 'string' && encodeURIComponent(value) !== undefined);
+      }
+      catch { return false; }
+    })) return true;
     if ((keys.identityPathAtomPrefixes ?? []).some(prefix => {
       if (!key.startsWith(prefix)) return false;
       const ids = key.slice(prefix.length).split('/');
