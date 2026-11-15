@@ -4,7 +4,7 @@
 
 6项受影响移动资源/帧检查、两项现有CI、plist/shell/diff检查通过。Release仅关闭Web Inspector并增加正式签名/图标/方向/隐私配置，不改变原聊天前端和Mac运行体。最终archive/export均成功，包内身份、entitlement及iPad方向声明实读；全部19204文件摘要留本机。IPA SHA256为`1abaa8760dc0ddfa91ea81f494da440c8916f1aa28e8adc16fffa45c3da149a6`。
 
-00:37:27 CST Apple altool返回`UPLOAD SUCCEEDED with no errors`，delivery `e358b7b7-913e-424a-87e4-c28323f0eb75`，一次上传303574667字节。ASC随后返回PROCESSING，原Internal Testers组hasAccessToAllBuilds=true；处理完成和可测试结果待补，不把上传成功写成可安装。凭据留Apple支持存储，日志不含密钥/token。
+00:37:27 CST Apple altool返回`UPLOAD SUCCEEDED with no errors`，delivery `e358b7b7-913e-424a-87e4-c28323f0eb75`，一次上传303574667字节。00:47:56 CST官方ASC读回同一build为VALID、0.3.1/IOS、INTERNAL_ONLY、internalBuildState=IN_BETA_TESTING、autoNotifyEnabled=true，原Internal Testers组hasAccessToAllBuilds=true。至此本次内部TestFlight发布完成，未操作真机，不宣称设备已安装。凭据留Apple支持存储，日志不含密钥/token。
 
 当前包内只含Mac私网地址、公钥指纹、原宿主版本与初始路由。Mac现役准入仍只接受原模拟器所用节点；本次TF发布不扩大设备准入，不证明物理手机已连通。用户后续指定设备时另验Tailscale身份与真实访问，不能把现有模拟器证据外推。
 
