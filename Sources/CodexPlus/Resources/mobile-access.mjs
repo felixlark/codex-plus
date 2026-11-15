@@ -51,7 +51,7 @@ export class MobileAccess {
     try { config = JSON.parse(await fs.readFile(path.join(path.dirname(options.stateFile), 'mobile.json'), 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') return null; throw Error('Invalid mobile configuration'); }
     if (config.enabled !== true) return null;
-    if (config.protocol !== 1 || !isTailIPv4(config.bind) || !/^[a-zA-Z0-9]+$/.test(String(config.nodeId)) || !/^\d+$/.test(String(config.userId)) || !/^[a-f0-9-]{36}$/.test(config.threadId) || !/^[a-f0-9-]{36}$/.test(config.anchor)) throw Error('Invalid mobile configuration');
+    if (config.protocol !== 1 || !Number.isInteger(config.port) || config.port < 1 || config.port > 65535 || !isTailIPv4(config.bind) || !/^[a-zA-Z0-9]+$/.test(String(config.nodeId)) || !/^\d+$/.test(String(config.userId)) || !/^[a-f0-9-]{36}$/.test(config.threadId) || !/^[a-f0-9-]{36}$/.test(config.anchor)) throw Error('Invalid mobile configuration');
     if (!options.supported) throw Error('Mobile host version unsupported');
     const {stdout} = await run('/usr/local/bin/tailscale', ['status', '--json']);
     const self = JSON.parse(stdout).Self;
@@ -132,7 +132,7 @@ export class MobileAccess {
   async startGateway() {
     const gatewayPath = fileURLToPath(new URL('./MobileGateway', import.meta.url));
     execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus.mobile-gateway" and certificate leaf[subject.OU] = "HJG65XBC25"', gatewayPath], {stdio: 'pipe'});
-    this.gateway = spawn(gatewayPath, ['--bind', this.config.bind], {stdio: ['pipe', 'pipe', 'pipe']});
+    this.gateway = spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
     this.gateway.stderr.resume();
     this.gateway.once('exit', () => { if (!this.stopped) { this.phase = 'gateway-exited'; void this.close(); } });
     this.gateway.once('error', () => { this.phase = 'gateway-failed'; void this.close(); });
