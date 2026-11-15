@@ -30,6 +30,7 @@ export function installWorkbenchView(config) {
   for (const name of ['felixlark', 'smart-shadow']) { const option = node('option', name, organization); option.value = name; }
   node('label', '仓库', filters).htmlFor = 'repository';
   const repository = node('select', null, filters); repository.id = 'repository';
+  const initial = node('option', config.repository, repository); initial.value = config.repository;
   const controls = node('div', null, body); controls.className = 'row';
   const refresh = node('button', '刷新', controls); refresh.type = 'button';
   const moreRepos = node('button', '更多仓库', controls); moreRepos.type = 'button'; moreRepos.hidden = true;
@@ -47,15 +48,22 @@ export function installWorkbenchView(config) {
     catch { pending.delete(requestId); reject(Error('workbench_connection_unavailable')); }
   });
   function message(text, error = false) { notice.textContent = text; notice.className = error ? 'error' : 'muted'; }
+  function describeError(error) {
+    const http = /^workspace_http_(\d+)$/.exec(error.message)?.[1];
+    if (http === '401' || http === '403' || error.message === 'workspace_human_session_required') return '本人身份未通过，请在 Mac 核对 Access 登录后刷新。';
+    if (http && http !== '0') return `任务服务暂未完成读取（HTTP ${http}），请稍后刷新。`;
+    if (error.message === 'workbench_action_unavailable') return '此会话尚不能由本机工作台打开。';
+    return '任务服务连接或返回内容未能确认，请稍后刷新。';
+  }
   async function perform(action) {
     if (busy || disposed) return;
     busy = true; refresh.disabled = organization.disabled = repository.disabled = more.disabled = moreRepos.disabled = true;
-    try { await action(); } catch (error) { message(`读取未完成：${error.message}`, true); }
+    try { await action(); } catch (error) { message(describeError(error), true); }
     finally { busy = false; refresh.disabled = organization.disabled = repository.disabled = more.disabled = moreRepos.disabled = false; }
   }
   async function issues(page = 1, current = generation) {
     const repo = repository.value;
-    if (!repo) { rows.replaceChildren(); message('当前页没有仓库；可继续读取更多仓库。'); return; }
+    if (!repo) { rows.replaceChildren(); detail.replaceChildren(); selection++; message('请选择仓库；尚未列出时可读取更多仓库。'); return; }
     const value = await request({action: 'read', operation: 'issues', repository: repo, page});
     if (current !== generation || disposed) return;
     if (page === 1) { rows.replaceChildren(); detail.replaceChildren(); selection++; }
@@ -68,12 +76,17 @@ export function installWorkbenchView(config) {
     message(`已读取 ${rows.children.length} 项 · ${value.observed_at ?? '时间未知'}${issuePage !== null ? ' · 还有下一页' : ''}`);
   }
   async function repositories(page = 1) {
-    const current = ++generation, selected = repository.value || 'felixlark/smart-shadow';
+    const current = ++generation, selected = repository.value;
     const value = await request({action: 'read', operation: 'repositories', organization: organization.value, page});
     if (current !== generation || disposed) return;
-    if (page === 1) repository.replaceChildren();
-    for (const repo of value.items) { const option = node('option', repo.full_name, repository); option.value = repo.full_name; }
-    if ([...repository.options].some(o => o.value === selected)) repository.value = selected;
+    if (page === 1) {
+      repository.replaceChildren(); const placeholder = node('option', '请选择仓库', repository); placeholder.value = '';
+      // The current explicitly selected repository is not necessarily on this
+      // catalog page. Preserve it; never silently read the first unrelated repo.
+      if (selected.startsWith(organization.value + '/')) { const option = node('option', selected, repository); option.value = selected; }
+    }
+    for (const repo of value.items) if (![...repository.options].some(o => o.value === repo.full_name)) { const option = node('option', repo.full_name, repository); option.value = repo.full_name; }
+    repository.value = [...repository.options].some(o => o.value === selected) ? selected : '';
     repoPage = value.next_page; moreRepos.hidden = repoPage === null;
     await issues(1, current);
   }
@@ -98,7 +111,7 @@ export function installWorkbenchView(config) {
           open.onclick = () => perform(async () => { await request({action: 'open-thread', hostId: action.host_id, threadId: action.thread_id, runId: action.run_id}); });
         }
       }
-    } catch (error) { if (current === selection) { runs.replaceChildren(); const p = node('p', `执行回执读取未完成：${error.message}`, runs); p.className = 'error'; } }
+    } catch (error) { if (current === selection) { runs.replaceChildren(); const p = node('p', `执行回执读取未完成：${describeError(error)}`, runs); p.className = 'error'; } }
   }
   refresh.onclick = () => perform(() => repositories());
   organization.onchange = () => perform(() => repositories());

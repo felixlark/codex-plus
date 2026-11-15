@@ -125,7 +125,7 @@ export class Workbench {
           await this.command(session[0], 'Page.navigate', {url: url.href}); return;
         }
       }
-      const result = await this.command(session[0], 'Runtime.evaluate', {expression: `(${installWorkbenchView.toString()})(${JSON.stringify({nonce: w.nonce, binding: workbenchBinding})})`, contextId: context.id, returnByValue: true});
+      const result = await this.command(session[0], 'Runtime.evaluate', {expression: `(${installWorkbenchView.toString()})(${JSON.stringify({nonce: w.nonce, binding: workbenchBinding, repository: 'felixlark/smart-shadow'})})`, contextId: context.id, returnByValue: true});
       w.phase = result.result?.value?.ready && result.result.value.nonce === w.nonce ? 'ready' : 'loading';
     } catch { if (this.window) this.window.phase = 'unknown'; }
     finally { this.busy = false; }
