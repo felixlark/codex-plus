@@ -130,6 +130,11 @@ struct ManagerView: View {
         let panel = NSOpenPanel()
         panel.title = "载入 \(role) 配置"
         panel.message = "选择现有私有 JSON 配置。组件保持停止；校验通过后保存并更新配置引用。"
+        if let path = model.modules[role]?.configurationPath {
+            let current = URL(fileURLWithPath: path)
+            panel.directoryURL = current.deletingLastPathComponent()
+            panel.nameFieldStringValue = current.lastPathComponent
+        }
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
