@@ -14,7 +14,7 @@ required={'CFBundleIdentifier':'me.longbiaochen.smart-shadow.app','CFBundleExecu
 info=plistlib.loads((candidate/'Contents/Info.plist').read_bytes())
 if any(info.get(k)!=v for k,v in required.items()):raise SystemExit('manager bundle identity mismatch')
 requirement='anchor apple generic and identifier "me.longbiaochen.smart-shadow.app" and certificate leaf[subject.OU] = "HJG65XBC25"'
-subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R',requirement,str(candidate)],check=True)
+subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R','='+requirement,str(candidate)],check=True)
 # A live installed client must be handed off through official Computer Use first.
 # Never terminate by name or let an installer touch interactiond/its windows.
 rows=subprocess.check_output(['/bin/ps','-axo','pid=,comm='],text=True).splitlines()
@@ -25,7 +25,7 @@ backup=root/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S
 backup.mkdir()
 stage=Path('/Applications')/('.SmartShadow-manager-'+backup.name+'.app')
 subprocess.run(['/usr/bin/ditto',str(candidate),str(stage)],check=True)
-subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R',requirement,str(stage)],check=True)
+subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R','='+requirement,str(stage)],check=True)
 if target.exists() or target.is_symlink():
     if target.is_symlink():raise SystemExit('installed app path is a symlink; preserve and reconcile before replacement')
     os.rename(target,backup/'SmartShadow.app')
@@ -33,7 +33,7 @@ try:os.rename(stage,target)
 except BaseException:
     if not target.exists() and (backup/'SmartShadow.app').exists():os.rename(backup/'SmartShadow.app',target)
     raise
-subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R',requirement,str(target)],check=True)
+subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict','-R','='+requirement,str(target)],check=True)
 print(str(target))
 print('previous installation retained at '+str(backup))
 PY
