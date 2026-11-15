@@ -16,7 +16,7 @@ import {initializePageSession} from './page-session.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
-import {MobileAccess,mobileHostSupported} from './mobile-access.mjs';
+import {MobileAccess,mobileHostSupported,probeUnclaimedMobileThread} from './mobile-access.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
@@ -25,7 +25,8 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
+const controllerVersion='sha256:'+createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex');
+let state={phase:'preparing',protocol:6,version:controllerVersion,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
@@ -108,11 +109,12 @@ async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Pr
 }
 function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
 async function probeSuggestions(target){
-  if(mobile?.ownsThread(target.threadId))return false;
+  return probeUnclaimedMobileThread(mobile,target.threadId,async()=>{
   const generation=suggestions.revision,initial=pageSet(),ids=[...sessions].filter(([,s])=>s.main).map(([id])=>id);
   if(!ids.length)return false;
   const probe=async()=>Promise.all(ids.map(async id=>{const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.probe(${JSON.stringify(target)})`,returnByValue:true});return r.result.value;}));
   try{const first=await probe();if(first.some(p=>!p?.ok))return false;const last=await probe();return suggestions.enabled&&generation===suggestions.revision&&initial===pageSet()&&last.every((p,i)=>p?.ok&&p.inputRevision===first[i].inputRevision);}catch{return false;}
+  });
 }
 async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -122,7 +124,7 @@ async function suggestionGuard(message){
   const p=suggestions.pending;
   let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.reviewId===p.reviewId&&request.token===p.token&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
   if(ok)ok=await probeSuggestions(p.target);
-  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping;
+  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping&&!mobile?.ownsThread(p.target.threadId);
   await command(message.sessionId,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.resolveGuard(${JSON.stringify(request.requestId)},${ok})`,contextId:event.executionContextId});
 }
 async function reviewDecision(message){
@@ -184,7 +186,7 @@ function suggestionSettings(line){try{const message=JSON.parse(line);if(message.
 const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -301,14 +303,14 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
-  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
+  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
     if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
-    if(message.method==='Runtime.executionContextDestroyed'){const context=sessions.get(message.sessionId)?.contexts.get(message.params.executionContextId);if(context?.auxData?.isDefault)mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
     if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
     if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}

@@ -128,6 +128,24 @@ final class HumanWindows {
         return initial.flatMap { URLComponents(string: "https://codex.invalid" + $0)?.queryItems?.first(where: { $0.name == "codexPlusHumanWindow" })?.value }
     }
 
+    /// Locate only the newly-created, nonce-tagged mobile window before its
+    /// document is replaced by the isolated app-host. No human placement runs.
+    func mobileAnchor(_ app: NSRunningApplication, nonce: String, instance: String) -> (element: AXUIElement, id: UInt32)? {
+        guard let launch = app.launchDate, !app.isTerminated else { return nil }
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        let matches = (value(root, kAXWindowsAttribute) as? [AXUIElement] ?? []).compactMap { element -> (AXUIElement, UInt32)? in
+            guard let url = webURL(element), url.scheme == "app", url.host == "-", url.path == "/index.html",
+                  let route = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "initialRoute" })?.value,
+                  let parts = URLComponents(string: "https://codex.invalid" + route),
+                  parts.queryItems?.first(where: { $0.name == "codexPlusMobileAnchor" })?.value == nonce,
+                  parts.queryItems?.first(where: { $0.name == "codexPlusMobileInstance" })?.value == instance else { return nil }
+            let id = cp_window_id(element)
+            return id == 0 ? nil : (element, id)
+        }
+        guard matches.count == 1, app.launchDate == launch else { return nil }
+        return (matches[0].0, matches[0].1)
+    }
+
     private func windows(_ app: NSRunningApplication) -> [Window] {
         guard !app.isTerminated else { return [] }
         let root = AXUIElementCreateApplication(app.processIdentifier)
@@ -139,12 +157,16 @@ final class HumanWindows {
     }
 
     private func mainURL(_ root: AXUIElement) -> URL? {
+        guard let url = webURL(root), HumanWindowRoute.isMain(url) else { return nil }
+        return url
+    }
+
+    private func webURL(_ root: AXUIElement) -> URL? {
         var queue = [(root, 0)], index = 0
         while index < queue.count {
             let (element, depth) = queue[index]; index += 1
             if value(element, kAXRoleAttribute) as? String == "AXWebArea" {
-                guard let url = value(element, kAXURLAttribute) as? URL, HumanWindowRoute.isMain(url) else { return nil }
-                return url
+                return value(element, kAXURLAttribute) as? URL
             }
             // Native shell only; never traverse webpage content after finding the WebArea.
             if depth < 12 { queue += (value(element, kAXChildrenAttribute) as? [AXUIElement] ?? []).map { ($0, depth + 1) } }

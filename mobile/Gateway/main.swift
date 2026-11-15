@@ -5,9 +5,11 @@ import Security
 // A child of the existing Plus controller. It carries frames only; the controller
 // authenticates Tailscale peers and owns the original Electron connection.
 let arguments = CommandLine.arguments
+let portIndex = arguments.firstIndex(of: "--port")
+let requestedPort = portIndex.flatMap { arguments.indices.contains($0 + 1) ? UInt16(arguments[$0 + 1]) : nil }
 guard let at = arguments.firstIndex(of: "--bind"), arguments.indices.contains(at + 1),
-      mobileIPv4(arguments[at + 1]) != nil else {
-    fputs("Expected a Tailscale IPv4 bind address\n", stderr); exit(2)
+      mobileIPv4(arguments[at + 1]) != nil, let configuredPort = requestedPort, configuredPort > 0 else {
+    fputs("Expected a Tailscale IPv4 bind address and configured port\n", stderr); exit(2)
 }
 let queue = DispatchQueue(label: "codex-plus.mobile.gateway", autoreleaseFrequency: .workItem)
 let outputLock = NSLock()
@@ -57,7 +59,7 @@ listener.newConnectionHandler = { connection in
 listener.stateUpdateHandler = { state in
     switch state {
     case .ready:
-        do { ingress = try MobileIngress(address: arguments[at + 1], internalPort: listener.port!.rawValue, queue: queue); emit(["type": "listening", "port": ingress!.port, "internalPort": listener.port!.rawValue, "fingerprint": fingerprint]) } catch { emit(["type": "failed"]); exit(1) }
+        do { ingress = try MobileIngress(address: arguments[at + 1], port: configuredPort, internalPort: listener.port!.rawValue, queue: queue); emit(["type": "listening", "port": ingress!.port, "internalPort": listener.port!.rawValue, "fingerprint": fingerprint]) } catch { emit(["type": "failed"]); exit(1) }
     case .failed: emit(["type": "failed"]); exit(1)
     default: break
     }

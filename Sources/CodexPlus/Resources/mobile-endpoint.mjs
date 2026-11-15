@@ -3,7 +3,31 @@
 export function installMobileEndpoint(config, encode, decode) {
   if (globalThis.__codexPlusMobileEndpoint) throw Error('Mobile endpoint already installed');
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
-  const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map();
+  const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map(), gitRequests = new Map();
+  const requestIDs = new Map();
+  const requestKey = (host, id) => JSON.stringify([host ?? null, typeof id, id]);
+  function forgetRequest(id) {
+    const record = ids.get(id); if (!record) return;
+    ids.delete(id); requestIDs.delete(requestKey(record.host, record.original));
+  }
+  const retiredPorts = new Set();
+  const rpcTrace = new Map();
+  function trace(id, direction, value) {
+    if (phone || !Array.isArray(value)) return;
+    let state = rpcTrace.get(id);
+    if (!state) { state = {sequence: 0, methods: new Map(), pending: new Map(), replies: 0}; rpcTrace.set(id, state); }
+    if (direction === 'request' && value[0] === 'push') {
+      const call = value[1], path = Array.isArray(call) && call[0] === 'pipeline' ? call[2] : null;
+      const method = Array.isArray(path) && path.length && path.every(part => typeof part === 'string' && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(part)) ? path.join('.') : 'opaque';
+      state.methods.set(++state.sequence, method);
+    } else if (direction === 'request' && value[0] === 'pull') {
+      state.pending.set(value[1], state.methods.get(value[1]) ?? 'opaque');
+    } else if (direction === 'request' && value[0] === 'release') {
+      state.pending.delete(value[1]); state.methods.delete(value[1]);
+    } else if (direction === 'reply' && ['resolve', 'reject'].includes(value[0])) {
+      state.pending.delete(value[1]); state.methods.delete(value[1]); state.replies++;
+    }
+  }
   let sequence = 0, appPort, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
@@ -28,6 +52,7 @@ export function installMobileEndpoint(config, encode, decode) {
     if (ports.has(id)) throw Error('Duplicate mobile port');
     ports.set(id, port);
     port.onmessage = event => {
+      trace(id, 'reply', event.data);
       sendValue({kind: 'port-frame', id}, event.data);
       if (event.data === null && appPort === id) fatal();
     };
@@ -35,8 +60,8 @@ export function installMobileEndpoint(config, encode, decode) {
     port.onmessageerror = () => close();
     port.start();
   }
-  function dispatch(data, transferred = []) {
-    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length ? window : null}));
+  function dispatch(data, transferred = [], sameWindow = false) {
+    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length || sameWindow ? window : null, origin: location.origin}));
   }
   const methods = new Set(['sendMessageFromView', 'acknowledgeChunkedMessage', 'sendWorkerMessageFromView', 'connectGitWorker', 'getFastModeRolloutMetrics']);
   async function receive(message) {
@@ -47,14 +72,30 @@ export function installMobileEndpoint(config, encode, decode) {
         if (phone || !methods.has(message.method) || typeof message.id !== 'string') throw Error('Unsupported mobile call');
         let args = decode(message.value);
         if (!Array.isArray(args)) throw Error('Invalid call arguments');
-        if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request') {
+        if (message.method === 'connectGitWorker') {
+          if (args.length !== 1 || typeof args[0] !== 'string' || !args[0] || gitRequests.has(args[0])) throw Error('Invalid original Git connection');
+          gitRequests.set(args[0], {phase: 'pending'});
+        }
+        if (message.method === 'sendMessageFromView' && ['mcp-request', 'thread-prewarm-start'].includes(args[0]?.type)) {
           const request = args[0].request;
           if (!request || !['string', 'number'].includes(typeof request.id)) throw Error('Invalid original request');
-          const id = `${config.connection}:${++sequence}`; ids.set(id, request.id);
+          const key = requestKey(args[0].hostId, request.id);
+          let id = requestIDs.get(key);
+          if (!id) {
+            id = `${config.connection}:${++sequence}`;
+            ids.set(id, {original: request.id, host: args[0].hostId, method: request.method}); requestIDs.set(key, id);
+          }
           args = [{...args[0], request: {...request, id}}];
+        } else if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request-abandon') {
+          const id = requestIDs.get(requestKey(args[0].hostId, args[0].requestId));
+          if (!id) { sendValue({kind: 'result', id: message.id, ok: true}, undefined); break; }
+          args = [{...args[0], requestId: id}]; ids.get(id).abandoned = true;
         }
-        try { sendValue({kind: 'result', id: message.id, ok: true}, await original[message.method](...args)); }
-        catch { send({kind: 'result', id: message.id, ok: false}); }
+        try {
+          const result = await original[message.method](...args);
+          if (message.method === 'connectGitWorker' && result === false) gitRequests.delete(args[0]);
+          sendValue({kind: 'result', id: message.id, ok: true}, result);
+        } catch { if (message.method === 'connectGitWorker') gitRequests.delete(args[0]); send({kind: 'result', id: message.id, ok: false}); }
         break;
       }
       case 'result': {
@@ -69,8 +110,10 @@ export function installMobileEndpoint(config, encode, decode) {
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
         // This literal same-window handoff on our captured blank page cannot
         // address another window. The original preload checks event.source.
-        const targetOrigin = location.href === 'about:blank' && location.origin === 'null' ? '*' : location.origin;
-        window.postMessage({type: 'connect-app-host', port: channel.port2}, targetOrigin, [channel.port2]);
+        if (location.href !== 'about:blank' || location.origin !== 'null' ||
+            document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content !== config.anchor ||
+            document.querySelector('meta[name="codex-plus-mobile-instance"]')?.content !== config.instance) throw Error('Original blank host unavailable');
+        window.postMessage({type: 'connect-app-host', port: channel.port2}, '*', [channel.port2]);
         break;
       }
       case 'worker-subscribe': {
@@ -81,15 +124,27 @@ export function installMobileEndpoint(config, encode, decode) {
       case 'worker-unsubscribe': workers.get(message.worker)?.(); workers.delete(message.worker); break;
       case 'worker': if (phone) for (const callback of workers.get(message.worker) ?? []) callback(decode(message.value)); break;
       case 'port-frame': {
+        if (retiredPorts.has(message.id)) break;
         const port = ports.get(message.id); if (!port) throw Error('Unknown mobile port');
-        port.postMessage(decode(message.value)); break;
+        const value = decode(message.value); trace(message.id, 'request', value);
+        port.postMessage(value); break;
       }
       case 'git-port': {
-        if (!phone || typeof message.id !== 'string') throw Error('Invalid Git port');
+        if (!phone || typeof message.id !== 'string' || gitRequests.get(message.metadata?.requestId)?.phase !== 'pending') throw Error('Invalid Git port');
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
+        gitRequests.set(message.metadata.requestId, {phase: 'active', id: message.id});
         dispatch(message.metadata, [channel.port2]); break;
       }
-      case 'event': if (phone) dispatch(decode(message.value)); break;
+      case 'event': if (phone) {
+        const value = decode(message.value);
+        if (value?.type === 'codex_desktop:git-worker-port') {
+          const request = gitRequests.get(value.requestId); if (!request || value.closed !== true) break;
+          gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+          rpcTrace.delete(request.id);
+          if (request.id) retiredPorts.add(request.id);
+          dispatch(value, [], true);
+        } else dispatch(value);
+      } break;
       case 'theme': if (phone) { config.snapshot.theme = message.theme; for (const callback of themes) callback(); } break;
       default: throw Error('Invalid mobile message');
     }
@@ -99,18 +154,32 @@ export function installMobileEndpoint(config, encode, decode) {
     if (phone) return;
     let value = event.data;
     if (!value || typeof value !== 'object') return;
-    if (value.type === 'codex_desktop:git-worker-port' && event.source === window) {
-      if (event.ports.length === 1) {
+    if (value.type === 'codex_desktop:git-worker-port') {
+      const request = gitRequests.get(value.requestId);
+      if (event.source !== window || event.origin !== location.origin || !request) { for (const port of event.ports) port.close(); return; }
+      if (request.phase === 'pending' && value.closed === undefined && event.ports.length === 1) {
         const id = `${config.connection}:git:${++sequence}`;
+        gitRequests.set(value.requestId, {phase: 'active', id});
         send({kind: 'git-port', id, metadata: value}); attachPort(event.ports[0], id);
-      } else sendValue({kind: 'event'}, value);
+      } else if (value.closed === true && event.ports.length === 0) {
+        gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+        rpcTrace.delete(request.id);
+        if (request.id) retiredPorts.add(request.id);
+        sendValue({kind: 'event'}, value);
+      } else for (const port of event.ports) port.close();
       return;
     }
     if (event.source !== null) return;
     if (value.type === 'mcp-response') {
       const id = String(value.message?.id);
-      if (!ids.has(id)) return; // Discard fallback broadcasts from other views.
-      value = {...value, message: {...value.message, id: ids.get(id)}}; ids.delete(id);
+      const record = ids.get(id);
+      if (!record || record.host != null && value.hostId != null && record.host !== value.hostId) return; // Ignore other views' fallback broadcasts.
+      value = {...value, message: {...value.message, id: record.original}}; forgetRequest(id);
+    } else if (value.type === 'mcp-request-delivery') {
+      const id = String(value.update?.delivery?.requestId), record = ids.get(id);
+      if (!record || record.host != null && value.hostId != null && record.host !== value.hostId) return;
+      value = {...value, update: {...value.update, delivery: {...value.update.delivery, requestId: record.original}}};
+      if (value.update.type === 'failed') forgetRequest(id);
     }
     sendValue({kind: 'event'}, value);
   };
@@ -127,7 +196,10 @@ export function installMobileEndpoint(config, encode, decode) {
       getBuildFlavor: () => s.buildFlavor,
       getDesktopUserAgent: () => s.userAgent,
       getAppSessionId: () => s.appSessionId,
-      getInitialSidebarBootstrap: () => s.sidebar,
+      getInitialSidebarBootstrap: () => {
+        if (!globalThis.__codexPlusMobileLocal) throw Error('Phone local UI state is not ready');
+        return globalThis.__codexPlusMobileLocal.initialSidebarBootstrap(s.sidebar);
+      },
       isDeviceCheckSupported: () => false, isIntelMacBuild: () => false,
       getPathForFile: () => null,
       subscribeToSystemThemeVariant: callback => { themes.add(callback); return () => themes.delete(callback); },
@@ -136,7 +208,22 @@ export function installMobileEndpoint(config, encode, decode) {
         workers.get(worker).add(callback);
         return () => { const set = workers.get(worker); set?.delete(callback); if (set?.size === 0) { workers.delete(worker); send({kind: 'worker-unsubscribe', worker}); } };
       },
-      ...Object.fromEntries([...methods].map(method => [method, (...args) => invoke(method, args)])),
+      ...Object.fromEntries([...methods].map(method => [method, (...args) => {
+        if (method === 'sendMessageFromView' && globalThis.__codexPlusMobileLocal) {
+          const local = globalThis.__codexPlusMobileLocal.handleMessage(args[0]);
+          if (local.handled) return Promise.resolve(local.value);
+          // The original renderer explicitly requests this read-only connection /
+          // initialization snapshot when its host advertises window events.
+          const allowed = new Set(['mcp-request', 'mcp-response', 'mcp-notification', 'mcp-request-abandon', 'thread-prewarm-start', 'request-app-server-state', 'fetch', 'cancel-fetch']);
+          if (!allowed.has(args[0]?.type)) return Promise.reject(Error(`Unsupported phone host message: ${args[0]?.type}`));
+        }
+        if (method === 'connectGitWorker') {
+          if (typeof args[0] !== 'string' || !args[0] || gitRequests.has(args[0])) return Promise.reject(Error('Invalid original Git connection'));
+          gitRequests.set(args[0], {phase: 'pending'});
+          return invoke(method, args).then(result => { if (result === false) gitRequests.delete(args[0]); return result; }, error => { gitRequests.delete(args[0]); throw error; });
+        }
+        return invoke(method, args);
+      }])),
     };
     const post = window.postMessage.bind(window);
     window.postMessage = function(message, target, transfer) {
@@ -162,13 +249,15 @@ export function installMobileEndpoint(config, encode, decode) {
   function close() {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
-    calls.clear(); ids.clear();
+    calls.clear(); ids.clear(); requestIDs.clear(); gitRequests.clear(); retiredPorts.clear(); rpcTrace.clear();
     for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();
     window.removeEventListener('message', onMessage);
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
-  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size})};
+  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, reportRoute: route => { if (phone) send({kind: 'view-route', route}); }, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size,
+    pendingMcp: [...ids.values()].map(record => typeof record.method === 'string' && /^[a-zA-Z][a-zA-Z0-9_/-]*$/.test(record.method) ? record.method : 'opaque'),
+    rpc: [...rpcTrace].map(([id, state]) => ({kind: id === appPort ? 'app' : 'git', replies: state.replies, pending: [...state.pending.values()]}))})};
   window.addEventListener('pagehide', fatal, {once: true});
 }

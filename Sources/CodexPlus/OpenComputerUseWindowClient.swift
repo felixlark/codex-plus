@@ -24,11 +24,13 @@ final class OpenComputerUseWindowClient {
             process.executableURL = URL(fileURLWithPath: Self.executable)
             process.arguments = ["mcp"]
             var environment = ProcessInfo.processInfo.environment
-            environment["OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE"] = "persistent-display"
+            // Do not inherit an old virtual-display client environment.
+            for key in ["OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE", "OPEN_COMPUTER_USE_CONFIG_FILE",
+                        "OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_RESTORE_ON_SESSION_END"] { environment.removeValue(forKey: key) }
+            environment["OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE"] = "right-screen"
             environment["OPEN_COMPUTER_USE_CONFIG_FILE"] = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/open-computer-use-persistent/config.json").path
-            environment["OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_ENABLED"] = "true"
-            environment["OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_RESTORE_ON_SESSION_END"] = "false"
+                .appendingPathComponent("Library/Application Support/open-computer-use/config.json").path
+            environment["OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_ENABLED"] = "false"
             environment["OPEN_COMPUTER_USE_ACTION_READ_BACK"] = "0"
             environment["OPEN_COMPUTER_USE_VISUAL_CURSOR"] = "0"
             process.environment = environment
@@ -50,7 +52,7 @@ final class OpenComputerUseWindowClient {
             if initialized, let listed = request(2, "tools/list", [:])?["result"] as? [String: Any],
                let tools = listed["tools"] as? [[String: Any]],
                let schema = tools.first(where: { $0["name"] as? String == "get_app_state" })?["inputSchema"] as? [String: Any],
-               OCUWindowProtocol.supportsExactLifecycle(schema) {
+               OCUWindowProtocol.supportsExactRightPlacement(schema) {
                 // An error may follow a partial move. Caller must inspect the
                 // exact identity/frame; never replay an unknown operation.
                 if let arguments {

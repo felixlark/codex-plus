@@ -14,18 +14,18 @@ final class MobileIngress {
     let queue: DispatchQueue, generation = UUID(), internalPort: UInt16
     private var listener: Int32 = -1, pairs = [UUID: Pair](), ports = [UInt16: UUID](), stopped = false
     private(set) var port: UInt16 = 0
-    init(address: String, internalPort: UInt16, queue: DispatchQueue) throws {
+    init(address: String, port: UInt16 = 0, internalPort: UInt16, queue: DispatchQueue) throws {
         self.internalPort = internalPort; self.queue = queue
         listener = socket(AF_INET, SOCK_STREAM, 0)
         guard listener >= 0 else { throw POSIXError(.EIO) }
         var yes: Int32 = 1; setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        var local = Self.address(address, 0)
+        var local = Self.address(address, port)
         let result = withUnsafePointer(to: &local) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         // SOMAXCONN is the Darwin kernel listen backlog, not an application quota.
         guard result == 0, Darwin.listen(listener, SOMAXCONN) == 0 else { Darwin.close(listener); throw POSIXError(.EADDRNOTAVAIL) }
         var size = socklen_t(MemoryLayout<sockaddr_in>.size)
         withUnsafeMutablePointer(to: &local) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { _ = getsockname(listener, $0, &size) } }
-        port = UInt16(bigEndian: local.sin_port)
+        self.port = UInt16(bigEndian: local.sin_port)
         DispatchQueue.global().async { [self] in acceptLoop() }
     }
     static func address(_ ip: String, _ port: UInt16) -> sockaddr_in {

@@ -3,7 +3,7 @@
 ## Scope
 
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
-Codex Web App enhancements, workspace observation, settings, the status CLI, and isolation of Agent-owned windows on an invisible virtual display.
+Codex Web App enhancements, workspace observation, settings, the status CLI, and exact placement of Agent-owned windows on the rightmost physical screen. OCU virtual displays and their automatic recovery are retired.
 
 All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
 The page's Codex Plus button is the first item in the lower-left navigation footer;

@@ -1,5 +1,19 @@
 # Codex Plus 验收
 
+## 2026-11-15 原Codex移动工作流与右屏路由
+
+正式Mac安装0.10.0/build71，冻结源码`3cb4819`；iOS原前端容器0.1.0/build53，源码`038bbc8`；官方Codex26.1111.21308、原宿主PID3333保持。Developer ID严格身份验签通过，安装31文件与签名构建0差异。
+
+- 指定iPhone模拟器真实原界面完成项目选择/实际CWD、原会话读发流式、多轮中文/emoji、附件选择与冷恢复/字节一致、原Stop/Deny/Allow once、模型Terra/Medium与真实exit17错误、三处独立草稿及后台恢复。证据绑定各候选，不扩大为真机跨节点或所有宿主能力。
+- Mac71按新物理右屏规则创建准确手机宿主CG8989/target4C0D9E9DF252EF6783E388881544B819，完整frame(1994,-1112,1968,1072)。配套OCU正式F3BB0F4E-FCCA-4D94-BD46-5CD87DDF6F08/build3；原nonce/CG身份→right_display实际布局→隔离blank/preload→网关54628读回，手机一条连接。
+- 真实Mac链路退出导致手机明确断线；一次原生“重新连接”恢复原L聊天及未发草稿M。官方原聊天仅有原一个completed turn、hasMore=false，无新增Send/Run。原人工298/406保持显示器重排后的物理基线。
+- 更早Mac67/iOS50的真实90秒Run中退出/重开独立Manager，原controller/手机/原Run持续，沿其有效候选证据复用；不是对新工作台关闭或所有模块生命周期的全覆盖。
+- 完整122项Node/87项Swift曾通过；本批影响面定向11项移动接缝、8项Core及编译通过，当前PR远端两项CI通过。Mac70曾因OCU先position后resize而停在window-placement-unknown；该失败保留，提供方修复后Mac71真实链路通过，未重复未知消息。
+
+本人Access会话已沿官方cloudflared支持入口实际通过，凭据留工具存储；本人coordination GET发现既有无case分支409，由taskd原负责人修复，不补造case/Run。工作台workspace.open、真实任务看板与后续本人任务决定仍在原#578交付范围，尚未由本批实现，不关闭原案。首条可用与完整验收分开，旧虚拟屏验收仅属历史。
+
+本机证据：`~/Library/Logs/codex-plus/mobile-complete-20261115/`中的acceptance.json、各send台账/录像、ios53-M-reconnect-ledger.json、native71-installed-files.json、native71-connected-final.json和native71-management-status.json。私密原会话与凭据不入Git。
+
 ## 2026-11-15 已读任务延后下移
 
 实现613e0c5、初始化修复2d3f1b4；签名安装0.10.0/build50。独立主线候选只包含排序与其回归，不包含同机并行移动版或窗口托管增量。

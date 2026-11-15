@@ -11,6 +11,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusServer = StatusServer()
     private let toolWindows = ToolWindowRouter()
     private let toolServer = ToolControlServer()
+    private let management = ManagementRuntime()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var agentSettingsWindow: NSWindow?
@@ -80,9 +81,29 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onToolRoutingChange = { [weak self] in self?.toolWindows.setEnabled($0) }
         settings.onChromeRoutingChange = { [weak self] in self?.toolWindows.setChromeUsesAgentDisplay($0) }
         toolWindows.start()
-        do { try toolServer.start { [weak self] in self?.toolWindows.command($0) ?? ["ok": false] } }
+        management.readSettings = { [weak self] in
+            guard let self, let selection = CodexWorkspaceDisplayPreference.load() else { throw ManagementProtocol.failure("settings_unavailable") }
+            return .init(workspaceAutoExpand: CodexWorkspacePreference.enabled,
+                         autoSendSuggestions: self.settings.autoSendSuggestions,
+                         workspaceAutoExpandDisplaySelection: selection,
+                         agentToolWindowsEnabled: self.toolWindows.enabled, chromeUsesAgentDisplay: self.toolWindows.chromeUsesAgentDisplay)
+        }
+        management.writeSettings = { [weak self] value in self?.settings.applyManagement(value) }
+        management.readComponents = { [weak self] in self?.launcher.runtimeComponents() ?? [:] }
+        management.readStatus = { [weak self] in
+            guard let self else { return [:] }
+            let tools = self.toolWindows.command(["command": "tool-status"])
+            return ["launcher": self.launcher.status(), "tool_windows": ["enabled": self.toolWindows.enabled,
+                    "chromeUsesAgentDisplay": self.toolWindows.chromeUsesAgentDisplay,
+                    "displaySummary": self.toolWindows.displaySummary, "lastError": tools["lastError"] ?? NSNull()]]
+        }
+        do { try toolServer.start { [weak self] request in
+            guard let self else { return ["ok": false] }
+            return request["command"] as? String == ManagementProtocol.command ? self.management.handle(request) : self.toolWindows.command(request)
+        } }
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
+        launcher.onPlaceMobileWindow = { [weak self] host, request in self?.toolWindows.routeMobileAnchor(host, request: request) }
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -100,7 +121,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
-        let quiet = NSMenuItem(title: "Agent 工具窗口使用虚拟屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
+        let quiet = NSMenuItem(title: "Agent 工具窗口使用右屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
         quiet.target = self
         menu.addItem(quiet)
         menu.addItem(.separator())
@@ -251,6 +272,16 @@ final class SettingsModel: ObservableObject {
         displayDecision = readDisplayDecision?()
     }
 
+    func applyManagement(_ value: ManagementProtocol.Settings) {
+        if !value.agentToolWindowsEnabled && toolWindowsEnabled { setToolRouting(false) }
+        if enabled != value.workspaceAutoExpand { enabled = value.workspaceAutoExpand }
+        if autoSendSuggestions != value.autoSendSuggestions { autoSendSuggestions = value.autoSendSuggestions }
+        saveSelection(value.workspaceAutoExpandDisplaySelection)
+        if chromeUsesAgentDisplay != value.chromeUsesAgentDisplay { setChromeRouting(value.chromeUsesAgentDisplay) }
+        if value.agentToolWindowsEnabled && !toolWindowsEnabled { setToolRouting(true) }
+        refresh()
+    }
+
     func setDisplayMode(_ mode: CodexWorkspaceDisplaySelection.Mode) {
         var value = selection ?? CodexWorkspaceDisplaySelection()
         value.setMode(mode, displays: catalog.displays)
@@ -351,18 +382,20 @@ struct SettingsView: View {
             Text("ChatGPT 视图保持收起，已展开的任务保留现有标签页。")
                 .font(.callout).foregroundColor(.secondary)
             Divider()
-            Text("OCU 虚拟屏").font(.headline)
+            Text("Agent 窗口右屏路由").font(.headline)
             Text(model.agentDisplaySummary).font(.callout).foregroundColor(.secondary)
-            Toggle("Agent 工具窗口使用虚拟屏", isOn: Binding(
+            Text("Agent 工具窗口使用当前最右侧物理屏；不创建虚拟屏。")
+                .font(.caption).foregroundColor(.secondary)
+            Toggle("Agent 工具窗口使用右屏", isOn: Binding(
                 get: { model.toolWindowsEnabled }, set: { model.setToolRouting($0) }
             ))
-            Toggle("Google Chrome 默认使用虚拟屏", isOn: Binding(
+            Toggle("Agent Chrome 窗口使用右屏", isOn: Binding(
                 get: { model.chromeUsesAgentDisplay }, set: { model.setChromeRouting($0) }
             ))
             .disabled(!model.toolWindowsEnabled)
-            Text("开启后将 Chrome 浏览窗口放到虚拟屏，新窗口自动沿用。手动移出的窗口会解除托管；关闭后已停放窗口保持原位。全屏、最小化或超出虚拟屏大小的窗口需先恢复或缩小。")
+            Text("只路由明确登记的 Agent 窗口；人工窗口保留。超大窗口适配右屏，手动移动后解除托管，停止路由不搬回原屏。")
                 .font(.caption).foregroundColor(.secondary)
-            Button("刷新虚拟屏状态") { model.refresh() }
+            Button("刷新物理屏状态") { model.refresh() }
             Toggle("登录时启动", isOn: Binding(
                 get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }
             ))
@@ -406,9 +439,9 @@ struct SettingsView: View {
                     }
                 )) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(AgentDisplay.isPersistentScreen(display.displayID) ? "OCU 虚拟屏" : displayTitle(display))
+                        Text(displayTitle(display))
                         Text(display.identityUsable
-                             ? "\(AgentDisplay.isPersistentScreen(display.displayID) ? "不可见虚拟屏" : display.isBuiltin ? "内屏" : "外屏") · \(Int(display.bounds.width)) × \(Int(display.bounds.height)) pt"
+                             ? "\(display.isBuiltin ? "内屏" : "外屏") · \(Int(display.bounds.width)) × \(Int(display.bounds.height)) pt"
                              : "屏幕身份暂不可用")
                             .font(.caption).foregroundColor(.secondary)
                     }

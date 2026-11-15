@@ -5,12 +5,6 @@ public enum ToolWindowPolicy {
     public enum Scope: Equatable { case document(URL), none }
     public static let enabledKey = "agentToolWindowsEnabled"
     public static let chromeEnabledKey = "chromeUsesAgentDisplay"
-    public static func defaultsToAgentDisplay(bundleID: String, enabled: Bool) -> Bool {
-        enabled && bundleID == "com.google.Chrome"
-    }
-    public static func retainsObservation(defaultChrome: Bool, documents: Set<URL>?) -> Bool {
-        defaultChrome || documents?.isEmpty == false
-    }
     public static let protectedBundles: Set<String> = [
         "com.openai.codex", "me.longbiaochen.codex-plus", "com.webcatalog.juli.x-chat",
         "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
@@ -30,14 +24,13 @@ public enum ToolWindowPolicy {
         claims.subtracting(knownDocuments)
     }
 
-    /// Exact official OCU namespace identity; never choose a screen by position.
-    public static func isPersistentAgentDisplay(id: UInt32, primary: UInt32,
-        vendor: UInt32, model: UInt32, serial: UInt32, expectedSerial: UInt32,
-        builtin: Bool, mirrored: Bool, online: [UInt32: CGRect]) -> Bool {
-        guard id != 0, id != primary, !builtin, !mirrored,
-              vendor == 0x0CAC, model == 0x0CAC, serial == expectedSerial, expectedSerial > 1,
-              let bounds = online[id], !bounds.isEmpty, online.count > 1 else { return false }
-        return !online.contains { $0.key != id && $0.value.intersects(bounds) }
+    /// Candidates are already verified physical, online and non-mirrored.
+    public static func rightmostDisplay(_ candidates: [UInt32: CGRect]) -> UInt32? {
+        candidates.filter { !$0.value.isEmpty }.max {
+            if $0.value.minX != $1.value.minX { return $0.value.minX < $1.value.minX }
+            if $0.value.maxX != $1.value.maxX { return $0.value.maxX < $1.value.maxX }
+            return $0.key < $1.key
+        }?.key
     }
 
     public static func matchesIdentity(pid: Int32, windowID: UInt32, launchDate: Date,

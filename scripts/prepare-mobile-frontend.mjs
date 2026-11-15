@@ -8,6 +8,7 @@ import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
 import {openAsar} from './inspect-sidebar-model.mjs';
 import {mobileHost} from '../Sources/CodexPlus/Resources/mobile-host.mjs';
+import {adaptMobileFrontend} from './mobile-frontend-adapter.mjs';
 export {mobileHost};
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -36,8 +37,9 @@ export async function prepareFrontend({app, output}) {
       const bytes = await archive.readBytes(entry), sha256 = digest(bytes);
       if (entry.integrity?.algorithm !== 'SHA256' || sha256 !== entry.integrity.hash) throw Error(`Host integrity mismatch: ${entry.path}`);
       await fs.mkdir(path.dirname(destination), {recursive: true});
-      await fs.writeFile(destination, bytes);
-      assets.push({path: relative, bytes: bytes.length, sha256});
+      const shipped = await adaptMobileFrontend(relative, bytes);
+      await fs.writeFile(destination, shipped);
+      assets.push({path: relative, bytes: bytes.length, sha256, ...shipped !== bytes ? {shippedBytes: shipped.length, shippedSHA256: digest(shipped), adapter: ({'index.html': 'phone-input-typography', 'assets/async/486887.8844429c7e.js': 'original-browser-attachment-picker', 'assets/async/757723.3067c948bc.js': 'original-router-location', 'assets/async/907538.0572f09d40.js': 'original-sidebar-default', 'assets/async/149364.fd50fe6b4a.js': 'original-sidebar-trigger'})[relative]} : {}});
     }
     const manifest = {protocol: 1, host: mobileHost, assets};
     await fs.writeFile(path.join(output, 'codex-mobile-manifest.json'), JSON.stringify(manifest));

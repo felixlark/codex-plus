@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "CodexPlus",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "CodexPlus", targets: ["CodexPlus"])],
+    products: [.executable(name: "CodexPlus", targets: ["CodexPlus"]), .executable(name: "SmartShadowManager", targets: ["SmartShadowManager"])],
     targets: [
         .target(name: "CodexPlusCore"),
         .target(name: "AgentDisplayShim", publicHeadersPath: "include",
@@ -19,6 +19,7 @@ let package = Package(
                 "-Xlinker", "__info_plist", "-Xlinker", "AppInfo.plist"
             ])]
         ),
+        .executableTarget(name: "SmartShadowManager", dependencies: ["CodexPlusCore"]),
         .testTarget(name: "CodexPlusCoreTests", dependencies: ["CodexPlusCore"])
     ]
 )
