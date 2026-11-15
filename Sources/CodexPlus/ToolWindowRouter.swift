@@ -116,6 +116,33 @@ final class ToolWindowRouter {
         value(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
     }
 
+    private struct FileOpenSnapshot {
+        let process: FileOpenPolicy.ProcessIdentity
+        let windows: [AXUIElement]
+    }
+
+    private func fileOpenSnapshots(_ appURL: URL) -> [FileOpenSnapshot]? {
+        var snapshots: [FileOpenSnapshot] = []
+        for app in NSWorkspace.shared.runningApplications
+            where app.bundleURL?.resolvingSymlinksInPath() == appURL {
+            guard !app.isTerminated, let launchDate = app.launchDate else { return nil }
+            var raw: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),
+                    kAXWindowsAttribute as CFString, &raw) == .success,
+                  let baseline = raw as? [AXUIElement],
+                  let live = NSRunningApplication(processIdentifier: app.processIdentifier),
+                  !live.isTerminated, live.launchDate == launchDate else { return nil }
+            snapshots.append(FileOpenSnapshot(
+                process: .init(pid: app.processIdentifier, launchDate: launchDate), windows: baseline))
+        }
+        return snapshots
+    }
+
+    private func existingFileInstance(_ resource: URL, snapshots: [FileOpenSnapshot]) -> Int? {
+        FileOpenPolicy.existingInstance(resource: resource,
+            documents: snapshots.map { Set($0.windows.compactMap(document)) })
+    }
+
     @discardableResult
     private func watch(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
                        defaultChrome: Bool = false, remainder: ((Set<URL>?) -> Void)? = nil) -> Bool {
@@ -124,6 +151,9 @@ final class ToolWindowRouter {
         }
         guard enabled, !stopping, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
+        if let existing = watches[app.processIdentifier], existing.app.launchDate != app.launchDate {
+            removeWatch(app.processIdentifier)
+        }
         if let existing = watches[app.processIdentifier] {
             if defaultChrome && !existing.defaultChrome { existing.defaultKnown = [] }
             existing.defaultChrome = existing.defaultChrome || defaultChrome
@@ -173,7 +203,12 @@ final class ToolWindowRouter {
     }
 
     private func scan(_ watch: Watch) {
-        guard enabled else { return }
+        guard enabled, watches[watch.app.processIdentifier] === watch,
+              let launchDate = watch.app.launchDate else { return }
+        guard let live = NSRunningApplication(processIdentifier: watch.app.processIdentifier),
+              !live.isTerminated, live.launchDate == launchDate else {
+            removeWatch(watch.app.processIdentifier); return
+        }
         if let claims = watch.documents {
             // Opening a file as a tab in an existing manual window consumes
             // the request without taking ownership of that window.
@@ -569,9 +604,12 @@ final class ToolWindowRouter {
               FileManager.default.fileExists(atPath: resource.path) else { return error("A current local file URL is required; other tools need an exact window ID") }
         let appURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         currentOpenDocument = nil; currentOpenID = nil
-        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.resolvingSymlinksInPath() == appURL }),
-           windows(app).compactMap(document).contains(resource.standardizedFileURL.resolvingSymlinksInPath()) {
-            lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(app.processIdentifier)]
+        guard let snapshots = fileOpenSnapshots(appURL) else {
+            lastOpen = ["id": id, "state": "failed", "error": "application-window-baseline-unavailable"]
+            return error("Application window baseline is unavailable")
+        }
+        if let index = existingFileInstance(resource, snapshots: snapshots) {
+            lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(snapshots[index].process.pid)]
             return ["ok": true, "state": "opened-in-existing-window"]
         }
         currentOpenDocument = resource.standardizedFileURL.resolvingSymlinksInPath(); currentOpenID = id
@@ -581,9 +619,21 @@ final class ToolWindowRouter {
     }
 
     private func openFile(appURL: URL, resource: URL, id: String, requestEpoch: UUID) {
-        let existing = NSWorkspace.shared.runningApplications.first { $0.bundleURL?.resolvingSymlinksInPath() == appURL }
-        let baseline = existing.map(windows) ?? []
-        let existingDocuments = Set(baseline.compactMap { document($0) })
+        // Capture all instances again after display preparation. LaunchServices
+        // may select any running instance; array order is not an identity.
+        guard let snapshots = fileOpenSnapshots(appURL) else {
+            if lastOpen["id"] as? String == id {
+                lastOpen = ["id": id, "state": "failed", "error": "application-window-baseline-unavailable"]
+            }
+            return
+        }
+        if let index = existingFileInstance(resource, snapshots: snapshots) {
+            if lastOpen["id"] as? String == id {
+                lastOpen = ["id": id, "state": "opened-in-existing-window", "pid": Int(snapshots[index].process.pid)]
+            }
+            return
+        }
+        let existingDocuments = Set(snapshots.flatMap { $0.windows.compactMap(document) })
         let scope = ToolWindowPolicy.scope(bundleID: Bundle(url: appURL)?.bundleIdentifier ?? "", resource: resource, existingDocuments: existingDocuments)
         // File document identity is public AX metadata. Web/tab identity is left
         // to the official browser tool, followed by exact tool-place if needed.
@@ -596,14 +646,12 @@ final class ToolWindowRouter {
             if lastOpen["id"] as? String == id { lastOpen["state"] = "opened-in-existing-window" }
             return
         }
-        let preObserved: Bool
-        if let existing, documents?.isEmpty == false { preObserved = watch(existing, baseline: baseline, documents: documents) }
-        else { preObserved = false }
         if lastOpen["id"] as? String == id { lastOpen["state"] = "requested" }
-        if let existing { lastOpen["pid"] = Int(existing.processIdentifier) }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
-        let completion: (NSRunningApplication?, Error?) -> Void = { [weak self] app, failure in
+        config.allowsRunningApplicationSubstitution = false
+        let openCalledAt = Date()
+        NSWorkspace.shared.open([resource], withApplicationAt: appURL, configuration: config) { [weak self] app, failure in
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard self.enabled, !self.stopping, self.observationEpoch == requestEpoch else {
@@ -611,21 +659,36 @@ final class ToolWindowRouter {
                     return
                 }
                 if let failure {
-                    if let documents, let existing, let watch = self.watches[existing.processIdentifier], watch.documents != nil {
-                        watch.documents?.subtract(documents)
-                        if !ToolWindowPolicy.retainsObservation(defaultChrome: watch.defaultChrome, documents: watch.documents) { self.removeWatch(existing.processIdentifier) }
-                    }
                     if self.lastOpen["id"] as? String == id { self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription] }; return
                 }
                 guard let app else { if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "failed" }; return }
+                guard let launchDate = app.launchDate,
+                      let live = NSRunningApplication(processIdentifier: app.processIdentifier),
+                      !live.isTerminated, live.launchDate == launchDate else {
+                    if self.lastOpen["id"] as? String == id { self.lastOpen["state"] = "observation-unavailable" }
+                    return
+                }
+                let baseline: [AXUIElement]
+                let newProcess: Bool
+                switch FileOpenPolicy.baseline(pid: app.processIdentifier, launchDate: launchDate,
+                    appURL: live.bundleURL, requestedAppURL: appURL, openCalledAt: openCalledAt,
+                    captured: snapshots.map(\.process)) {
+                case .captured(let index): baseline = snapshots[index].windows; newProcess = false
+                case .newProcess: baseline = []; newProcess = true
+                case .unavailable:
+                    if self.lastOpen["id"] as? String == id {
+                        self.lastOpen = ["id": id, "state": "observation-unavailable",
+                            "pid": Int(app.processIdentifier), "error": "application-window-baseline-unavailable"]
+                    }
+                    return
+                }
                 if let watch = self.watches[app.processIdentifier] { self.scan(watch) }
                 var pending = documents
                 let observed: Bool
                 if scope != .none {
-                    // Never recreate a pre-open claim that was already consumed
-                    // by an AX event (including an existing-window/tab reuse).
-                    if preObserved { observed = self.watches[app.processIdentifier] != nil }
-                    else if let documents,
+                    // Claims are created only here, against the actual instance.
+                    // Initial scan covers windows created before completion.
+                    if let documents,
                             ToolWindowPolicy.remainingClaims(documents, knownDocuments: Set(baseline.compactMap(self.document))).isEmpty {
                         pending = []; observed = false
                     } else { observed = self.watch(app, baseline: baseline, documents: documents, remainder: { pending = $0 }) }
@@ -641,7 +704,7 @@ final class ToolWindowRouter {
                 let reused = baseline.compactMap(self.document).contains(resource.standardizedFileURL.resolvingSymlinksInPath())
                 let state = placed ? "parked" : self.managed.contains(where: { $0.pid == app.processIdentifier && $0.result == "parking" }) ? "parking" : reused ? "opened-in-existing-window" : observed ? "waiting-for-window" : scope != .none ? "observation-unavailable" : "opened-without-window-rule"
                 if self.lastOpen["id"] as? String == id {
-                    self.lastOpen = ["id": id, "state": state, "pid": Int(app.processIdentifier), "observing": observed, "newProcess": existing == nil]
+                    self.lastOpen = ["id": id, "state": state, "pid": Int(app.processIdentifier), "observing": observed, "newProcess": newProcess]
                 }
                 if scope != .none && !observed && !placed && pending?.isEmpty != true,
                    self.observationErrors[app.processIdentifier] == Int(AXError.cannotComplete.rawValue) {
@@ -650,7 +713,6 @@ final class ToolWindowRouter {
                 }
             }
         }
-        NSWorkspace.shared.open([resource], withApplicationAt: appURL, configuration: config, completionHandler: completion)
     }
 
     private func windowInfo(_ id: UInt32) -> [String: Any]? {
