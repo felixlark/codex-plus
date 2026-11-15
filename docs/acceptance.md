@@ -1,5 +1,9 @@
 ## 小看板正式入口（2026-11-15）
 
+后续安装版 4102：PR29 合入 `90882bbcd4a3d4b5c1087b9ecafcba0e188094fa`，修复关闭全部窗口后无法正常重开的入口。定向 Debug 编译和两项现有 CI 通过；#613 从候选76259d构建签名包并安装。OCU 关闭全部窗口后，CG窗口列表为空、Manager PID77104仍在；正常打开 `/Applications/SmartShadow.app`，同一进程恢复主窗口13089。验收关闭动作禁用工具自动读回，以免观察工具自行激活应用干扰结果。
+
+真实任务读回经历总计1/执行中1，随后 taskd 登记 #610 后显示总计2/执行中0/已完成0。#611 显示“交付中”、本次尝试“已交付”、输入版本已更新及准确成果评论6896808729；没有把 Run 结束或 delivered 回执误计成全案完成。主窗口及看板13092已停放右侧物理屏。Manager正常退出与重开前后，原Codex3333/appserver3406、Plus35819/controller36117/gateway37922保持，手机原宿主未重建。原案链接实际交给默认浏览器并到达准确URL，浏览器的私有仓库登录仍未完成，不能据此宣称正文已打开。Codex独立任务关联去重仍未交付。
+
 PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartShadow 4.1.0/4101。正式安装入口通过 OCU 打开独立“任务看板”窗口，先正确显示 taskd 的 node_identity_changed；服务修复后手动刷新从真实 taskd971 的原 LocalMcpClient读取登记范围，显示总计1、执行中0、待处理0、已完成0，`felixlark/smart-shadow#611` 已暂停。未把 running/ready 的服务误计为完成任务。
 
 关闭看板返回原管理窗口12292，重开保留真实快照与更新时间。关闭后 Plus35819/host3333/controller36117、手机宿主9769保持，手机connected=1。未操作服务启停。原案链接可见；实际点击跳转及首Run后的动态状态/成果仍待验，Codex独立任务覆盖未交付。私有证据为 `Library/Logs/codex-plus/mobile-complete-20261115/board4101-live-*`。OCU MCP连接故障经同一官方已安装工具的doctor/call入口完成，未改用另一套GUI。
