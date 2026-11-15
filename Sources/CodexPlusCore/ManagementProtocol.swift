@@ -9,6 +9,13 @@ public enum ManagementProtocol {
     public static let runtimeBundleID = "me.longbiaochen.codex-plus"
     public static let runtimePath = "/Applications/Codex Plus.app"
     public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", workspaceOpen = "workspace.open" }
+    public enum Rejection: String { case unsupported, conflict }
+    /// Only these protocol codes attest a pre-effect rejection. Arbitrary
+    /// failures may follow an effect and must remain unknown to the client.
+    public static func rejection(in response: [String: Any]) -> Rejection? {
+        guard boolean(response["ok"]) == false, let code = response["error"] as? String else { return nil }
+        return Rejection(rawValue: code)
+    }
     public struct Request {
         public let id: UUID
         public let operation: Operation

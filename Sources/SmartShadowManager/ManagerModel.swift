@@ -11,7 +11,7 @@ import Security
     @Published private(set) var status: [String: Any] = [:]
     @Published private(set) var busy = false
     @Published private(set) var message = "正在读取 interactiond…"
-    @Published private(set) var pendingOpen: UUID?
+    @Published private(set) var pendingOpen: ManagementWorkspaceRequest?
     @Published private(set) var modules: [String: ModuleObservation] = [:]
     @Published private(set) var moduleErrors: [String: String] = [:]
     private var serviceConnection: ServiceControlClient?
@@ -33,11 +33,12 @@ import Security
                 self.serviceConnection = nil
             }
             let state = try await self.call(.status)
-            self.status = state
-            self.adoptPendingOpen(state)
+            self.status = state.result
+            self.adoptPendingOpen(state.result, instance: state.runtime.instance_id)
             let result = try await self.call(.settingsRead)
-            try self.acceptSettings(result)
-            self.message = "已连接原 interactiond 运行主体"
+            try self.acceptSettings(result.result)
+            self.message = self.pendingOpen.map { $0.runtimeID != state.runtime.instance_id } == true
+                ? "已连接新运行实例，原工作台请求仍待核实" : "已连接 interactiond 运行主体"
         }
     }
     private func acceptSettings(_ result: [String: Any]) throws {
@@ -53,46 +54,56 @@ import Security
             do {
                 let result = try await self.call(.settingsWrite, extra: ["expected_runtime": runtime.instance_id.uuidString,
                     "expected_settings_revision": revision, "changes": changes])
-                try self.acceptSettings(result); self.message = "设置已由 interactiond 保存并读回"
+                try self.acceptSettings(result.result); self.message = "设置已由 interactiond 保存并读回"
+            } catch let rejection as Rejected {
+                if rejection.code == .conflict, (try? self.acceptSettings(rejection.result)) != nil {
+                    self.message = "设置已变化，本次修改未写入；已读取当前值"
+                } else {
+                    if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual.result) }
+                    self.message = rejection.code == .conflict ? "设置已变化，本次修改未写入" : "当前运行接口不支持本次设置，未写入"
+                }
             } catch {
                 let reason = error.localizedDescription
                 // Reconcile current values only; never repeat a settings write.
-                if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual) }
+                if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual.result) }
                 self.message = "写入回执未确认，已尝试只读核对当前值：\(reason)"
             }
         }
     }
     func openWorkbench() {
         guard !busy, pendingOpen == nil, let runtime else { return }
-        let id = UUID(); pendingOpen = id
+        let id = UUID(); let pending = ManagementWorkspaceRequest(requestID: id, runtimeID: runtime.instance_id); pendingOpen = pending
         perform {
             do {
                 _ = try await self.call(.workspaceOpen, id: id, extra: ["expected_runtime": runtime.instance_id.uuidString])
                 self.message = "工作台请求已接收；正在读取实际窗口状态"
+            } catch let rejection as Rejected {
+                if self.pendingOpen == pending { self.pendingOpen = nil }
+                self.message = rejection.code == .unsupported ? "当前运行接口不支持打开工作台，本次请求未执行" : "本次工作台请求已拒绝，未执行"
+                return
             } catch { self.message = "工作台回执未知，保留原请求并只读核对：\(error.localizedDescription)" }
-            await self.reconcileOpen(id: id, instance: runtime.instance_id)
+            await self.reconcileOpen(pending)
         }
     }
-    private func adoptPendingOpen(_ state: [String: Any]) {
-        guard let open = state["workspace_request"] as? [String: Any],
-              let id = ManagementProtocol.uuid(open["request_id"]), let phase = open["phase"] as? String else { return }
-        pendingOpen = ["ready", "failed", "closed"].contains(phase) ? nil : id
+    private func adoptPendingOpen(_ state: [String: Any], instance: UUID) {
+        guard let open = state["workspace_request"] as? [String: Any] else { return }
+        if let pendingOpen { self.pendingOpen = pendingOpen.observing(open, runtimeID: instance) }
+        else { pendingOpen = ManagementWorkspaceRequest.recovering(open, runtimeID: instance) }
     }
     func checkOpen() {
-        guard !busy, let id = pendingOpen, let runtime else { return }
-        perform { await self.reconcileOpen(id: id, instance: runtime.instance_id) }
+        guard !busy, let pendingOpen else { return }
+        perform { await self.reconcileOpen(pendingOpen) }
     }
-    private func reconcileOpen(id: UUID, instance: UUID) async {
+    private func reconcileOpen(_ pending: ManagementWorkspaceRequest) async {
         do {
-            let result = try await call(.status, extra: ["expected_runtime": instance.uuidString, "query_request_id": id.uuidString])
-            status = result
-            adoptPendingOpen(result)
-            guard let open = result["workspace_request"] as? [String: Any], open["request_id"] as? String == id.uuidString else {
+            let reply = try await call(.status, extra: pending.reconciliationFields)
+            status = reply.result
+            adoptPendingOpen(reply.result, instance: reply.runtime.instance_id)
+            guard let open = reply.result["workspace_request"] as? [String: Any],
+                  ManagementProtocol.uuid(open["request_id"]) == pending.requestID else {
                 message = "原工作台请求结果未知，保留请求 ID"; return
             }
-            let phase = open["phase"] as? String ?? "unknown"
-            message = "工作台状态：\(phase)"
-            if ["ready", "failed", "closed"].contains(phase) { pendingOpen = nil }
+            message = "工作台状态：\(open["phase"] as? String ?? "unknown")"
         } catch { message = "原工作台请求仍待核对：\(error.localizedDescription)" }
     }
     func attach() {
@@ -123,7 +134,13 @@ import Security
             catch { self.message = "未连接或接口尚不可用：\(error.localizedDescription)" }
         }
     }
-    private func call(_ operation: ManagementProtocol.Operation, id: UUID = UUID(), extra: [String: Any] = [:]) async throws -> [String: Any] {
+    private struct Rejected: LocalizedError {
+        let code: ManagementProtocol.Rejection
+        let result: [String: Any]
+        var errorDescription: String? { code == .unsupported ? "当前运行接口不支持此操作" : "设置已变化，请刷新" }
+    }
+    private struct Reply { let result: [String: Any]; let runtime: ManagementProtocol.RuntimeIdentity }
+    private func call(_ operation: ManagementProtocol.Operation, id: UUID = UUID(), extra: [String: Any] = [:]) async throws -> Reply {
         try Task.checkCancellation()
         var request: [String: Any] = ["command": ManagementProtocol.command, "protocol": ManagementProtocol.version,
             "request_id": id.uuidString, "operation": operation.rawValue]
@@ -138,8 +155,11 @@ import Security
         if let expected = request["expected_runtime"] as? String, identity.instance_id.uuidString != expected { throw ManagementProtocol.failure("runtime_changed_result_unknown") }
         if operation == .settingsRead, let runtime, identity.instance_id != runtime.instance_id { throw ManagementProtocol.failure("runtime_changed_refresh_required") }
         runtime = identity; capabilities = response["capabilities"] as? [String] ?? []
-        guard response["ok"] as? Bool == true else { throw ManagementProtocol.failure(response["error"] as? String ?? "management_request_failed") }
-        return response["result"] as? [String: Any] ?? [:]
+        if let code = ManagementProtocol.rejection(in: response) {
+            throw Rejected(code: code, result: response["result"] as? [String: Any] ?? [:])
+        }
+        guard response["ok"] as? Bool == true else { throw ManagementProtocol.failure(response["error"] as? String ?? "management_request_failed_result_unknown") }
+        return Reply(result: response["result"] as? [String: Any] ?? [:], runtime: identity)
     }
     private static func verify(_ identity: ManagementProtocol.RuntimeIdentity) throws {
         guard identity.pid > 0, identity.bundle_id == ManagementProtocol.runtimeBundleID, identity.path == ManagementProtocol.runtimePath,

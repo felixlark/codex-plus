@@ -81,3 +81,41 @@ final class ManagementProtocolTests: XCTestCase {
         catch { XCTAssertTrue(error is CancellationError) }
     }
 }
+
+final class ManagementWorkspaceRequestTests: XCTestCase {
+    func testReconciliationAlwaysUsesOriginalRuntimeWhenCurrentRuntimeChanges() {
+        let original = UUID(), replacement = UUID(), request = UUID()
+        let pending = ManagementWorkspaceRequest(requestID: request, runtimeID: original)
+        XCTAssertEqual(pending.reconciliationFields["expected_runtime"] as? String, original.uuidString)
+        XCTAssertEqual(pending.reconciliationFields["query_request_id"] as? String, request.uuidString)
+        XCTAssertEqual(pending.observing(["request_id": request.uuidString, "phase": "ready"], runtimeID: replacement), pending)
+    }
+    func testDifferentRequestOrUnknownPhaseCannotClearOriginalPendingRequest() {
+        let instance = UUID(), pending = ManagementWorkspaceRequest(requestID: UUID(), runtimeID: UUID())
+        XCTAssertEqual(pending.observing(["request_id": UUID().uuidString, "phase": "ready"], runtimeID: instance), pending)
+        XCTAssertEqual(pending.observing(["request_id": pending.requestID.uuidString, "phase": "unknown"], runtimeID: pending.runtimeID), pending)
+        XCTAssertEqual(pending.observing(["request_id": UUID().uuidString, "phase": "ready"], runtimeID: pending.runtimeID), pending)
+        XCTAssertNil(pending.observing(["request_id": pending.requestID.uuidString, "phase": "ready"], runtimeID: pending.runtimeID))
+    }
+    func testRecoveryBindsReportedRequestToActualResponseRuntime() {
+        let actual = UUID(), id = UUID()
+        let pending = ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "phase": "accepted"], runtimeID: actual)
+        XCTAssertEqual(pending, .init(requestID: id, runtimeID: actual))
+        XCTAssertNil(ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "phase": "closed"], runtimeID: actual))
+    }
+}
+
+
+final class ManagementRejectionTests: XCTestCase {
+    func testExplicitPreEffectRefusalsAreDistinctFromUnknownFailures() {
+        XCTAssertEqual(ManagementProtocol.rejection(in: ["ok": false, "error": "unsupported"]), .unsupported)
+        XCTAssertEqual(ManagementProtocol.rejection(in: ["ok": false, "error": "conflict"]), .conflict)
+        XCTAssertNil(ManagementProtocol.rejection(in: ["ok": false, "error": "settings_write_failed"]))
+        XCTAssertNil(ManagementProtocol.rejection(in: ["ok": false, "error": "runtime_changed"]))
+    }
+    func testMalformedOrSuccessfulResponsesCannotAttestRejection() {
+        XCTAssertNil(ManagementProtocol.rejection(in: ["ok": "false", "error": "conflict"]))
+        XCTAssertNil(ManagementProtocol.rejection(in: ["ok": 0, "error": "conflict"]))
+        XCTAssertNil(ManagementProtocol.rejection(in: ["ok": true, "error": "conflict"]))
+    }
+}

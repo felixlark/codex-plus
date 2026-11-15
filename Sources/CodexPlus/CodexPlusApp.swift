@@ -11,6 +11,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusServer = StatusServer()
     private let toolWindows = ToolWindowRouter()
     private let toolServer = ToolControlServer()
+    private let management = ManagementRuntime()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var agentSettingsWindow: NSWindow?
@@ -80,7 +81,25 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onToolRoutingChange = { [weak self] in self?.toolWindows.setEnabled($0) }
         settings.onChromeRoutingChange = { [weak self] in self?.toolWindows.setChromeUsesAgentDisplay($0) }
         toolWindows.start()
-        do { try toolServer.start { [weak self] in self?.toolWindows.command($0) ?? ["ok": false] } }
+        management.readSettings = { [weak self] in
+            guard let self, let selection = CodexWorkspaceDisplayPreference.load() else { throw ManagementProtocol.failure("settings_unavailable") }
+            return .init(workspaceAutoExpand: CodexWorkspacePreference.enabled,
+                         autoSendSuggestions: self.settings.autoSendSuggestions,
+                         workspaceAutoExpandDisplaySelection: selection,
+                         agentToolWindowsEnabled: self.toolWindows.enabled, chromeUsesAgentDisplay: self.toolWindows.chromeUsesAgentDisplay)
+        }
+        management.writeSettings = { [weak self] value in self?.settings.applyManagement(value) }
+        management.readStatus = { [weak self] in
+            guard let self else { return [:] }
+            let tools = self.toolWindows.command(["command": "tool-status"])
+            return ["launcher": self.launcher.status(), "tool_windows": ["enabled": self.toolWindows.enabled,
+                    "chromeUsesAgentDisplay": self.toolWindows.chromeUsesAgentDisplay,
+                    "displaySummary": self.toolWindows.displaySummary, "lastError": tools["lastError"] ?? NSNull()]]
+        }
+        do { try toolServer.start { [weak self] request in
+            guard let self else { return ["ok": false] }
+            return request["command"] as? String == ManagementProtocol.command ? self.management.handle(request) : self.toolWindows.command(request)
+        } }
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.start()
@@ -249,6 +268,16 @@ final class SettingsModel: ObservableObject {
         refreshToolRouting()
         selection = CodexWorkspaceDisplayPreference.load()
         displayDecision = readDisplayDecision?()
+    }
+
+    func applyManagement(_ value: ManagementProtocol.Settings) {
+        if !value.agentToolWindowsEnabled && toolWindowsEnabled { setToolRouting(false) }
+        if enabled != value.workspaceAutoExpand { enabled = value.workspaceAutoExpand }
+        if autoSendSuggestions != value.autoSendSuggestions { autoSendSuggestions = value.autoSendSuggestions }
+        saveSelection(value.workspaceAutoExpandDisplaySelection)
+        if chromeUsesAgentDisplay != value.chromeUsesAgentDisplay { setChromeRouting(value.chromeUsesAgentDisplay) }
+        if value.agentToolWindowsEnabled && !toolWindowsEnabled { setToolRouting(true) }
+        refresh()
     }
 
     func setDisplayMode(_ mode: CodexWorkspaceDisplaySelection.Mode) {
