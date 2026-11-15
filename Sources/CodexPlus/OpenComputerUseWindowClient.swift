@@ -27,6 +27,9 @@ final class OpenComputerUseWindowClient {
             // Do not inherit an old virtual-display client environment.
             for key in ["OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE", "OPEN_COMPUTER_USE_CONFIG_FILE",
                         "OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_RESTORE_ON_SESSION_END"] { environment.removeValue(forKey: key) }
+            environment["OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE"] = "right-screen"
+            environment["OPEN_COMPUTER_USE_CONFIG_FILE"] = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/open-computer-use/config.json").path
             environment["OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_ENABLED"] = "false"
             environment["OPEN_COMPUTER_USE_ACTION_READ_BACK"] = "0"
             environment["OPEN_COMPUTER_USE_VISUAL_CURSOR"] = "0"
