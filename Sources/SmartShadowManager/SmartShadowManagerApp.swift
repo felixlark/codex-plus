@@ -16,12 +16,13 @@ import CodexPlusCore
 @main struct SmartShadowManagerApp: App {
     @NSApplicationDelegateAdaptor(ManagerDelegate.self) private var delegate
     @StateObject private var model = ManagerModel()
+    @StateObject private var taskBoard = TaskBoardModel()
     var body: some Scene {
         WindowGroup("SmartShadow", id: "manager") {
-            ManagerView(model: model, registerReopen: { delegate.reopenManager = $0 })
+            ManagerView(model: model, registerReopen: { delegate.reopenManager = $0 }, refreshTaskBoard: { taskBoard.refresh() })
                 .onAppear { delegate.model = model }
         }
-        Window("任务看板", id: "task-board") { TaskBoardView() }.defaultSize(width: 460, height: 380)
+        Window("任务看板", id: "task-board") { TaskBoardView(model: taskBoard) }.defaultSize(width: 460, height: 380)
         .commands {
             CommandGroup(replacing: .appInfo) { Button("关于 SmartShadow") { NSApp.orderFrontStandardAboutPanel() } }
         }
@@ -32,6 +33,7 @@ struct ManagerView: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: ManagerModel
     let registerReopen: (@escaping () -> Void) -> Void
+    let refreshTaskBoard: () -> Void
     @StateObject private var catalog = CodexWorkspaceDisplayCatalog()
     @State private var login = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -44,7 +46,7 @@ struct ManagerView: View {
                         Text("配置、组件状态与权限").foregroundColor(.secondary)
                     }
                     Spacer()
-                    Button("任务看板") { openWindow(id: "task-board") }
+                    Button("任务看板") { refreshTaskBoard(); openWindow(id: "task-board") }
                     Button("启动或附着 interactiond") { model.attach() }.disabled(model.busy)
                     Button("刷新") { catalog.refresh(); model.refresh() }.disabled(model.busy)
                 }

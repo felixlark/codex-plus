@@ -19,7 +19,7 @@ let package = Package(
                 "-Xlinker", "__info_plist", "-Xlinker", "AppInfo.plist"
             ])]
         ),
-        .executableTarget(name: "SmartShadowManager", dependencies: ["CodexPlusCore"]),
+        .executableTarget(name: "SmartShadowManager", dependencies: ["CodexPlusCore"], resources: [.copy("Resources")]),
         .testTarget(name: "CodexPlusCoreTests", dependencies: ["CodexPlusCore"])
     ]
 )
