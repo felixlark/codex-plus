@@ -19,7 +19,10 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     });
   }
   function dispatch(data) { window.dispatchEvent(new MessageEvent('message', {data, source: null})); }
-  function warning() { void native('refs-warning', {key: 'phone-ui-state'}).catch(() => {}); }
+  function warning(error) {
+    const key = error?.phoneStateKey;
+    void native('local-state-warning', {key: typeof key === 'string' ? key : undefined}).catch(() => {});
+  }
   async function commit(change) {
     const next = JSON.parse(JSON.stringify(state));
     change(next);
@@ -29,7 +32,9 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   }
   async function update(message) {
     const key = message.key;
-    if (!atomKeys.has(key) && !(keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) throw Error(`Unsupported phone atom key: ${key}`);
+    if (!atomKeys.has(key) && !(keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) {
+      const error = Error('Unsupported phone atom key'); error.phoneStateKey = key; throw error;
+    }
     if (message.recordUpdate) await configured;
     const next = await commit(next => {
       if (message.recordUpdate) next.atoms[key] = updateRecord(next.atoms[key] ?? next.atoms[message.recordUpdate.legacyStorageKey], message.recordUpdate);

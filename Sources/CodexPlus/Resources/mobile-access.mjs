@@ -53,6 +53,24 @@ export function prepareMobileAnchor(nonce) {
   return {...probe, isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce};
 }
 
+// Poll the original startup acknowledgement without awaiting it inside a CDP
+// command. An accepted one-way window IPC is not proof that native window
+// context exists yet; at cold start createFreshWindow can otherwise return null.
+export function mobileStartupReadiness(nonce, load = () => import('app://-/assets/348410.374a9b8f98.js')) {
+  let state = globalThis.__codexPlusMobileStartup;
+  if (!state || state.nonce !== nonce || state.phase === 'missing') {
+    state = {nonce, phase: 'loading'};
+    globalThis.__codexPlusMobileStartup = state;
+    void load().then(async module => {
+      const startup = module.__webpack_require__('GaA7').appServices?.startup;
+      if (!startup) { state.phase = 'missing'; return; }
+      state.phase = 'waiting';
+      await startup.whenReady(); state.phase = 'ready';
+    }).catch(() => { state.phase = 'failed'; });
+  }
+  return state.phase;
+}
+
 export class MobileAccess {
   static async create(options) {
     let config;
@@ -119,6 +137,12 @@ export class MobileAccess {
       } else if (!this.creationAttempted) {
         const source = [...this.sessions].find(([, s]) => s.main);
         if (!source) return;
+        const context = [...source[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === source[1].frame);
+        if (!context) return;
+        this.phase = 'waiting-for-host-startup'; this.stage = 'startup';
+        const readiness = await this.command(source[0], 'Runtime.evaluate', {expression: `(${mobileStartupReadiness.toString()})(${JSON.stringify(this.config.anchor)})`, contextId: context.id, returnByValue: true});
+        if (readiness.exceptionDetails || readiness.result?.value === 'failed') throw Error('Native anchor startup failed');
+        if (readiness.result?.value !== 'ready') return;
         this.creationAttempted = true; this.phase = 'creating-anchor';
         const route = `/local/${this.config.threadId}?codexPlusMobileAnchor=${this.config.anchor}`;
         this.stage = 'create';
@@ -127,7 +151,7 @@ export class MobileAccess {
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
     } catch (error) {
       const message = String(error?.message ?? '');
-      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor creation failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
+      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
       this.phase = 'unavailable'; await this.close();
     }
     finally { this.busy = false; }

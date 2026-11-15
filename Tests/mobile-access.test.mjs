@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
+import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
 
@@ -13,6 +13,30 @@ test('mobile binding is an exact private IPv4 and original anchor URL', () => {
   assert.ok(isAnchorURL(url.href, config));
   assert.equal(isAnchorURL(url.href.replace('app://-', 'https://attacker.example'), config), false);
   assert.equal(isAnchorURL(url.href, {...config, anchor: 'another'}), false);
+});
+
+test('cold startup waits for original readiness and issues the native window request only once', async () => {
+  let release, waits = 0, creates = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const load = async () => ({__webpack_require__: () => ({appServices: {startup: {whenReady() { waits++; return gate; }}}})});
+  const sessions = new Map([['human', {main: true, frame: 'root', contexts: new Map([[7, {id: 7, auxData: {isDefault: true, frameId: 'root'}}]])}]]);
+  const manager = new MobileAccess({threadId: 'thread', anchor: 'cold-test'}, {
+    cdp: {call: async () => ({targetInfos: []})}, sessions, stateFile: '/unused', publish: async () => {},
+    command: async (_, method, params) => {
+      if (params.expression.includes('mobileStartupReadiness')) {
+        assert.equal(params.contextId, 7);
+        return {result: {value: mobileStartupReadiness('cold-test', load)}};
+      }
+      creates++; return {};
+    },
+  });
+  try {
+    await manager.tick(); await manager.tick(); await manager.tick();
+    assert.equal(waits, 1); assert.equal(creates, 0); assert.equal(manager.creationAttempted, false);
+    release(); await new Promise(resolve => setImmediate(resolve));
+    await manager.tick(); await manager.tick();
+    assert.equal(creates, 1); assert.equal(manager.creationAttempted, true);
+  } finally { delete globalThis.__codexPlusMobileStartup; }
 });
 
 test('a duplicate app-host handshake closes instead of replacing the native view', async () => {

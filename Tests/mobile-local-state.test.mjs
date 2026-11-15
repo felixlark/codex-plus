@@ -70,6 +70,8 @@ test('a rejected atomic write is neither published nor carried into the next com
     assert.equal(await module.appServices.projectCatalog.readSelection(), undefined);
     f.api.handleMessage({type: 'persisted-atom-update', key: 'composer-prompt-drafts-v2', value: {thread: 'failed draft'}});
     await flush(); await flush();
+    assert.ok(f.messages.some(message => message.operation === 'local-state-warning'));
+    assert.equal(f.messages.some(message => message.operation === 'refs-warning'), false);
     f.api.handleMessage({type: 'persisted-atom-sync-request'}); await flush();
     assert.equal(f.events.at(-1).state['composer-prompt-drafts-v2'], undefined);
     reject = false;
@@ -83,4 +85,36 @@ test('a rejected atomic write is neither published nor carried into the next com
     await flush(); await flush(); await flush();
     assert.deepEqual(f.messages.filter(m => m.operation === 'local-state-save').at(-1).state.atoms, {});
   } finally { f.cleanup(); }
+});
+
+test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), wire = new MessageChannel();
+  class Lease extends rpc.TF {}
+  class Account extends rpc.TF {
+    getAccount() { return {account: {type: 'chatgpt'}, requiresOpenaiAuth: true}; }
+    getAuthMethod() { return 'chatgpt'; }
+    subscribeAuthStatus(callback) { callback({authMethod: 'chatgpt'}); return new Lease(); }
+  }
+  class Managers extends rpc.TF { openAccount() { return new Account(); } }
+  class AccountInfo extends rpc.TF { readAccountInfo() { return {status: 'ready', data: {hasChatGptToken: true}}; } }
+  class Root extends rpc.TF { get services() { return {appServerManagers: new Managers(), accountInfo: new AccountInfo(), accessInputs: new AccountInfo()}; } }
+  const server = rpc.ab(wire.port1, new Root()), client = rpc.ab(wire.port2, new rpc.TF());
+  const original = await client.services;
+  const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    assert.equal((await module.appServices.accountInfo.readAccountInfo()).data.hasChatGptToken, true);
+    assert.equal(module.appServices.accessInputs, undefined);
+    await assert.rejects(async () => await module.appServices.accountInfo.readLocalChatGptAuth());
+    const account = module.appServices.appServerManagers.openAccount('local');
+    assert.equal((await account.getAccount({priority: 'critical'})).requiresOpenaiAuth, true);
+    assert.equal(await account.getAuthMethod({priority: 'critical'}), 'chatgpt');
+    let observed;
+    const lease = await account.subscribeAuthStatus(value => { observed = value.authMethod; });
+    await flush(); assert.equal(observed, 'chatgpt');
+    lease[Symbol.dispose](); account[Symbol.dispose]();
+  } finally {
+    f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); wire.port1.close(); wire.port2.close();
+  }
 });

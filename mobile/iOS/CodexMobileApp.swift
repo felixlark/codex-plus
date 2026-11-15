@@ -166,6 +166,15 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         var navigate = false
         do {
             switch operation {
+            case "local-state-warning":
+                // Only protocol key names are diagnostic metadata; never record
+                // the associated draft, account data or state value.
+                if let key = value["key"] as? String, key.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil {
+                    print("CodexMobile unsupported local state key: \(key)")
+                }
+                let alert = UIAlertController(title: "页面状态未能保存", message: "请保留当前页面，重新连接前先核对草稿。", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "好", style: .default))
+                if presentedViewController == nil { present(alert, animated: true) }
             case "local-state-save": try MobileUIState(identity: routeKey).write(value["state"] as Any)
             case "clipboard-read": reply["value"] = UIPasteboard.general.string ?? ""
             case "clipboard-write":

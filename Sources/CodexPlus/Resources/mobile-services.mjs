@@ -18,6 +18,9 @@ export function selectMobileServices(original, RpcTarget) {
   class Settings extends RpcTarget { read(...args) { return original.settings.read(...args); } }
   class Evaluations extends RpcTarget { readExecutionAssignments(...args) { return original.statsigEvaluations.readExecutionAssignments(...args); } }
   class AppInfo extends RpcTarget { get(...args) { return original.appInfo.get(...args); } }
+  // The original host derives this account summary on the Mac. Unlike
+  // accessInputs.readLocalChatGptAuth(), it does not return an access token.
+  class AccountInfo extends RpcTarget { readAccountInfo(...args) { return original.accountInfo.readAccountInfo(...args); } }
   class Coordination extends RpcTarget {
     getIdeContext(...args) { return original.clientCoordination.getIdeContext(...args); }
     findThreadOwner(...args) { return original.clientCoordination.findThreadOwner(...args); }
@@ -27,6 +30,7 @@ export function selectMobileServices(original, RpcTarget) {
   if (original.settings) services.settings = new Settings();
   if (original.statsigEvaluations) services.statsigEvaluations = new Evaluations();
   if (original.appInfo) services.appInfo = new AppInfo();
+  if (original.accountInfo) services.accountInfo = new AccountInfo();
   if (original.clientCoordination) services.clientCoordination = new Coordination();
   return services;
 }

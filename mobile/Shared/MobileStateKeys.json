@@ -7,7 +7,10 @@
     "composer-presentation-suggestion-drafts-v1", "thread-workspace-draft-tabs-v1",
     "composer-auto-context-enabled", "composer-recent-model-configurations-v1",
     "composer-model-picker-selection-mode-v1", "chatgpt-home-model-picker-selection-mode-v1",
-    "chatgpt-work-model-picker-selection-mode-v1", "home-composer-mode-v1"
+    "chatgpt-work-model-picker-selection-mode-v1", "home-composer-mode-v1",
+    "flat-project-sidebar-preferences-v1", "sidebar-mcp-destination-discovery-by-account-id-v1",
+    "sidebar-more-menu-seen-mcp-destination-ids-by-account-id-v1",
+    "plugin-oauth-install-reconciliation-by-state-v1"
   ],
   "atomPrefixes": ["thread-client-id-v1:local%3A"],
   "application": ["selected-project", "selected-remote-host-id", "active-remote-project-id"]
