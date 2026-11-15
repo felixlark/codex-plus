@@ -118,3 +118,57 @@ test('business account stubs survive the phone-only service session and preserve
     f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); wire.port1.close(); wire.port2.close();
   }
 });
+
+test('original settings initialization reads all values and retains a read-only subscription across both RPC sessions', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), channel = new MessageChannel();
+  let notify, disposed = 0;
+  class Watch extends rpc.TF {
+    constructor(callback) { super(); this.callback = callback; }
+    [Symbol.dispose]() { this.callback[Symbol.dispose](); disposed++; }
+  }
+  class Settings extends rpc.TF {
+    readAll() { return {values: {'conversation-detail-mode': 'normal'}}; }
+    subscribe(key, callback) {
+      const held = callback.dup(); notify = effective => held({effective}); return new Watch(held);
+    }
+    write() { throw Error('Mac settings writes must remain inaccessible'); }
+  }
+  class Root extends rpc.TF { get services() { return {settings: new Settings()}; } }
+  const server = rpc.ab(channel.port1, new Root()), client = rpc.ab(channel.port2, new rpc.TF());
+  const original = await client.services;
+  const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    assert.equal((await module.appServices.settings.readAll()).values['conversation-detail-mode'], 'normal');
+    let observed;
+    const pending = module.appServices.settings.subscribe('conversation-detail-mode', value => { observed = value.effective; });
+    const lease = await pending;
+    await notify('detailed'); await flush();
+    assert.equal(observed, 'detailed');
+    await assert.rejects(async () => await module.appServices.settings.write('conversation-detail-mode', 'changed'));
+    lease[Symbol.dispose](); pending[Symbol.dispose]();
+    await module.appServices.settings.readAll();
+    for (let i=0;i<8;i++) await flush(); assert.equal(disposed, 1);
+  } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); }
+});
+
+test('phone renderer readiness waits for the original local phase without advancing the Mac startup service', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(); let nativeReads = 0;
+  const forbidden = () => { throw Error('Must not advance Mac startup'); };
+  const module = {appServices: {startup: {whenReady: forbidden, reach: forbidden, isSentryEnabled() { nativeReads++; return false; }}}, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    const pending = module.appServices.startup.whenReady(); let completed = 0;
+    pending.then(() => { completed++; });
+    await module.appServices.startup.reach('first_content_visible');
+    await flush(); assert.equal(completed, 0);
+    await module.appServices.startup.reach('renderer_ready'); await pending;
+    await module.appServices.startup.reach('renderer_ready'); await flush();
+    assert.equal(completed, 1);
+    assert.equal(await module.appServices.startup.isSentryEnabled(), false); assert.equal(nativeReads, 1);
+    await assert.rejects(async () => await module.appServices.startup.reach('invented'));
+    pending[Symbol.dispose]();
+  } finally { f.cleanup(); }
+});

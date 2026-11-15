@@ -11,7 +11,8 @@
     "flat-project-sidebar-preferences-v1", "sidebar-mcp-destination-discovery-by-account-id-v1",
     "sidebar-more-menu-seen-mcp-destination-ids-by-account-id-v1",
     "plugin-oauth-install-reconciliation-by-state-v1",
-    "spaces-workspace-chats-v1", "settings-workspace-owner-v1"
+    "spaces-workspace-chats-v1", "settings-workspace-owner-v1",
+    "appearance-analytics-snapshots-v1", "recent-workspace-files-v3"
   ],
   "atomPrefixes": ["thread-client-id-v1:local%3A"],
   "application": ["selected-project", "selected-remote-host-id", "active-remote-project-id"]

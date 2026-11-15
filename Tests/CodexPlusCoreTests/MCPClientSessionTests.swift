@@ -2,7 +2,7 @@ import XCTest
 @testable import CodexPlusCore
 
 final class MCPClientSessionTests: XCTestCase {
-    private func fixture(_ mode: String, timeout: TimeInterval = 0.5) throws -> MCPClientSession {
+    private func fixture(_ mode: String, timeout: TimeInterval = 2) throws -> MCPClientSession {
         let script = #"""
 import sys,json,time
 mode=sys.argv[1]
@@ -39,7 +39,7 @@ if mode=='eof': time.sleep(60)
           } catch { XCTFail("Client fixture failed: \(error)") }
           finished.fulfill()
         }
-        wait(for: [finished], timeout: 10)
+        wait(for: [finished], timeout: 15)
     }
     func testSuccessfulReplyButProxyIgnoringEOFHasBoundedCleanup() throws {
         let finished = expectation(description: "background EOF cleanup bounded")

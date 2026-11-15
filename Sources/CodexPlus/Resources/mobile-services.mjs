@@ -15,7 +15,11 @@ export function selectMobileServices(original, RpcTarget) {
     readLocalProjects() { return original.projectCatalog.readLocalProjects(); }
     readRemoteProjects() { return original.projectCatalog.readRemoteProjects(); }
   }
-  class Settings extends RpcTarget { read(...args) { return original.settings.read(...args); } }
+  class Settings extends RpcTarget {
+    read(...args) { return original.settings.read(...args); }
+    readAll(...args) { return original.settings.readAll(...args); }
+    subscribe(...args) { return original.settings.subscribe(...args); }
+  }
   class Evaluations extends RpcTarget { readExecutionAssignments(...args) { return original.statsigEvaluations.readExecutionAssignments(...args); } }
   class AppInfo extends RpcTarget { get(...args) { return original.appInfo.get(...args); } }
   // The original host derives this account summary on the Mac. Unlike

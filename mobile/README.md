@@ -22,6 +22,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 断线不重发操作；原端口失效后关闭连接，重新启动页面前重新取快照。发送回执未知需读同一原会话对账。
 - 手机草稿、项目选择和页面偏好独立存入本 App 的 Application Support，原持久化协议收到原子写入回执后才发布更新，不读取或覆盖 Mac 草稿/窗口布局。允许的键随准确原前端登记；未知键明确报告页面状态失败，附件引用使用独立回执。
 - 账户摘要沿原后台 `accountInfo.readAccountInfo()` 读取；`accessInputs.readLocalChatGptAuth()` 不开放给手机，Mac 访问令牌不随摘要转发。
+- 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
 
 ## 当前可执行增量
 

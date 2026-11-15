@@ -75,6 +75,19 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
       }
     }
     const application = new ApplicationState();
+    // The original renderer reports its own phase through this service. The
+    // phone gate never advances the Mac window's startup or invents host timing.
+    let acknowledgeRenderer;
+    const rendererReady = new Promise(resolve => { acknowledgeRenderer = resolve; });
+    class Startup extends rpc.TF {
+      whenReady() { return rendererReady; }
+      reach(phase) {
+        if (!['renderer_ready', 'first_content_visible', 'background_ready'].includes(phase)) throw Error('Unsupported phone startup phase');
+        if (phase === 'renderer_ready') acknowledgeRenderer();
+      }
+      isSentryEnabled() { return original.startup?.isSentryEnabled?.() ?? false; }
+    }
+    const startup = new Startup();
     class ProjectCatalog extends rpc.TF {
       readLocalProjects() { return original.projectCatalog.readLocalProjects(); }
       readRemoteProjects() { return original.projectCatalog.readRemoteProjects(); }
@@ -97,7 +110,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     }
     class Services extends rpc.TF {
       get services() {
-        return {...selectServices(original, rpc.TF), applicationState: application, projectCatalog: new ProjectCatalog(),
+        return {...selectServices(original, rpc.TF), applicationState: application, startup, projectCatalog: new ProjectCatalog(),
           windowTitle: new WindowTitle(), windowNavigation: new WindowNavigation(), clipboard: new Clipboard()};
       }
     }
