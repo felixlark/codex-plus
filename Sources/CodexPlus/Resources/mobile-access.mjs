@@ -104,7 +104,7 @@ export class MobileAccess {
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, probe: this.lastProbe ?? null}; }
+  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, documentCheck: this.documentCheck ?? null, probe: this.lastProbe ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async tick() {
     if (this.busy || this.stopped) return;
@@ -184,6 +184,11 @@ export class MobileAccess {
     if (typeof this.documentRequestId === 'string' && this.documentRequestId === event.requestId) return true;
     const owned = this.sessions.get(sessionId)?.target === this.anchorTarget;
     if (!owned) { this.failure = 'Mobile anchor lost'; this.phase = 'unavailable'; await this.close(); return false; }
+    // Only contract booleans leave this boundary; request URLs and CDP error
+    // text may carry private data and must never enter persistent status.
+    this.documentCheck = {armed: !!this.documentArmed, first: !this.documentRequestId,
+      frame: event.frameId === this.documentFrame, url: event.request?.url === this.documentURL,
+      requestStage: event.responseStatusCode === undefined, requestId: typeof event.requestId === 'string'};
     if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
         event.request?.url === this.documentURL && event.responseStatusCode === undefined && typeof event.requestId === 'string') {
       this.documentRequestId = event.requestId; this.documentArmed = false;
@@ -193,7 +198,7 @@ export class MobileAccess {
             {name: 'Content-Security-Policy', value: "default-src 'none'; base-uri 'none'"}], body: Buffer.from(mobileDocumentHTML(this.config)).toString('base64')});
         if (!this.stopped) this.documentFulfilled = true;
         return true;
-      } catch { /* A claimed Document is never continued after a failed fulfill. */ }
+      } catch { this.documentCheck.fulfillRejected = true; /* Never continue a failed fulfill. */ }
     }
     this.failure = 'Mobile document interception failed'; this.phase = 'unavailable';
     if (typeof event.requestId === 'string') await this.command(sessionId, 'Fetch.failRequest', {requestId: event.requestId, errorReason: 'BlockedByClient'}).catch(() => {});
