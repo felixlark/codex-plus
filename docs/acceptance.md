@@ -336,7 +336,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] 上述文本事务994样本/51.2秒：前台Codex及同一焦点元素保持，0activation，鼠标/剪贴板/人工Codex26050和26131/全部显示器模式、主屏与拓扑不变。仅本案验收文档被改写。
 - [x] 正式入口拒绝认领两个人工Codex窗口；旧recover/exempt/dedicated入口拒绝。暂停取消在途请求，恢复后无旧请求重放，observer计数0、ownedWindows空。
 - [x] 85 Node沿未变mobile40资源证据；57 Swift含短MCP行读和断管写2项新纯进程内回归。正式OCU同生产客户端schema握手0.0376秒。真实交互发现并修复FileHandle短包阻塞/SIGPIPE，以及get_app_state两种观察均false非法；采用screenshot-only注册，弃置图像，诊断仅包含本窗口身份/几何/受限错误首行。
-- [ ] X Chat输入框焦点连续实测：当前等待真实输入框就位，未激活XChat、未输入或发送任何标记。
+- [x] X Chat系统输入焦点专项已由下述 build54 安装版补验通过；build42本次未单独重跑。
 
 证据：`~/Library/Logs/codex-plus/agent-display-20261115/` 中 installed42.json、settings42-open.json、settings42-close-verified/receipt.json、settings42-focus-summary.json、text42-open.json、text42-edit/receipt.json、text42-screen/get_app_state-3.png、text42-restored.json、text42-close/receipt.json、text42-focus-summary.json、protection42.json、swift41.log、pipe41-tests.log、preflight41-live.txt。build42是当前模块的真实安装交互证据；后续集成候选需重新绑定身份/摘要，复用未变模块证据。
 
@@ -356,3 +356,17 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 本批只证明模拟器原会话读取、发送、流式和断线语义。模拟器沿 Mac 网络栈访问其 Tailscale 地址，未验证物理 iPhone 的跨节点 WireGuard 或漫游；原 UI 的其他宿主能力也未全量验收。每次原 Codex 更新须重新绑定准确版本和摘要。
 
 本机私有证据位于 `~/Library/Logs/codex-plus/mobile-port-design-20261114/`：`installed45-ios-assets.json`、`message45-readback.json`、`disconnect45-readback.json`、`message46-readback.json`、三个 message/disconnect ledger、`simulator45-send-stream.mp4`、`simulator45-real-disconnected.png`、`simulator45-recovered-restored.png`、`simulator46-send-stream.mp4`、`simulator46-final-restored.png` 和 `health46.jsonl`、`health46-summary.json` 和两张46流式录屏帧。聊天原文、资源和接入配置不入 Git。
+
+
+## build53/54 准确实例认领与 X Chat 焦点收尾（2026-11-15）
+
+修复多实例应用文件打开回调与枚举首实例不一致造成的窗口误认领。两次已打开检查覆盖所有准确安装路径实例，回调只使用匹配 PID、launchDate 与路径的已知 AX 窗口基线；仅实际 open 调用后新建的进程允许空基线，未知基线不会推断为空。旧人工窗口／标签复用不认领，旧观察器不能跨 PID 复用；不使用首实例预认领，也不允许替代安装。
+
+- [x] 64项 Swift 检查和 native debug 编译通过，包括5项准确实例策略回归；独立候选差异审查无剩余实质发现。原生源码候选82770929，签名build53已安装并核对二进制；后续集成build54的全部原生Swift/C/头文件/Package与该候选一致。
+- [x] 最终实际验收为正式 `/Applications/Codex Plus.app` build54，源码c1c532f，Mach-O UUID `C62DE373-6FC5-3FD0-93F9-C9FCDF94D533`，SHA256 `6867d645d127cecbb01a41506b3555ef63189505c775012ab4a56926bc5acdd1`；冻结二进制一致，严格验签通过。
+- [x] 实际打开／关闭 Agent Settings，打开独立 TextEdit 文件并停放 OCU 隐藏屏6，OCU在准确窗口内编辑、保存并核对落盘，再关闭本案窗口。151样本／8.173秒期间，AXSystemWide 实际焦点始终为同一 X Chat 输入框，CFEqual保持、AX错误0、激活事件0；鼠标、剪贴板、X草稿摘要及长度均不变。
+- [x] 两个人工 Codex 窗口298（中间屏）与406（右屏）的准确ID及几何全程不变，所有显示器模式、主屏与拓扑不变。结束时本案临时窗口关闭，Plus认领列表为空；保留共享OCU显示器及其他任务Agent窗口1486。测量结束后恢复准备前的人工窗口298前台。
+
+该焦点验收以手机连接0、无初始化RPC的隔离现场进行；测试前曾用最小必要前台点击建立X真实输入焦点，此准备动作不计入零激活测量。另一次并发手机初始化时观察到宿主自动激活，因果尚未证实，证据已交移动端原案#578继续处理；本案不据此宣称覆盖全部并发手机流程。未重新验证物理热插拔或实体热键。
+
+本机证据：`~/Library/Logs/codex-plus/agent-display-20261115/` 中 `xfocus-54-1794719478/summary.json`、该目录原始观察流与操作回执、`candidate54-adoption.json`、`final-cleanup54.json`、`swift53.log`、`file-open53-tests.log`。旧右屏归集清理由PR14交付，其不变模块沿用上述build42真实交互证据。
