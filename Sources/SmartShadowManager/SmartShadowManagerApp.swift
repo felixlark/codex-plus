@@ -51,11 +51,18 @@ struct ManagerView: View {
                         Text("小型任务看板尚未实现").foregroundColor(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
-                GroupBox("contextd · taskd") {
+                GroupBox("系统服务") {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(["contextd", "taskd"], id: \.self) { role in
+                        ForEach(["contextd", "taskd", "interactiond"], id: \.self) { role in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(role).font(.headline)
+                                HStack {
+                                    Text(role).font(.headline)
+                                    Spacer()
+                                    Button("启动") { model.control("start", role: role) }
+                                        .disabled(model.busy || model.modules[role]?.installed != true)
+                                    Button("停止") { model.control("stop", role: role) }
+                                        .disabled(model.busy || model.modules[role]?.installed != true)
+                                }
                                 if let observation = model.modules[role] {
                                     Text("进程：\(observation.job) · 配置：\(observation.configuration)")
                                     Text("\(observation.selection) · 运行报告：\(observation.report)")
