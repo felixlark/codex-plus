@@ -9,6 +9,7 @@ import {randomUUID, createHash} from 'node:crypto';
 import {mobileHost} from './mobile-host.mjs';
 import {encodeMobileValue, decodeMobileValue} from './mobile-codec.mjs';
 import {installMobileEndpoint} from './mobile-endpoint.mjs';
+import {installMobileGitOriginRepair} from './mobile-git-origin.mjs';
 
 const run = promisify(execFile);
 const binding = '__codexPlusMobileOutbound';
@@ -41,29 +42,23 @@ export async function probeUnclaimedMobileThread(mobile, threadId, probe) {
   return ok && revision === mobile?.claimRevision && !mobile?.ownsThread(threadId);
 }
 
-// Executed only in the current default context of the captured native target.
 export function mobileAnchorRoute(config) {
   const query = new URLSearchParams({codexPlusMobileAnchor: config.anchor, codexPlusMobileInstance: config.instance});
   return `/local/${config.threadId}?${query}`;
 }
-export function mobileDocumentURL(config) {
-  const url = new URL('app://-/index.html');
-  url.searchParams.set('initialRoute', mobileAnchorRoute(config));
-  url.searchParams.set('codexPlusMobileAnchor', config.anchor);
-  url.searchParams.set('codexPlusMobileDocument', config.instance);
-  return url.href;
-}
-export function mobileDocumentHTML(config) {
-  if (![config.anchor, config.instance].every(value => typeof value === 'string' && /^[a-zA-Z0-9-]+$/.test(value))) throw Error('Invalid mobile document identity');
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'"><meta name="codex-plus-mobile-anchor" content="${config.anchor}"><meta name="codex-plus-mobile-instance" content="${config.instance}"><title>Codex Plus Mobile</title></head><body>Codex Plus 移动接入专用窗口</body></html>`;
-}
-export function prepareMobileAnchor(nonce, instance, url) {
-  return {url: location.href === url, origin: location.origin === 'app://-',
-    blank: document.body?.textContent === 'Codex Plus 移动接入专用窗口', preload: !!window.electronBridge,
-    complete: document.readyState === 'complete', ui: !!document.querySelector('script'),
-    isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce &&
-      document.querySelector('meta[name="codex-plus-mobile-instance"]')?.content === instance &&
-      document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content === "default-src 'none'; base-uri 'none'"};
+
+// Executed only in the current default context of the captured native target.
+export function prepareMobileAnchor(nonce, instance) {
+  const probe = {blank: location.href === 'about:blank', preload: !!window.electronBridge, complete: document.readyState === 'complete', ui: !!document.querySelector('script'), isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce};
+  if (!probe.blank || !probe.preload || !probe.complete || probe.ui) return probe;
+  if (!probe.isolated) {
+    const policy = document.createElement('meta'); policy.httpEquiv = 'Content-Security-Policy'; policy.content = "default-src 'none'";
+    const marker = document.createElement('meta'); marker.name = 'codex-plus-mobile-anchor'; marker.content = nonce;
+    const generation = document.createElement('meta'); generation.name = 'codex-plus-mobile-instance'; generation.content = instance;
+    document.head.append(policy, marker, generation); document.title = 'Codex Plus Mobile';
+    document.body.textContent = 'Codex Plus 移动接入专用窗口';
+  }
+  return {...probe, isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce && document.querySelector('meta[name="codex-plus-mobile-instance"]')?.content === instance};
 }
 
 // Poll the original startup acknowledgement without awaiting it inside a CDP
@@ -97,14 +92,13 @@ export class MobileAccess {
     if (!self?.TailscaleIPs?.includes(config.bind) || String(self.ID) !== String(config.nodeId) || String(self.UserID) !== String(config.userId)) throw Error('Mobile Tailscale identity changed');
     return new MobileAccess(config, options);
   }
-  constructor(config, {cdp, command, sessions, stateFile, publish, scriptPatterns = [], instance = randomUUID()}) {
+  constructor(config, {cdp, command, sessions, stateFile, publish, instance = randomUUID()}) {
     this.config = {...config, instance}; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
-    this.scriptPatterns = scriptPatterns; this.documentURL = mobileDocumentURL(this.config);
     this.stateFile = stateFile; this.claimRevision = 0; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, documentCheck: this.documentCheck ?? null, probe: this.lastProbe ?? null}; }
+  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async tick() {
     if (this.busy || this.stopped) return;
@@ -119,7 +113,7 @@ export class MobileAccess {
       if (!this.anchorTarget && candidates.length) this.anchorTarget = candidates[0].targetId;
       const anchors = targetInfos.filter(t => t.type === 'page' && t.targetId === this.anchorTarget);
       if (this.anchorTarget && !anchors.length) throw Error('Mobile anchor lost');
-      if (anchors.length && !this.isAnchorURL(anchors[0].url)) throw Error('Mobile anchor lost');
+      if (anchors.length && !this.isAnchorURL(anchors[0].url) && anchors[0].url !== 'about:blank') throw Error('Mobile anchor lost');
       if (anchors.length) {
         const session = [...this.sessions].find(([, s]) => s.target === anchors[0].targetId);
         if (!session) return;
@@ -133,30 +127,28 @@ export class MobileAccess {
           // The native sender stays registered; main-frame navigation tears down
           // any old app-host before the phone can register its sole port.
           this.preparationAttempted = true; this.preparingFromLoader = frameTree.frame.loaderId; this.phase = 'preparing-anchor'; this.stage = 'navigate';
-          this.documentFrame = frameTree.frame.id;
-          // Retain the controller's existing Script patterns. This exact owned
-          // session also keeps a Document guard for its entire lifetime.
-          await this.command(session[0], 'Fetch.enable', {patterns: [...this.scriptPatterns, {urlPattern: '*', resourceType: 'Document', requestStage: 'Response'}]});
-          if (this.stopped) return;
-          this.documentArmed = true;
-          const navigation = await this.command(session[0], 'Page.navigate', {url: this.documentURL});
+          const navigation = await this.command(session[0], 'Page.navigate', {url: 'about:blank'});
           if (navigation.errorText) throw Error('Mobile anchor navigation failed');
           return;
         }
         const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
         if (!context) { this.phase = 'anchor-loading'; return; }
         this.stage = 'probe';
-        const result = await this.evaluate(`(${prepareMobileAnchor.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)},${JSON.stringify(this.documentURL)})`, false, context.id);
-        if (this.stopped) return;
-        this.lastProbe = Object.fromEntries(['url', 'origin', 'blank', 'preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
+        const result = await this.evaluate(`(${prepareMobileAnchor.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)})`, false, context.id);
+        this.lastProbe = Object.fromEntries(['blank', 'preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
         this.stage = 'isolation-check';
-        if (!this.documentFulfilled) {
-          if (!this.documentRequestId && result.url && result.complete) throw Error('Mobile anchor Document not intercepted');
-          this.phase = 'anchor-loading'; return;
-        }
         if (!result.complete) { this.phase = 'anchor-loading'; return; }
         if (!result.preload) throw Error('Mobile anchor preload unavailable');
-        if (frameTree.frame.url !== this.documentURL || !result.url || !result.origin || !result.blank || !result.isolated || result.ui) throw Error('Mobile anchor isolation unavailable');
+        if (frameTree.frame.url !== 'about:blank' || !result.blank || !result.isolated || result.ui) throw Error('Mobile anchor isolation unavailable');
+        if (this.stopped) return;
+        if (!this.gitOriginContext) {
+          const isolated = [...session[1].contexts.values()].filter(c => !c.auxData?.isDefault && c.auxData?.frameId === frameTree.frame.id && c.name === 'Electron Isolated Context');
+          if (isolated.length !== 1) throw Error('Mobile anchor preload unavailable');
+          const installed = await this.evaluate(`(${installMobileGitOriginRepair.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)})`, false, isolated[0].id);
+          if (!installed || this.stopped) throw Error('Mobile anchor isolation unavailable');
+          this.gitOriginContext = isolated[0].id;
+        }
+        if (!session[1].contexts.has(this.gitOriginContext)) throw Error('Mobile anchor lost');
         this.anchorPrepared = true;
         this.stage = 'gateway';
         if (!this.gateway) await this.startGateway();
@@ -177,55 +169,10 @@ export class MobileAccess {
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
     } catch (error) {
       const message = String(error?.message ?? '');
-      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|Document not intercepted|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
+      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
       this.phase = 'unavailable'; await this.close();
     }
     finally { this.busy = false; }
-  }
-  // Called by the controller's sole Fetch dispatcher before its Script handler.
-  // Once claimed, no Document in this session may fall back to the vendor UI.
-  async handleDocument(sessionId, event) {
-    if (sessionId !== this.anchorSession || event.resourceType !== 'Document' || !this.preparationAttempted) return false;
-    if (typeof this.documentRequestId === 'string' && this.documentRequestId === event.requestId) return true;
-    const owned = this.sessions.get(sessionId)?.target === this.anchorTarget;
-    if (!owned) { this.failure = 'Mobile anchor lost'; this.phase = 'unavailable'; await this.close(); return false; }
-    // Only contract booleans leave this boundary; request URLs and CDP error
-    // text may carry private data and must never enter persistent status.
-    this.documentCheck = {armed: !!this.documentArmed, first: !this.documentRequestId,
-      frame: event.frameId === this.documentFrame, url: event.request?.url === this.documentURL,
-      responseStage: event.responseStatusCode === 200 && event.responseErrorReason === undefined, requestId: typeof event.requestId === 'string'};
-    try {
-      const url = new URL(event.request?.url);
-      this.documentCheck.urlKind = url.protocol === 'app:' ? 'app' : url.protocol === 'about:' ? 'about' : ['https:', 'http:'].includes(url.protocol) ? 'web' : 'other';
-      this.documentCheck.appIndex = url.protocol === 'app:' && url.hostname === '-' && url.pathname === '/index.html';
-      this.documentCheck.anchorRoute = isAnchorURL(url.href, this.config);
-      const {frameTree} = await this.command(sessionId, 'Page.getFrameTree');
-      this.documentCheck.currentRoot = event.frameId === frameTree.frame.id;
-    } catch { this.documentCheck.inspectionFailed = true; }
-    // The original page may still have an external iframe request queued when
-    // interception is armed. Block that child without cancelling the owned
-    // main-frame replacement. Neither the old nor the new root can use this
-    // branch, and no child Document is ever continued.
-    if (!this.stopped && event.frameId !== this.documentFrame && this.documentCheck.currentRoot === false &&
-        typeof event.requestId === 'string') {
-      await this.command(sessionId, 'Fetch.failRequest', {requestId: event.requestId, errorReason: 'BlockedByClient'});
-      return true;
-    }
-    if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
-        event.request?.url === this.documentURL && event.responseStatusCode === 200 && event.responseErrorReason === undefined && typeof event.requestId === 'string') {
-      this.documentRequestId = event.requestId; this.documentArmed = false;
-      try {
-        await this.command(sessionId, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200,
-          responseHeaders: [{name: 'Content-Type', value: 'text/html; charset=utf-8'}, {name: 'Cache-Control', value: 'no-store'},
-            {name: 'Content-Security-Policy', value: "default-src 'none'; base-uri 'none'"}], body: Buffer.from(mobileDocumentHTML(this.config)).toString('base64')});
-        if (!this.stopped) this.documentFulfilled = true;
-        return true;
-      } catch { this.documentCheck.fulfillRejected = true; /* Never continue a failed fulfill. */ }
-    }
-    this.failure = 'Mobile document interception failed'; this.phase = 'unavailable';
-    if (typeof event.requestId === 'string') await this.command(sessionId, 'Fetch.failRequest', {requestId: event.requestId, errorReason: 'BlockedByClient'}).catch(() => {});
-    await this.close();
-    return true;
   }
   async evaluate(expression, awaitPromise = false, contextId) {
     if (!this.anchorSession || !this.sessions.has(this.anchorSession)) throw Error('Mobile anchor unavailable');
@@ -295,7 +242,7 @@ export class MobileAccess {
       if (!this.current(client)) return;
       client.phase = 'binding';
       const connection = client.connection;
-      const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
+      const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection, anchor: this.config.anchor, instance: this.config.instance})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
       const snapshot = await this.evaluate(source, true);
       if (!this.current(client)) return;
       client.threadId = this.config.threadId; client.phase = 'active'; this.claimRevision++; this.phase = 'connected';
@@ -322,13 +269,21 @@ export class MobileAccess {
     await this.anchorWork(() => this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)}){e.close();delete globalThis.__codexPlusMobileEndpoint;}})()`)).catch(() => {});
     if (!this.stopped) this.phase = 'listening';
   }
-  contextLost(id) { if (id === this.anchorSession && this.gateway) { this.phase = 'anchor-lost'; void this.close(); } }
+  contextLost(id, contextId) {
+    if (id === this.anchorSession && (this.gateway || this.gitOriginContext) &&
+        (contextId === undefined || contextId === this.gitOriginContext || this.sessions.get(id)?.contexts.get(contextId)?.auxData?.isDefault)) {
+      this.phase = 'anchor-lost'; void this.close();
+    }
+  }
   async close() {
     if (this.stopped) return; this.stopped = true;
     try {
       for (const id of this.clients.keys()) await this.release(id);
       this.gateway?.stdin.end();
     } finally {
+      if (this.gitOriginContext && this.sessions.get(this.anchorSession)?.contexts.has(this.gitOriginContext)) {
+        await this.evaluate('globalThis.__codexPlusMobileGitOriginRepair?.close()', false, this.gitOriginContext).catch(() => {});
+      }
       if (this.anchorTarget) await this.cdp.call('Target.closeTarget', {targetId: this.anchorTarget}).catch(() => {});
     }
   }

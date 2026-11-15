@@ -302,14 +302,14 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
-  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,scriptPatterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
+  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
     if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
-    if(message.method==='Runtime.executionContextDestroyed'){const context=sessions.get(message.sessionId)?.contexts.get(message.params.executionContextId);if(context?.auxData?.isDefault)mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
     if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
     if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
@@ -344,7 +344,6 @@ async function main(){
     }
   }
   async function response(sessionId,event){
-    if(await mobile?.handleDocument(sessionId,event)){await publish();return;}
     let body,finished=false;
     const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await command(sessionId,'Fetch.continueRequest',{requestId:event.requestId});finished=true;};
     try{

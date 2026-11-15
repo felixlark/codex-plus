@@ -3,7 +3,7 @@
 export function installMobileEndpoint(config, encode, decode) {
   if (globalThis.__codexPlusMobileEndpoint) throw Error('Mobile endpoint already installed');
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
-  const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map();
+  const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map(), gitRequests = new Map();
   let sequence = 0, appPort, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
@@ -35,8 +35,8 @@ export function installMobileEndpoint(config, encode, decode) {
     port.onmessageerror = () => close();
     port.start();
   }
-  function dispatch(data, transferred = []) {
-    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length ? window : null, origin: location.origin}));
+  function dispatch(data, transferred = [], sameWindow = false) {
+    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length || sameWindow ? window : null, origin: location.origin}));
   }
   const methods = new Set(['sendMessageFromView', 'acknowledgeChunkedMessage', 'sendWorkerMessageFromView', 'connectGitWorker', 'getFastModeRolloutMetrics']);
   async function receive(message) {
@@ -47,14 +47,21 @@ export function installMobileEndpoint(config, encode, decode) {
         if (phone || !methods.has(message.method) || typeof message.id !== 'string') throw Error('Unsupported mobile call');
         let args = decode(message.value);
         if (!Array.isArray(args)) throw Error('Invalid call arguments');
+        if (message.method === 'connectGitWorker') {
+          if (args.length !== 1 || typeof args[0] !== 'string' || !args[0] || gitRequests.has(args[0])) throw Error('Invalid original Git connection');
+          gitRequests.set(args[0], {phase: 'pending'});
+        }
         if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request') {
           const request = args[0].request;
           if (!request || !['string', 'number'].includes(typeof request.id)) throw Error('Invalid original request');
           const id = `${config.connection}:${++sequence}`; ids.set(id, request.id);
           args = [{...args[0], request: {...request, id}}];
         }
-        try { sendValue({kind: 'result', id: message.id, ok: true}, await original[message.method](...args)); }
-        catch { send({kind: 'result', id: message.id, ok: false}); }
+        try {
+          const result = await original[message.method](...args);
+          if (message.method === 'connectGitWorker' && result === false) gitRequests.delete(args[0]);
+          sendValue({kind: 'result', id: message.id, ok: true}, result);
+        } catch { if (message.method === 'connectGitWorker') gitRequests.delete(args[0]); send({kind: 'result', id: message.id, ok: false}); }
         break;
       }
       case 'result': {
@@ -69,8 +76,10 @@ export function installMobileEndpoint(config, encode, decode) {
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
         // This literal same-window handoff on our captured blank page cannot
         // address another window. The original preload checks event.source.
-        if (location.origin !== 'app://-') throw Error('Original app-origin host unavailable');
-        window.postMessage({type: 'connect-app-host', port: channel.port2}, location.origin, [channel.port2]);
+        if (location.href !== 'about:blank' || location.origin !== 'null' ||
+            document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content !== config.anchor ||
+            document.querySelector('meta[name="codex-plus-mobile-instance"]')?.content !== config.instance) throw Error('Original blank host unavailable');
+        window.postMessage({type: 'connect-app-host', port: channel.port2}, '*', [channel.port2]);
         break;
       }
       case 'worker-subscribe': {
@@ -85,11 +94,19 @@ export function installMobileEndpoint(config, encode, decode) {
         port.postMessage(decode(message.value)); break;
       }
       case 'git-port': {
-        if (!phone || typeof message.id !== 'string') throw Error('Invalid Git port');
+        if (!phone || typeof message.id !== 'string' || gitRequests.get(message.metadata?.requestId)?.phase !== 'pending') throw Error('Invalid Git port');
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
+        gitRequests.set(message.metadata.requestId, {phase: 'active', id: message.id});
         dispatch(message.metadata, [channel.port2]); break;
       }
-      case 'event': if (phone) dispatch(decode(message.value)); break;
+      case 'event': if (phone) {
+        const value = decode(message.value);
+        if (value?.type === 'codex_desktop:git-worker-port') {
+          const request = gitRequests.get(value.requestId); if (!request || value.closed !== true) break;
+          gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+          dispatch(value, [], true);
+        } else dispatch(value);
+      } break;
       case 'theme': if (phone) { config.snapshot.theme = message.theme; for (const callback of themes) callback(); } break;
       default: throw Error('Invalid mobile message');
     }
@@ -99,11 +116,17 @@ export function installMobileEndpoint(config, encode, decode) {
     if (phone) return;
     let value = event.data;
     if (!value || typeof value !== 'object') return;
-    if (value.type === 'codex_desktop:git-worker-port' && event.source === window) {
-      if (event.ports.length === 1) {
+    if (value.type === 'codex_desktop:git-worker-port') {
+      const request = gitRequests.get(value.requestId);
+      if (event.source !== window || event.origin !== location.origin || !request) { for (const port of event.ports) port.close(); return; }
+      if (request.phase === 'pending' && value.closed === undefined && event.ports.length === 1) {
         const id = `${config.connection}:git:${++sequence}`;
+        gitRequests.set(value.requestId, {phase: 'active', id});
         send({kind: 'git-port', id, metadata: value}); attachPort(event.ports[0], id);
-      } else sendValue({kind: 'event'}, value);
+      } else if (value.closed === true && event.ports.length === 0) {
+        gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+        sendValue({kind: 'event'}, value);
+      } else for (const port of event.ports) port.close();
       return;
     }
     if (event.source !== null) return;
@@ -145,6 +168,11 @@ export function installMobileEndpoint(config, encode, decode) {
           const allowed = new Set(['mcp-request', 'mcp-response', 'mcp-notification', 'mcp-request-abandon', 'thread-prewarm-start', 'request-app-server-state', 'fetch', 'cancel-fetch']);
           if (!allowed.has(args[0]?.type)) return Promise.reject(Error(`Unsupported phone host message: ${args[0]?.type}`));
         }
+        if (method === 'connectGitWorker') {
+          if (typeof args[0] !== 'string' || !args[0] || gitRequests.has(args[0])) return Promise.reject(Error('Invalid original Git connection'));
+          gitRequests.set(args[0], {phase: 'pending'});
+          return invoke(method, args).then(result => { if (result === false) gitRequests.delete(args[0]); return result; }, error => { gitRequests.delete(args[0]); throw error; });
+        }
         return invoke(method, args);
       }])),
     };
@@ -172,7 +200,7 @@ export function installMobileEndpoint(config, encode, decode) {
   function close() {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
-    calls.clear(); ids.clear();
+    calls.clear(); ids.clear(); gitRequests.clear();
     for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();

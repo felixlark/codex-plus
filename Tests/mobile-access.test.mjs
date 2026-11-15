@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness, mobileAnchorRoute, mobileDocumentURL, mobileDocumentHTML} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
+import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness, mobileAnchorRoute} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
 import {isHumanWindowURL} from '../Sources/CodexPlus/Resources/human-window.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
@@ -46,16 +46,17 @@ test('a duplicate app-host handshake closes instead of replacing the native view
   const window = new EventTarget();
   window.electronBridge = {subscribeToSystemThemeVariant: () => () => {}};
   window.postMessage = (data, origin) => { native.push(data.type); ports.push(data.port); origins.push(origin); };
-  const context = vm.createContext({window, location: {origin: 'app://-', href: 'app://-/index.html'}, MessageChannel, MessageEvent: EventMessage, CustomEvent, MessagePort,
+  const document = {querySelector: selector => ({content: selector.includes('instance') ? 'fixture' : 'anchor'})};
+  const context = vm.createContext({window, document, location: {origin: 'null', href: 'about:blank'}, MessageChannel, MessageEvent: EventMessage, CustomEvent, MessagePort,
     __codexPlusMobileOutbound: text => sent.push(JSON.parse(text))});
-  vm.runInContext(`(${installMobileEndpoint.toString()})({side:'host',connection:'test'},${encodeMobileValue.toString()},${decodeMobileValue.toString()})`, context);
+  vm.runInContext(`(${installMobileEndpoint.toString()})({side:'host',connection:'test',anchor:'anchor',instance:'fixture'},${encodeMobileValue.toString()},${decodeMobileValue.toString()})`, context);
   const endpoint = context.__codexPlusMobileEndpoint;
   endpoint.receive(JSON.stringify({connection: 'test', kind: 'port-open', id: 'one'}));
   await new Promise(resolve => setTimeout(resolve, 10));
   endpoint.receive(JSON.stringify({connection: 'test', kind: 'port-open', id: 'two'}));
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(native, ['connect-app-host']);
-  assert.deepEqual(origins, ['app://-']);
+  assert.deepEqual(origins, ['*']);
   assert.ok(endpoint.inspect().closed);
   assert.ok(sent.some(event => event.kind === 'fatal'));
   for (const port of ports) port.close();
@@ -109,155 +110,72 @@ test('revoked binding installation and old fatal cannot replace or release its s
   assert.equal(manager.clients.get('B'), b);
 });
 
-function anchorHarness({fulfillError = false} = {}) {
+function blankHarness() {
   const commands = [], contexts = new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]]);
   const state = {loader: 'old', target: 'owned', starts: 0, probes: [], ready: false};
   const manager = new MobileAccess({threadId: 'thread', anchor: 'anchor'}, {
-    instance: 'fixture', scriptPatterns: [{urlPattern: 'app://-/assets/original.js', resourceType: 'Script', requestStage: 'Response'}],
-    cdp: {call: async (method, args) => {
+    instance: 'fixture', cdp: {call: async (method, args) => {
       commands.push({method, params: args});
       return method === 'Target.getTargets' ? {targetInfos: [{type: 'page', targetId: state.target, url: state.url}]} : {};
-    }},
-    command: async (session, method, params) => {
+    }}, command: async (session, method, params) => {
       commands.push({session, method, params});
-      if (method === 'Fetch.enable') await state.fetchGate;
-      if (method === 'Fetch.fulfillRequest' && fulfillError) throw Error('Controlled document failure');
-      if (method === 'Page.getFrameTree') {
-        state.onFrameTree?.();
-        return {frameTree: {frame: {id: state.rootFrame ?? 'root', loaderId: state.loader, url: state.frameURL}}};
-      }
+      if (method === 'Page.getFrameTree') return {frameTree: {frame: {id: 'root', loaderId: state.loader, url: state.frameURL}}};
       return {};
-    },
-    sessions: new Map([['anchor', {target: 'owned', frame: 'root', contexts}]]), stateFile: '/unused', publish: async () => {},
+    }, sessions: new Map([['anchor', {target: 'owned', frame: 'root', contexts}]]), stateFile: '/unused', publish: async () => {},
   });
   const initial = new URL('app://-/index.html'); initial.searchParams.set('initialRoute', mobileAnchorRoute(manager.config));
   state.url = state.frameURL = initial.href;
-  manager.evaluate = async (_, __, context) => {
+  manager.evaluate = async (source, _, context) => {
     state.probes.push(context);
-    return state.probe ?? {url: true, origin: true, blank: true, complete: state.ready, preload: true, isolated: true, ui: false};
+    if (source.includes('installMobileGitOriginRepair')) return state.repair !== false;
+    return {blank: true, complete: state.ready, preload: true, isolated: true, ui: false};
   };
-  manager.startGateway = async () => { state.starts++; manager.gateway = {stdin: {end() { state.gatewayClosed = true; }}}; };
+  manager.startGateway = async () => { state.starts++; manager.gateway = {stdin: {end() {}}}; };
   const commit = () => {
-    state.loader = 'new'; state.url = state.frameURL = manager.documentURL;
+    state.loader = 'new'; state.url = state.frameURL = 'about:blank';
     contexts.clear(); contexts.set(2, {id: 2, auxData: {isDefault: true, frameId: 'root'}});
+    contexts.set(3, {id: 3, name: 'Electron Isolated Context', auxData: {isDefault: false, frameId: 'root'}});
   };
-  const document = extra => ({resourceType: 'Document', frameId: 'root', requestId: 'document-1', responseStatusCode: 200, request: {url: manager.documentURL}, ...extra});
-  return {manager, state, commands, contexts, commit, document};
+  return {manager, state, commands, contexts, commit};
 }
 
-test('the owned document waits for Fetch acknowledgement, fulfillment and a new original app-origin loader', async () => {
-  const h = anchorHarness(); let release;
-  h.state.fetchGate = new Promise(resolve => { release = resolve; });
-  const preparing = h.manager.tick();
-  while (!h.commands.some(c => c.method === 'Fetch.enable')) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(h.commands.filter(c => c.method === 'Page.navigate').length, 0);
-  release(); await preparing;
-  const patterns = h.commands.find(c => c.method === 'Fetch.enable').params.patterns;
-  assert.equal(patterns[0].resourceType, 'Script'); assert.equal(patterns[1].resourceType, 'Document'); assert.equal(patterns[1].requestStage, 'Response');
-  assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), [h.manager.documentURL]);
+test('the captured blank host repairs only its original preload world before opening the gateway', async () => {
+  const h = blankHarness(); await h.manager.tick();
+  assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), ['about:blank']);
   await h.manager.tick(); assert.equal(h.state.probes.length, 0);
-  h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0); assert.equal(h.state.probes.length, 1);
-  assert.equal(await h.manager.handleDocument('anchor', h.document()), true);
-  const fulfilled = h.commands.find(c => c.method === 'Fetch.fulfillRequest').params;
-  assert.equal(fulfilled.responseCode, 200); assert.ok(Buffer.from(fulfilled.body, 'base64').toString().includes('codex-plus-mobile-instance'));
-  await h.manager.handleDocument('anchor', h.document());
-  assert.equal(h.commands.filter(c => c.method === 'Fetch.fulfillRequest').length, 1);
-  await h.manager.tick(); assert.equal(h.state.starts, 0);
+  h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0);
   h.state.ready = true; await h.manager.tick(); await h.manager.tick();
-  assert.equal(h.state.starts, 1); assert.equal(h.manager.status().anchorReady, true);
-  assert.deepEqual(h.state.probes, [2, 2, 2, 2]);
+  assert.equal(h.state.starts, 1); assert.equal(h.manager.gitOriginContext, 3);
+  assert.equal(h.state.probes.filter(id => id === 3).length, 1);
+  assert.equal(h.commands.some(c => c.method === 'Page.createIsolatedWorld'), false);
 });
 
-test('unexpected Documents and failed fulfillment never resume the original UI', async () => {
-  for (const variant of ['url', 'frame', 'response-stage', 'response-error', 'non-200', 'fulfill']) {
-    const h = anchorHarness({fulfillError: variant === 'fulfill'}); await h.manager.tick();
-    if (variant === 'frame') h.state.rootFrame = 'other';
-    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: undefined} : variant === 'response-error' ? {responseErrorReason: 'Failed'} : variant === 'non-200' ? {responseStatusCode: 302} : {});
-    assert.equal(await h.manager.handleDocument('anchor', event), true);
-    await h.manager.tick();
-    assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
-    assert.equal(h.commands.filter(c => c.method === 'Fetch.failRequest').length, 1);
-    assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
-    assert.equal(h.commands.filter(c => c.method === 'Fetch.continueRequest').length, 0);
+test('a missing, ambiguous or failed preload repair never opens the gateway', async () => {
+  for (const variant of ['missing', 'ambiguous', 'failed']) {
+    const h = blankHarness(); await h.manager.tick(); h.commit(); h.state.ready = true;
+    if (variant === 'missing') h.contexts.delete(3);
+    if (variant === 'ambiguous') h.contexts.set(4, {id: 4, name: 'Electron Isolated Context', auxData: {isDefault: false, frameId: 'root'}});
+    if (variant === 'failed') h.state.repair = false;
+    await h.manager.tick(); assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
+    assert.deepEqual(h.commands.filter(c => c.method === 'Target.closeTarget').map(c => c.params.targetId), ['owned']);
   }
 });
 
-test('an uncaptured complete original document closes its own target without opening the gateway', async () => {
-  const h = anchorHarness(); await h.manager.tick(); h.commit(); h.state.ready = true;
-  h.state.probe = {url: true, complete: true, preload: true, origin: true, blank: false, isolated: false, ui: true};
-  await h.manager.tick();
-  assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
-  assert.equal(h.manager.failure, 'Mobile anchor Document not intercepted');
-  assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
-});
-
-test('a fulfilled owned page cannot reload the vendor Document while a phone is connected', async () => {
-  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
-  h.commit(); h.state.ready = true; await h.manager.tick();
-  assert.equal(await h.manager.handleDocument('anchor', h.document({requestId: 'reload'})), true);
-  assert.equal(h.manager.stopped, true); assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
-  assert.equal(h.commands.filter(c => c.method === 'Fetch.fulfillRequest').length, 1);
-});
-
-test('queued child Documents are blocked while the exact owned root still completes', async () => {
-  const h = anchorHarness(); await h.manager.tick();
-  const child = h.document({frameId: 'child', requestId: 'child-1', request: {url: 'https://external.invalid/private'}});
-  assert.equal(await h.manager.handleDocument('anchor', child), true);
-  assert.equal(h.manager.stopped, false); assert.equal(h.manager.documentArmed, true);
-  assert.equal(h.manager.status().documentCheck.currentRoot, false);
-  assert.equal(JSON.stringify(h.manager.status()).includes('external.invalid'), false);
-  assert.deepEqual(h.commands.filter(c => c.method === 'Fetch.failRequest').map(c => c.params.requestId), ['child-1']);
-  assert.equal(h.commands.filter(c => c.method === 'Fetch.continueRequest').length, 0);
-  await h.manager.handleDocument('anchor', h.document()); h.commit(); h.state.ready = true; await h.manager.tick();
-  assert.equal(h.state.starts, 1); assert.equal(h.manager.anchorPrepared, true);
-});
-
-test('foreign sessions remain untouched and a replaced sticky target is never adopted', async () => {
-  const h = anchorHarness(); await h.manager.tick();
-  const before = h.commands.length;
-  assert.equal(await h.manager.handleDocument('human', h.document()), false); assert.equal(h.commands.length, before);
-  h.state.target = 'replacement'; await h.manager.tick();
-  assert.equal(h.manager.anchorTarget, 'owned'); assert.equal(h.manager.stopped, true);
+test('losing the repaired preload context closes only the sticky target and never adopts a replacement', async () => {
+  const h = blankHarness(); await h.manager.tick(); h.commit(); h.state.ready = true; await h.manager.tick();
+  h.manager.contextLost('human', 3); assert.equal(h.manager.stopped, false);
+  h.manager.contextLost('anchor', 3); await h.manager.anchorQueue;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.manager.stopped, true);
   assert.deepEqual(h.commands.filter(c => c.method === 'Target.closeTarget').map(c => c.params.targetId), ['owned']);
 });
 
-test('per-controller document identities exclude orphan anchors and all human enhancement entry points', async () => {
-  const h = anchorHarness(), old = {...h.manager.config, instance: 'previous'};
-  assert.ok(isAnchorURL(h.manager.documentURL, h.manager.config));
-  assert.equal(isAnchorURL(mobileDocumentURL(old), h.manager.config), false);
-  assert.equal(isHumanWindowURL(h.manager.documentURL), false); assert.equal(isHumanWindowURL(h.state.url), false);
-  h.state.url = h.state.frameURL = mobileDocumentURL(old); await h.manager.tick();
-  assert.equal(h.manager.anchorTarget, undefined); assert.equal(h.commands.some(c => c.method === 'Page.navigate'), false);
+test('per-controller nonce routes exclude orphan anchors and human enhancement entry points', () => {
+  const h = blankHarness(), old = {...h.manager.config, instance: 'previous'};
+  const url = new URL('app://-/index.html'); url.searchParams.set('initialRoute', mobileAnchorRoute(old));
+  assert.equal(isAnchorURL(url.href, h.manager.config), false);
+  assert.equal(isHumanWindowURL(h.state.url), false);
 });
-
-test('an unisolated new document closes even after the expected response was fulfilled', async () => {
-  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
-  h.commit(); h.state.probe = {url: true, origin: false, blank: true, complete: true, preload: true, isolated: true, ui: false};
-  await h.manager.tick(); assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
-});
-
-test('the new context wins when navigation commits during frame-tree lookup', async () => {
-  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
-  h.state.onFrameTree = h.commit; h.state.ready = true;
-  await h.manager.tick(); assert.deepEqual(h.state.probes, [2]); assert.equal(h.state.starts, 1);
-});
-
-test('the app-origin probe requires the already fulfilled marker, CSP, preload and script-free body', () => {
-  const config = {threadId: 'thread', anchor: 'anchor', instance: 'fixture'}, url = mobileDocumentURL(config);
-  const html = mobileDocumentHTML(config); assert.equal(/<script/i.test(html), false);
-  assert.throws(() => mobileDocumentHTML({...config, anchor: '<script>'}));
-  for (const change of [{}, {origin: 'null'}, {url: 'about:blank'}, {script: true}, {preload: false}, {marker: 'other'}, {policy: 'default-src *'}]) {
-    const document = {readyState: 'complete', body: {textContent: 'Codex Plus 移动接入专用窗口'},
-      querySelector: selector => selector === 'script' ? (change.script ? {} : null) :
-        {content: selector.includes('http-equiv') ? change.policy ?? "default-src 'none'; base-uri 'none'" : selector.includes('instance') ? 'fixture' : change.marker ?? 'anchor'},
-    };
-    const context = vm.createContext({document, window: {electronBridge: change.preload === false ? undefined : {}}, location: {href: change.url ?? url, origin: change.origin ?? 'app://-'}});
-    const probe = vm.runInContext(`(${prepareMobileAnchor.toString()})('anchor','fixture',${JSON.stringify(url)})`, context);
-    const accepted = probe.url && probe.origin && probe.blank && probe.complete && probe.preload && probe.isolated && !probe.ui;
-    assert.equal(accepted, Object.keys(change).length === 0);
-  }
-});
-
 
 test('mobile route claims migrate only on the authenticated current connection and revoke awaited guards', async () => {
   const manager = new MobileAccess({threadId: 'A'}, {cdp: {}, sessions: new Map(), stateFile: '/unused', publish: async () => {}});
