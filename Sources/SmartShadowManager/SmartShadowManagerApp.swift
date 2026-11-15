@@ -5,6 +5,11 @@ import CodexPlusCore
 
 @MainActor final class ManagerDelegate: NSObject, NSApplicationDelegate {
     weak var model: ManagerModel?
+    var reopenManager: (() -> Void)?
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { reopenManager?() }
+        return true
+    }
     func applicationWillTerminate(_ notification: Notification) { model?.cancel() }
 }
 
@@ -12,8 +17,8 @@ import CodexPlusCore
     @NSApplicationDelegateAdaptor(ManagerDelegate.self) private var delegate
     @StateObject private var model = ManagerModel()
     var body: some Scene {
-        WindowGroup("SmartShadow") {
-            ManagerView(model: model)
+        WindowGroup("SmartShadow", id: "manager") {
+            ManagerView(model: model, registerReopen: { delegate.reopenManager = $0 })
                 .onAppear { delegate.model = model }
         }
         Window("任务看板", id: "task-board") { TaskBoardView() }.defaultSize(width: 460, height: 380)
@@ -26,6 +31,7 @@ import CodexPlusCore
 struct ManagerView: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: ManagerModel
+    let registerReopen: (@escaping () -> Void) -> Void
     @StateObject private var catalog = CodexWorkspaceDisplayCatalog()
     @State private var login = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -108,7 +114,10 @@ struct ManagerView: View {
             }.padding(24)
         }
         .frame(minWidth: 580, idealWidth: 680, minHeight: 520, idealHeight: 740)
-        .onAppear { model.start() }
+        .onAppear {
+            registerReopen { openWindow(id: "manager") }
+            model.start()
+        }
     }
     private var accessibilityStatus: String {
         guard let permissions = model.status["permissions"] as? [String: Any],
