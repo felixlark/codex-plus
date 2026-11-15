@@ -73,7 +73,10 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
       read(key) { return {value: applicationKeys.has(key) && Object.hasOwn(state.application, key) ? state.application[key] : undefined}; }
       async write(key, value) {
         if (!applicationKeys.has(key)) throw Error(`Unsupported phone application state: ${key}`);
-        await enqueue(() => commit(next => { next.application[key] = value; }));
+        await enqueue(async () => {
+          try { return await commit(next => { next.application[key] = value; }); }
+          catch (error) { error.phoneStateKey = key; throw error; }
+        });
         dispatch({type: 'global-state-updated', keys: [key]}); return {success: true};
       }
     }

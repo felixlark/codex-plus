@@ -179,7 +179,7 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
                 // the associated draft, account data or state value.
                 if let key = value["key"] as? String, key.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil {
                     NSLog("CodexMobile local state failed at key: %@", key)
-                }
+                } else { NSLog("CodexMobile local state failure has no static key") }
                 let alert = UIAlertController(title: "页面状态未能保存", message: "请保留当前页面，重新连接前先核对草稿。", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "好", style: .default))
                 if presentedViewController == nil { present(alert, animated: true) }
@@ -194,7 +194,13 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
             default: throw NSError(domain: "MobileLocal", code: 3)
             }
             reply["ok"] = true
-        } catch { reply["ok"] = false }
+        } catch {
+            let failure = error as NSError
+            if failure.domain.range(of: #"^[a-zA-Z][a-zA-Z0-9_.-]*$"#, options: .regularExpression) != nil {
+                NSLog("CodexMobile local operation failed: %@ %@ %d", operation, failure.domain, failure.code)
+            }
+            reply["ok"] = false
+        }
         guard let web, generation == epoch, let bytes = try? JSONSerialization.data(withJSONObject: [reply]), let literal = String(data: bytes, encoding: .utf8) else { return }
         web.evaluateJavaScript("globalThis.__codexPlusMobileLocal?.resolve(\(literal)[0])") { [weak self, weak web] _, error in
             guard navigate, error == nil, let self, self.generation == epoch, self.web === web else { return }
