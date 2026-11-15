@@ -26,6 +26,8 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
 - 权限默认值就绪沿原 `statsigEvaluations.subscribe()` 的真实 publication 三态与可释放订阅确定，发送链只读查询 `hasReadyExecutionAssignments()`；不以空对象替代快照、不开放评估写入。缺少该订阅会使原界面停在配置延迟队列，Mac 投递函数返回不能证明消息已提交。
 - 原模型缓存只允许 `chatgpt-work-models-v1/` 后两个非空编码身份段；输入历史、会话活动时间与摘要按准确静态键登记，均留手机私有原子文件。身份段和缓存值不进诊断日志。
+- 原会话页的输入自动解决服务以可传值对象提供真实 `snooze`，不声明两个平台可选的 Mac surface/focus 方法。手机展示与输入不冒充 Mac 专用窗口焦点；Mac 原自动解决时序保留，手机活动抑制定时器尚未接入。
+- 原 query warm seed 只登记仓库 metadata 的身份/仓库 JSON 三元组和两类 Space metadata 的身份双段；沿原投影移除 `checkpoint`，不开放通用 query key。最近个人文件只存原列表元数据，不下载正文。原 `heartbeat-thread-permissions-by-id` 保存真实权限投影，参与恢复 fallback，保留原真实权限优先与服务端默认分支，不生成新授权或提升权限。
 - 原网页请求使用现役 `httpFetch`，身份注入仍留 Mac；返回体在手机本地会话逐块建立流归属，消费或取消后释放原租约，只取消本手机仍持有的请求。
 - iOS 资源适配移除原前端的旧 `hatch-pet` 桌面迁移触发钩子，避免手机初始化重复写 Mac 技能配置；Mac 原厂资源不变。手机缓存可包含身份 ID、页面预览和 profile 业务数据，不把这些缓存当作账号访问令牌。
 

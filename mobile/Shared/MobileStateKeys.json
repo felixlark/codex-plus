@@ -42,7 +42,9 @@
     "pull-request-attachment-records-v3",
     "prompt-history",
     "thread-user-activity-times-v1",
-    "thread-descriptions-v1"
+    "thread-descriptions-v1",
+    "space-personal-recents-cache-v1",
+    "heartbeat-thread-permissions-by-id"
   ],
   "atomPrefixes": [
     "thread-client-id-v1:local%3A",
@@ -59,5 +61,12 @@
   ],
   "identityPathAtomPrefixes": [
     "chatgpt-work-models-v1/"
+  ],
+  "identityTripleAtomPrefixes": [
+    "query-seed:cloud-v2-environment-repository-v1:"
+  ],
+  "identityColonAtomPrefixes": [
+    "query-seed:space-list-v2:",
+    "query-seed:space-pages-v1:"
   ]
 }

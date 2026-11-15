@@ -15,11 +15,17 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
       try { return ids.length === 2 && ids.every(id => { const decoded = decodeURIComponent(id); encodeURIComponent(decoded); return id.length > 0 && decoded.length > 0; }); }
       catch { return false; }
     })) return true;
-    return (keys.identityAtomPrefixes ?? []).some(prefix => {
+    if ((keys.identityColonAtomPrefixes ?? []).some(prefix => {
       if (!key.startsWith(prefix)) return false;
-      try { const ids = JSON.parse(key.slice(prefix.length)); return Array.isArray(ids) && ids.length === 2 && ids.every(id => typeof id === 'string' && id.length > 0); }
+      const ids = key.slice(prefix.length).split(':');
+      try { return ids.length === 2 && ids.every(id => id.length > 0 && encodeURIComponent(id).length > 0); }
       catch { return false; }
-    });
+    })) return true;
+    return [[keys.identityAtomPrefixes ?? [], 2], [keys.identityTripleAtomPrefixes ?? [], 3]].some(([prefixes, count]) => prefixes.some(prefix => {
+      if (!key.startsWith(prefix)) return false;
+      try { const ids = JSON.parse(key.slice(prefix.length)); return Array.isArray(ids) && ids.length === count && ids.every(id => typeof id === 'string' && id.length > 0 && encodeURIComponent(id).length > 0); }
+      catch { return false; }
+    }));
   }
   let updates = Promise.resolve();
   function enqueue(operation) {

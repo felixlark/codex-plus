@@ -102,6 +102,12 @@ export function selectMobileServices(original, RpcTarget) {
   if (original.appInfo) services.appInfo = new AppInfo();
   if (original.accountInfo) services.accountInfo = new AccountInfo();
   if (original.clientCoordination) services.clientCoordination = new Coordination();
+  // This is a value object so optional methods are absent on the original
+  // renderer, rather than opaque RPC paths that fail only when invoked. Mac
+  // surface/focus methods cannot represent a phone's presentation lifecycle.
+  if (original.requestUserInputAutoResolution) services.requestUserInputAutoResolution = {
+    snooze: (...args) => original.requestUserInputAutoResolution.snooze(...args),
+  };
   if (original.httpFetch) { const http = new HttpFetch(); services.httpFetch = http; Object.defineProperty(services, Symbol.dispose, {value: () => http[Symbol.dispose]()}); }
   return services;
 }

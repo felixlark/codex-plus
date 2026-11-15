@@ -136,6 +136,25 @@ test('model cache uses exactly two encoded identity segments and personal histor
   } finally { f.cleanup(); }
 });
 
+test('only reviewed repository and Space metadata seed formats persist', async () => {
+  const f = setup();
+  try {
+    const entries = [
+      ['query-seed:cloud-v2-environment-repository-v1:["account","user","repo:one"]', {repository_full_name: 'own/repo'}],
+      ['query-seed:space-list-v2:user:account', {items: [{id: 'space'}]}],
+      ['query-seed:space-pages-v1:user:account', {items: [{id: 'page'}]}],
+    ];
+    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
+    await flush(); await flush(); await flush();
+    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
+    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
+    for (const key of ['query-seed:cloud-v2-environment-repository-v1:["a","u"]', 'query-seed:cloud-v2-environment-repository-v1:["a","u",1]', 'query-seed:cloud-v2-environment-repository-v1:["a","u",""]', 'query-seed:space-list-v2:u', 'query-seed:space-pages-v1:u:a:extra', 'query-seed:space-pages-v1:u:', 'query-seed:browser-environments-v1:["a","u"]', 'query-seed:unknown:u:a']) f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
+    await flush(); await flush(); await flush();
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, entries.length);
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-warning').length, 8);
+  } finally { f.cleanup(); }
+});
+
 test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
   const rpc = await rpcLibrary(t); if (!rpc) return;
   const f = setup(), wire = new MessageChannel();
@@ -253,6 +272,30 @@ test('original evaluation publication reaches permission readiness with its real
     lease[Symbol.dispose](); pending[Symbol.dispose]();
     await module.appServices.statsigEvaluations.hasReadyExecutionAssignments();
     for (let i=0;i<8;i++) await flush(); assert.equal(disposed, 1);
+  } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); }
+});
+
+test('phone input-resolution exposes real snooze while optional Mac surface methods are absent', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), channel = new MessageChannel(), calls = [];
+  class Resolution extends rpc.TF {
+    setConversationPresented() { throw Error('Must not impersonate Mac surface'); }
+    recordConversationActivity() { throw Error('Must not impersonate Mac focus'); }
+    snooze(request) { calls.push(request); }
+  }
+  class Root extends rpc.TF { get services() { return {requestUserInputAutoResolution: new Resolution()}; } }
+  const server = rpc.ab(channel.port1, new Root()), client = rpc.ab(channel.port2, new rpc.TF());
+  const original = await client.services;
+  const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    const service = module.appServices.requestUserInputAutoResolution;
+    assert.equal(service.setConversationPresented, undefined);
+    assert.equal(service.recordConversationActivity, undefined);
+    service.setConversationPresented?.({conversationId: 'own', hostId: 'local', presented: true});
+    service.recordConversationActivity?.({conversationId: 'own', hostId: 'local'});
+    const request = {conversationId: 'own', hostId: 'local', requestId: 'real-pending-input'};
+    await service.snooze(request); assert.deepEqual(calls, [request]);
   } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); }
 });
 

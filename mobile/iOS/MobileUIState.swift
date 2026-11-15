@@ -17,10 +17,16 @@ struct MobileUIState {
                       guard key.hasPrefix(prefix) else { return false }
                       let ids = key.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
                       return ids.count == 2 && ids.allSatisfy { !$0.isEmpty && String($0).removingPercentEncoding?.isEmpty == false }
-                  }) || (keys["identityAtomPrefixes"] ?? []).contains(where: { prefix in
-                      guard key.hasPrefix(prefix), let bytes = String(key.dropFirst(prefix.count)).data(using: .utf8),
-                            let ids = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
+                  }) || (keys["identityColonAtomPrefixes"] ?? []).contains(where: { prefix in
+                      guard key.hasPrefix(prefix) else { return false }
+                      let ids = key.dropFirst(prefix.count).split(separator: ":", omittingEmptySubsequences: false)
                       return ids.count == 2 && ids.allSatisfy({ !$0.isEmpty })
+                  }) || [("identityAtomPrefixes", 2), ("identityTripleAtomPrefixes", 3)].contains(where: { group, count in
+                      (keys[group] ?? []).contains(where: { prefix in
+                          guard key.hasPrefix(prefix), let bytes = String(key.dropFirst(prefix.count)).data(using: .utf8),
+                                let ids = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
+                          return ids.count == count && ids.allSatisfy({ !$0.isEmpty })
+                      })
                   })
               }), Set(application.keys).isSubset(of: Set(keys["application"] ?? [])),
               JSONSerialization.isValidJSONObject(state) else { throw NSError(domain: "MobileUIState", code: 1) }
