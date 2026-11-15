@@ -59,7 +59,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     // phone owns its document/keyboard lifecycle and never changes Mac state.
     if (new Set(['ready', 'app-shell-shortcut-state-changed', 'keyboard-layout-map-changed', 'electron-window-zoom-changed',
       'electron-set-window-mode', 'electron-set-badge-count', 'power-save-blocker-set', 'tray-menu-threads-changed',
-      'electron-desktop-features-changed']).has(message?.type)) return {handled: true};
+      'electron-desktop-features-changed', 'remote-hosted-pip-active-thread-changed']).has(message?.type)) return {handled: true};
     return {handled: false};
   }
   const owned = [];
