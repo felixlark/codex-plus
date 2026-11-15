@@ -12,6 +12,7 @@ final class ToolWindowRouter {
         var known: [AXUIElement]
         var documents: Set<URL>?
         var defaultChrome = false
+        var defaultKnown: [AXUIElement] = []
         init(app: NSRunningApplication, observer: AXObserver, known: [AXUIElement], documents: Set<URL>?) {
             self.app = app; self.observer = observer; self.known = known; self.documents = documents
         }
@@ -123,7 +124,7 @@ final class ToolWindowRouter {
         guard enabled, !stopping, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
         if let existing = watches[app.processIdentifier] {
-            if defaultChrome && !existing.defaultChrome { existing.known = [] }
+            if defaultChrome && !existing.defaultChrome { existing.defaultKnown = [] }
             existing.defaultChrome = existing.defaultChrome || defaultChrome
             // Each request contributes its own manual-window baseline. Reusing
             // an observer must never make a later request claim those windows.
@@ -178,7 +179,8 @@ final class ToolWindowRouter {
             watch.documents = ToolWindowPolicy.remainingClaims(claims, knownDocuments: Set(watch.known.compactMap(document)))
             if !ToolWindowPolicy.retainsObservation(defaultChrome: watch.defaultChrome, documents: watch.documents) { removeWatch(watch.app.processIdentifier); return }
         }
-        for window in windows(watch.app) where !watch.known.contains(where: { CFEqual($0, window) }) {
+        let handled = watch.defaultChrome ? watch.defaultKnown : watch.known
+        for window in windows(watch.app) where !handled.contains(where: { CFEqual($0, window) }) {
             if watch.defaultChrome {
                 guard value(window, kAXSubroleAttribute) as? String == "AXStandardWindow" else { continue }
             } else if let documents = watch.documents {
@@ -191,6 +193,7 @@ final class ToolWindowRouter {
             }
             if place(window, pid: watch.app.processIdentifier) {
                 watch.known.append(window)
+                if watch.defaultChrome { watch.defaultKnown.append(window) }
                 if watch.documents != nil, let raw = value(window, kAXDocumentAttribute) as? String, let url = URL(string: raw) {
                     watch.documents?.remove(url.standardizedFileURL)
                 }
