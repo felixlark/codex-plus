@@ -26,7 +26,7 @@
 
 ## 精简后恢复边界
 
-用户2026-11-15已批准恢复开发、相称检查、合并、既定安装和真实验收。管理App最小启停/状态由#613交付，服务安装切换保持唯一操作者。现役 Plus74、iOS53、原窗口、草稿及历史未知结果保持。未来获准切换前按[精简交接](workbench-simplification.md)核对旧完整工作台，不能用删除后的源码接管或结算旧请求。
+用户2026-11-15已批准恢复开发、相称检查、合并、既定安装和真实验收。管理App最小启停/状态由#613交付，服务安装切换保持唯一操作者。当前已安装 Plus78、iOS53；旧完整工作台已按原身份确认消失，原窗口、草稿及历史未知结果保留。精简阶段的Plus74冻结与切换前置见[历史交接](workbench-simplification.md)，不用于冒认当前版本或结算旧请求。
 
 ## 薄生命周期管理
 
@@ -36,7 +36,7 @@
 
 每次打开或手动刷新，创建一个只读 MCP 连接，完成 initialize 与 tasks_read 后关闭。HMAC 和凭据只在原 LocalMcpClient/Vault 内处理；Swift 不读取密钥、不写业务状态。关闭看板只取消本次只读客户端，不停止 taskd、手机宿主或 Codex Run。
 
-以 repository/number 标识事项；重复身份拒绝显示，输入版本变化后仍保留明确绑定的在途尝试和成果，标注“输入版本已更新”，避免成果评论更新 Issue 后隐藏原 Run。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。4102安装版仅覆盖taskd登记范围。4103候选按[统一统计合同](designs/unified-current-tasks.md)加入本机Codex当前工作，taskd精确host/thread/run绑定才去重；来源或关联不完整时标记暂列项。界面提供原案和成果链接。
+以 repository/number 标识事项；重复身份拒绝显示，输入版本变化后仍保留明确绑定的在途尝试和成果，标注“输入版本已更新”，避免成果评论更新 Issue 后隐藏原 Run。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。4102安装版仅覆盖taskd登记范围；4103已安装验收，按[统一统计合同](designs/unified-current-tasks.md)加入本机Codex当前工作，taskd精确host/thread/run绑定才去重。来源或关联不完整时标记暂列项，界面提供原案和成果链接；4105保留该看板实现。
 
 安装版 4101 已经由正式 taskd 入口读到 #611 的真实执行中任务。任务数仅覆盖登记范围，成果回执仍须单独核验。
 

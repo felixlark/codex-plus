@@ -10,7 +10,7 @@ Plus 77 首次真实停机发现两项缺陷：小写request-id与大写UUID回�
 
 本次只证明指定模拟器、原签名Codex版本与本机IPv4 Tailscale接入；不外推物理手机跨节点网络。私有证据归`Library/Logs/codex-plus/mobile-complete-20261115/`的native77/native78文件及#613的同次native-finish/native-stop操作记录。当前保持78与手机连接运行。
 
-同批从正式Manager的停止/启动按钮再次核验原入口，均经同一ss-service正常完成。最终保留native40410/controller40422/gateway41150/targetD8C10B7A1607573E594F45D738C576C5/window13929，手机一次Reconnect后connected=1，N历史与O原草稿分别由全页和编辑器AX读回；原3333/3406保持。生命周期修复PR35合入852b93f；最终实例的30分钟资源观测由#613继续负责，未在此记录冒称已完成。
+同批从正式Manager的停止/启动按钮再次核验原入口，均经同一ss-service正常完成。最终保留native40410/controller40422/gateway41150/targetD8C10B7A1607573E594F45D738C576C5/window13929，手机一次Reconnect后connected=1，N历史与O原草稿分别由全页和编辑器AX读回（native78-gui-final-phone.txt、native78-gui-final-draft-verified.txt）；原3333/3406保持。生命周期修复PR35合入852b93f；最终实例的30分钟资源观测由#613继续负责，未在此记录冒称已完成。
 
 ## 统一小看板 4103（2026-11-15）
 
@@ -36,9 +36,9 @@ PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartSh
 
 # Codex Plus 验收
 
-## 2026-11-15 精简阶段边界
+## 历史快照：2026-11-15 精简阶段边界
 
-本批源码已退出完整Codex工作台创建/注入/恢复和管理操作入口，删除无消费者的工作台协议和任务适配器，保留手机原路径；小看板仍未实现。精简PR不合并、不构建签名包、不安装，现役Plus74/iOS53及原窗口/草稿/unknown冻结保持。此前工作台与手机证据仍归原候选，不能当作精简版运行验收。处置和未来切换前置见[源码精简](workbench-simplification.md)。以下记录为各历史候选的验收事实。
+以下为当时冻结阶段的记录；当前小看板、正式安装与生命周期结果以本文顶部为准。本批源码已退出完整Codex工作台创建/注入/恢复和管理操作入口，删除无消费者的工作台协议和任务适配器，保留手机原路径；当时小看板尚未实现，精简PR尚未合并、构建或安装，Plus74/iOS53及原窗口/草稿/unknown冻结保持。此前工作台与手机证据仍归原候选，不能当作精简版运行验收。处置和切换前置见[源码精简](workbench-simplification.md)。以下记录为各历史候选的验收事实。
 
 ## 2026-11-15 原Codex移动工作流与右屏路由
 

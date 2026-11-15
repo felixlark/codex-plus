@@ -7,8 +7,8 @@ Codex Web App enhancements, workspace observation, settings, the status CLI, and
 
 The native runtime and existing Codex enhancements remain owned here. The independent
 SmartShadow management App provides settings and component status. Its separate small
-task board reads taskd registered cases through the installed MCP client; independent
-Codex tasks are not yet included. Preserve the original mobile frontend and its Mac host.
+task board combines taskd registered cases with current local Codex work, deduplicating
+only exact host/thread/run associations. Preserve the original mobile frontend and its Mac host.
 The page's Codex Plus button is the first item in the lower-left navigation footer;
 the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
 
