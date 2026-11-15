@@ -32,6 +32,14 @@ export async function mobileHostSupported(archive) {
   return true;
 }
 
+// Recheck after awaited native probes: a phone can navigate while they run.
+export async function probeUnclaimedMobileThread(mobile, threadId, probe) {
+  const revision = mobile?.claimRevision;
+  if (mobile?.ownsThread(threadId)) return false;
+  const ok = await probe();
+  return ok && revision === mobile?.claimRevision && !mobile?.ownsThread(threadId);
+}
+
 // Executed only in the current default context of the captured native target.
 export function prepareMobileAnchor(nonce) {
   const probe = {blank: location.href === 'about:blank', preload: !!window.electronBridge, complete: document.readyState === 'complete', ui: !!document.querySelector('script'), isolated: document.querySelector('meta[name="codex-plus-mobile-anchor"]')?.content === nonce};
@@ -60,7 +68,7 @@ export class MobileAccess {
   }
   constructor(config, {cdp, command, sessions, stateFile, publish}) {
     this.config = config; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
-    this.stateFile = stateFile; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
+    this.stateFile = stateFile; this.claimRevision = 0; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
@@ -172,6 +180,12 @@ export class MobileAccess {
       const value = JSON.parse(event.text);
       if (value.connection !== client.connection) return;
       if (value.kind === 'fatal') { await this.release(event.id); return; }
+      if (value.kind === 'view-route') {
+        if (typeof value.route !== 'string' || !/^(?:\/|\/(?:local|remote)\/[a-zA-Z0-9_-]+)$/.test(value.route)) { await this.release(event.id); return; }
+        const threadId = value.route === '/' ? null : value.route.split('/')[2];
+        if (client.threadId !== threadId) { client.threadId = threadId; this.claimRevision++; }
+        return;
+      }
       await this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)})e.receive(${JSON.stringify(event.text)});})()`);
     } else if (event.type === 'closed') await this.release(event.id);
     else if (event.type === 'failed') throw Error('Mobile gateway failed');
@@ -189,13 +203,13 @@ export class MobileAccess {
       const source = `globalThis.__codexPlusMobileEndpoint?.close();delete globalThis.__codexPlusMobileEndpoint;(${installMobileEndpoint.toString()})(${JSON.stringify({side: 'host', connection})},${encodeMobileValue.toString()},${decodeMobileValue.toString()});(${encodeMobileValue.toString()})((()=>{const b=window.electronBridge;return {version:b.getSentryInitOptions().appVersion,theme:b.getSystemThemeVariant(),sentry:b.getSentryInitOptions(),buildFlavor:b.getBuildFlavor(),userAgent:b.getDesktopUserAgent(),appSessionId:b.getAppSessionId(),sidebar:b.getInitialSidebarBootstrap()};})())`;
       const snapshot = await this.evaluate(source, true);
       if (!this.current(client)) return;
-      client.phase = 'active'; this.phase = 'connected';
+      client.threadId = this.config.threadId; client.phase = 'active'; this.claimRevision++; this.phase = 'connected';
       this.send(client.id, {kind: 'bootstrap', connection, hostVersion: mobileHost.version, snapshot});
       for (const value of client.buffered ?? []) this.send(client.id, value);
       client.buffered = [];
     });
   }
-  ownsThread(threadId) { return !this.stopped && this.config.threadId === threadId && [...this.clients.values()].some(c => c.phase === 'active'); }
+  ownsThread(threadId) { return !this.stopped && [...this.clients.values()].some(c => c.phase === 'active' && c.threadId === threadId); }
   async onBinding(message) {
     if (this.stopped || message.params.name !== binding || message.sessionId !== this.anchorSession) return;
     const session = this.sessions.get(message.sessionId), context = session?.contexts.get(message.params.executionContextId);
@@ -209,7 +223,7 @@ export class MobileAccess {
   drop(id) { if (this.gateway?.stdin.writable) this.gateway.stdin.write(JSON.stringify({type: 'close', id}) + '\n'); }
   async release(id) {
     const client = this.clients.get(id); if (!client) return;
-    this.clients.delete(id); this.drop(id);
+    this.clients.delete(id); this.claimRevision++; this.drop(id);
     await this.anchorWork(() => this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)}){e.close();delete globalThis.__codexPlusMobileEndpoint;}})()`)).catch(() => {});
     if (!this.stopped) this.phase = 'listening';
   }

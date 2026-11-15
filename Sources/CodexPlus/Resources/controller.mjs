@@ -16,7 +16,7 @@ import {initializePageSession} from './page-session.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
-import {MobileAccess,mobileHostSupported} from './mobile-access.mjs';
+import {MobileAccess,mobileHostSupported,probeUnclaimedMobileThread} from './mobile-access.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
@@ -108,11 +108,12 @@ async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Pr
 }
 function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
 async function probeSuggestions(target){
-  if(mobile?.ownsThread(target.threadId))return false;
+  return probeUnclaimedMobileThread(mobile,target.threadId,async()=>{
   const generation=suggestions.revision,initial=pageSet(),ids=[...sessions].filter(([,s])=>s.main).map(([id])=>id);
   if(!ids.length)return false;
   const probe=async()=>Promise.all(ids.map(async id=>{const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.probe(${JSON.stringify(target)})`,returnByValue:true});return r.result.value;}));
   try{const first=await probe();if(first.some(p=>!p?.ok))return false;const last=await probe();return suggestions.enabled&&generation===suggestions.revision&&initial===pageSet()&&last.every((p,i)=>p?.ok&&p.inputRevision===first[i].inputRevision);}catch{return false;}
+  });
 }
 async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -122,7 +123,7 @@ async function suggestionGuard(message){
   const p=suggestions.pending;
   let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.reviewId===p.reviewId&&request.token===p.token&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
   if(ok)ok=await probeSuggestions(p.target);
-  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping;
+  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping&&!mobile?.ownsThread(p.target.threadId);
   await command(message.sessionId,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.resolveGuard(${JSON.stringify(request.requestId)},${ok})`,contextId:event.executionContextId});
 }
 async function reviewDecision(message){

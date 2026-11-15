@@ -17,7 +17,7 @@ export const reviewedRouteResource = Object.freeze({
   sha256: '67cc5635a64f200b60e53cbf6b2fe74e4e8f0440c6ab0ccffd6c0056f849f3e4',
 });
 
-export async function adaptReloadRoute(source) {
+export async function adaptReloadRoute(source, onRoute = restoreChatRoute) {
   if (createHash('sha256').update(source).digest('hex') !== reviewedRouteResource.sha256) return {supported:false,reason:'unreviewed-route-source'};
   const {parse}=await parser();const ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});const matches=[];
   walk(ast,(node,parents)=>{
@@ -42,7 +42,7 @@ export async function adaptReloadRoute(source) {
   });
   if(matches.length!==1)return {supported:false,reason:'route-match-count'};
   const match=matches[0];
-  const hook=`(0,${match.react}.useEffect)(()=>(${restoreChatRoute.toString()})(${match.name}),[${match.name}]);`;
+  const hook=`(0,${match.react}.useEffect)(()=>(${onRoute.toString()})(${match.name}),[${match.name}]);`;
   const adapted=source.slice(0,match.at)+hook+source.slice(match.at);
   parse(adapted,{ecmaVersion:'latest',sourceType:'module'});
   return {supported:true,source:adapted,match};

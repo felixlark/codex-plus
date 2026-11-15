@@ -8,8 +8,8 @@ test('packaged asset paths cannot escape the mobile bundle', () => {
   for (const name of ['../secrets', '/private/file', 'assets/../../file', 'assets\\file', 'assets//file', '']) assert.throws(() => localAssetPath('/bundle', name));
 });
 
-test('mobile attachment adaptation refuses an unreviewed composer and preserves other assets', () => {
+test('mobile attachment adaptation refuses an unreviewed composer and preserves other assets', async () => {
   const bytes = Buffer.from('unreviewed vendor build');
-  assert.throws(() => adaptMobileFrontend(attachmentPickerAsset.path, bytes), /Unreviewed/);
-  assert.equal(adaptMobileFrontend('assets/another.js', bytes), bytes);
+  await assert.rejects(adaptMobileFrontend(attachmentPickerAsset.path, bytes), /Unreviewed/);
+  assert.equal(await adaptMobileFrontend('assets/another.js', bytes), bytes);
 });

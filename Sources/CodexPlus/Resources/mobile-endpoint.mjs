@@ -169,6 +169,6 @@ export function installMobileEndpoint(config, encode, decode) {
     window.removeEventListener('message', onMessage);
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
-  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size})};
+  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, reportRoute: route => { if (phone) send({kind: 'view-route', route}); }, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size})};
   window.addEventListener('pagehide', fatal, {once: true});
 }

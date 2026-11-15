@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
+import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
 
@@ -183,4 +183,24 @@ test('blank marker writes require exact blank, complete document, original prelo
     if (allowed) { assert.equal(children[0].content, "default-src 'none'"); assert.equal(document.title, 'Codex Plus Mobile'); }
     else assert.equal(body.textContent, undefined);
   }
+});
+
+
+test('mobile route claims migrate only on the authenticated current connection and revoke awaited guards', async () => {
+  const manager = new MobileAccess({threadId: 'A'}, {cdp: {}, sessions: new Map(), stateFile: '/unused', publish: async () => {}});
+  const client = {id: 'phone', connection: 'current', phase: 'active', threadId: 'A'};
+  manager.clients.set('phone', client); manager.evaluate = async () => {}; manager.drop = () => {};
+  const route = (connection, value) => manager.gatewayEvent(JSON.stringify({type: 'frame', id: 'phone', text: JSON.stringify({kind: 'view-route', connection, route: value})}));
+  assert.ok(manager.ownsThread('A'));
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  const guard = probeUnclaimedMobileThread(manager, 'B', async () => { started(); await gate; return true; });
+  await entered; await route('current', '/local/B'); release();
+  assert.equal(await guard, false);
+  assert.equal(manager.ownsThread('A'), false); assert.ok(manager.ownsThread('B'));
+  await route('old', '/local/A'); assert.ok(manager.ownsThread('B'));
+  await route('current', '/'); assert.equal(manager.ownsThread('B'), false);
+  await route('current', '/remote/C'); assert.ok(manager.ownsThread('C'));
+  await manager.release('phone'); assert.equal(manager.ownsThread('C'), false);
 });

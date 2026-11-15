@@ -37,9 +37,9 @@ export async function prepareFrontend({app, output}) {
       const bytes = await archive.readBytes(entry), sha256 = digest(bytes);
       if (entry.integrity?.algorithm !== 'SHA256' || sha256 !== entry.integrity.hash) throw Error(`Host integrity mismatch: ${entry.path}`);
       await fs.mkdir(path.dirname(destination), {recursive: true});
-      const shipped = adaptMobileFrontend(relative, bytes);
+      const shipped = await adaptMobileFrontend(relative, bytes);
       await fs.writeFile(destination, shipped);
-      assets.push({path: relative, bytes: bytes.length, sha256, ...shipped !== bytes ? {shippedBytes: shipped.length, shippedSHA256: digest(shipped), adapter: 'original-browser-attachment-picker'} : {}});
+      assets.push({path: relative, bytes: bytes.length, sha256, ...shipped !== bytes ? {shippedBytes: shipped.length, shippedSHA256: digest(shipped), adapter: relative === 'assets/async/486887.8844429c7e.js' ? 'original-browser-attachment-picker' : 'original-router-location'} : {}});
     }
     const manifest = {protocol: 1, host: mobileHost, assets};
     await fs.writeFile(path.join(output, 'codex-mobile-manifest.json'), JSON.stringify(manifest));
