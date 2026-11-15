@@ -189,6 +189,14 @@ export class MobileAccess {
     this.documentCheck = {armed: !!this.documentArmed, first: !this.documentRequestId,
       frame: event.frameId === this.documentFrame, url: event.request?.url === this.documentURL,
       requestStage: event.responseStatusCode === undefined, requestId: typeof event.requestId === 'string'};
+    try {
+      const url = new URL(event.request?.url);
+      this.documentCheck.urlKind = url.protocol === 'app:' ? 'app' : url.protocol === 'about:' ? 'about' : ['https:', 'http:'].includes(url.protocol) ? 'web' : 'other';
+      this.documentCheck.appIndex = url.protocol === 'app:' && url.hostname === '-' && url.pathname === '/index.html';
+      this.documentCheck.anchorRoute = isAnchorURL(url.href, this.config);
+      const {frameTree} = await this.command(sessionId, 'Page.getFrameTree');
+      this.documentCheck.currentRoot = event.frameId === frameTree.frame.id;
+    } catch { this.documentCheck.inspectionFailed = true; }
     if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
         event.request?.url === this.documentURL && event.responseStatusCode === undefined && typeof event.requestId === 'string') {
       this.documentRequestId = event.requestId; this.documentArmed = false;
