@@ -154,6 +154,24 @@ test('record updates without a legacy key never borrow an atom named undefined o
   } finally { f.cleanup(); }
 });
 
+test('original sidebar query bootstrap uses phone selection and preserves genuine catalog metadata', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup();
+  const module = {appServices: {projectCatalog: {readLocalProjects: () => [], readRemoteProjects: () => []}}, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, (base, update) => ({...(base ?? {}), ...update.entries}));
+    const mac = {globalStateEntries: [{key: 'local-projects', value: [{id: 'real-project'}]}, {key: 'selected-project', value: {type: 'local', projectId: 'mac-selection'}}, {key: 'thread-project-assignments', value: {thread: 'real-project'}}], origin: 'real-backend'};
+    assert.equal(f.api.initialSidebarBootstrap(mac).globalStateEntries.find(e => e.key === 'selected-project').value, undefined);
+    await module.appServices.applicationState.write('selected-project', {type: 'local', projectId: 'phone-selection'});
+    const seeded = f.api.initialSidebarBootstrap(mac);
+    assert.deepEqual(seeded.globalStateEntries.find(e => e.key === 'selected-project').value, {type: 'local', projectId: 'phone-selection'});
+    assert.deepEqual(seeded.globalStateEntries.filter(e => e.key !== 'selected-project'), mac.globalStateEntries.filter(e => e.key !== 'selected-project'));
+    assert.equal(mac.globalStateEntries[1].value.projectId, 'mac-selection');
+    assert.equal(f.api.initialSidebarBootstrap(null), null);
+    assert.throws(() => f.api.initialSidebarBootstrap({globalStateEntries: 'changed'}));
+  } finally { f.cleanup(); }
+});
+
 test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
   const rpc = await rpcLibrary(t); if (!rpc) return;
   const f = setup(), wire = new MessageChannel();

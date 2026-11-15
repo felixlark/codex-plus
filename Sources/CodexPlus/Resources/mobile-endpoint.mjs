@@ -196,7 +196,10 @@ export function installMobileEndpoint(config, encode, decode) {
       getBuildFlavor: () => s.buildFlavor,
       getDesktopUserAgent: () => s.userAgent,
       getAppSessionId: () => s.appSessionId,
-      getInitialSidebarBootstrap: () => s.sidebar,
+      getInitialSidebarBootstrap: () => {
+        if (!globalThis.__codexPlusMobileLocal) throw Error('Phone local UI state is not ready');
+        return globalThis.__codexPlusMobileLocal.initialSidebarBootstrap(s.sidebar);
+      },
       isDeviceCheckSupported: () => false, isIntelMacBuild: () => false,
       getPathForFile: () => null,
       subscribeToSystemThemeVariant: callback => { themes.add(callback); return () => themes.delete(callback); },

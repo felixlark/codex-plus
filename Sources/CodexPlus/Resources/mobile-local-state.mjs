@@ -164,6 +164,16 @@ export function installMobileLocalState(bootstrap, selectServices) {
     owned.push(() => { services[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); });
   }
   globalThis.__codexPlusMobileLocal = {handleMessage, install, native,
+    initialSidebarBootstrap(sidebar) {
+      if (sidebar == null) return sidebar;
+      if (!Array.isArray(sidebar.globalStateEntries)) throw Error('Unreviewed original sidebar bootstrap');
+      // Genuine project catalog/assignment metadata stays on its real backend.
+      // The Mac's current UI selection must never seed this phone's query cache.
+      return {...sidebar, globalStateEntries: [
+        ...sidebar.globalStateEntries.filter(entry => entry.key !== 'selected-project'),
+        {key: 'selected-project', value: own(state.application, 'selected-project')},
+      ]};
+    },
     resolve(message) {
       const call = pending.get(message.id); if (!call) return;
       pending.delete(message.id); message.ok ? call.resolve(message.value) : call.reject(Error('Phone local operation failed'));

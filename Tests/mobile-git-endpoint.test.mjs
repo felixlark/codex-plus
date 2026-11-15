@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {installMobileLocalState} from '../Sources/CodexPlus/Resources/mobile-local-state.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
 
@@ -56,4 +57,20 @@ test('original Git metadata, real port messages and zero-port closure survive th
     host.__codexPlusMobileEndpoint.close(); phone.__codexPlusMobileEndpoint.close();
     native.port1.close(); native.port2.close(); remote?.close();
   }
+});
+
+
+test('actual phone bridge seeds its private selection instead of the Mac sidebar UI selection', () => {
+  const window = new EventTarget(); window.postMessage = () => {};
+  const context = vm.createContext({window, location: {origin: 'app://-'}, MessageChannel, MessagePort, MessageEvent, CustomEvent, queueMicrotask, encode: encodeMobileValue, decode: decodeMobileValue});
+  context.__codexPlusMobileNativeSend = () => {};
+  const snapshot = {version: 'version', sidebar: {globalStateEntries: [{key: 'local-projects', value: [{id: 'real-project'}]}, {key: 'selected-project', value: {type: 'local', projectId: 'mac-project'}}]}};
+  vm.runInContext(`(${installMobileEndpoint.toString()})({side:'phone',connection:'current',hostVersion:'version',snapshot:${JSON.stringify(snapshot)}},encode,decode)`, context);
+  try {
+    assert.throws(() => window.electronBridge.getInitialSidebarBootstrap(), /local UI state is not ready/);
+    vm.runInContext(`(${installMobileLocalState.toString()})({atoms:{},application:{'selected-project':{type:'local',projectId:'phone-project'}}},()=>({}))`, context);
+    const result = JSON.parse(JSON.stringify(window.electronBridge.getInitialSidebarBootstrap()));
+    assert.deepEqual(result.globalStateEntries.find(e => e.key === 'selected-project').value, {type: 'local', projectId: 'phone-project'});
+    assert.deepEqual(result.globalStateEntries.find(e => e.key === 'local-projects').value, [{id: 'real-project'}]);
+  } finally { context.__codexPlusMobileLocal?.close(); context.__codexPlusMobileEndpoint.close(); }
 });

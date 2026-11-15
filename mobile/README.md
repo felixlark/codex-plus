@@ -25,6 +25,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 账户摘要沿原后台 `accountInfo.readAccountInfo()` 读取；`accessInputs.readLocalChatGptAuth()` 不开放给手机，Mac 访问令牌不随摘要转发。
 - 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
 - 权限默认值就绪沿原 `statsigEvaluations.subscribe()` 的真实 publication 三态与可释放订阅确定，发送链只读查询 `hasReadyExecutionAssignments()`；不以空对象替代快照、不开放评估写入。缺少该订阅会使原界面停在配置延迟队列，Mac 投递函数返回不能证明消息已提交。
+- 原 sidebar bootstrap 的当前项目选择只采用手机已提交值；其余后台项目注册、会话分配和目录元数据保留真实只读来源，避免 Mac 选项直接种入手机查询缓存。
 - 原 key 的账号、项目和查询身份格式交由原前端维护，不另设普通键许可表。原 query/搜索索引投影和 disable_local_indexing 沿原源码，搜索缓存可含个人正文片段。原未读状态走 threadReadState；非主窗口的三个 tab/sidebar 持久化入口继续忽略，cloud-aeon 整值替换保留原 revision/刷新时间防旧覆盖规则，拒绝时回发现值。
 - 原会话页的输入自动解决服务以可传值对象提供真实 `snooze`，不声明两个平台可选的 Mac surface/focus 方法。手机展示与输入不冒充 Mac 专用窗口焦点；Mac 原自动解决时序保留，手机活动抑制定时器尚未接入。
 - 原网页请求使用现役 `httpFetch`，身份注入仍留 Mac；返回体在手机本地会话逐块建立流归属，消费或取消后释放原租约，只取消本手机仍持有的请求。
