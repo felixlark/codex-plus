@@ -10,6 +10,8 @@ Plus 77 首次真实停机发现两项缺陷：小写request-id与大写UUID回�
 
 本次只证明指定模拟器、原签名Codex版本与本机IPv4 Tailscale接入；不外推物理手机跨节点网络。私有证据归`Library/Logs/codex-plus/mobile-complete-20261115/`的native77/native78文件及#613的同次native-finish/native-stop操作记录。当前保持78与手机连接运行。
 
+同批从正式Manager的停止/启动按钮再次核验原入口，均经同一ss-service正常完成。最终保留native40410/controller40422/gateway41150/targetD8C10B7A1607573E594F45D738C576C5/window13929，手机一次Reconnect后connected=1，N历史与O原草稿分别由全页和编辑器AX读回；原3333/3406保持。生命周期修复PR35合入852b93f；最终实例的30分钟资源观测由#613继续负责，未在此记录冒称已完成。
+
 ## 统一小看板 4103（2026-11-15）
 
 PR31 最终候选63962a7由#613签名安装，原Plus74与iOS53保持。安装版PID90676、主13267/看板13274经官方OCU移至右侧物理屏。原Electron只读得到8个活动会话，taskd登记2事项，其中#610当前thread/run准确匹配并去重，安装UI总计9/执行中8/完成0；原Run结束后执行中降至7，未把delivered当全案完成。源数据与安装UI分别留证。
