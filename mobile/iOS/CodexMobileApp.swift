@@ -126,7 +126,10 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         let config = WKWebViewConfiguration(); config.userContentController = controller
         config.setURLSchemeHandler(LocalAssets(), forURLScheme: "app")
         let web = WKWebView(frame: .zero, configuration: config); self.web = web; webGeneration = epoch
-        web.isInspectable = true; web.navigationDelegate = self; web.translatesAutoresizingMaskIntoConstraints = false
+        #if DEBUG
+        web.isInspectable = true
+        #endif
+        web.navigationDelegate = self; web.translatesAutoresizingMaskIntoConstraints = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
         view.insertSubview(web, belowSubview: connectionUI)
         NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), web.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor), web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor)])

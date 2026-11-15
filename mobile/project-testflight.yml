@@ -1,0 +1,26 @@
+include:
+  - ${CODEX_PLUS_SOURCE_ROOT}/mobile/project.yml
+name: SmartShadowMobile
+targets:
+  CodexMobile:
+    info:
+      path: SmartShadowMobile-Info.plist
+      properties:
+        CFBundleDisplayName: Smart Shadow
+        ITSAppUsesNonExemptEncryption: false
+    sources:
+      - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Release/Assets.xcassets
+      - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Release/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.longbiaochen.smart-shadow
+        PRODUCT_NAME: SmartShadowMobile
+        MARKETING_VERSION: 0.3.1
+        CURRENT_PROJECT_VERSION: 374
+        CODE_SIGN_ENTITLEMENTS: ${CODEX_PLUS_SOURCE_ROOT}/mobile/Release/SmartShadow.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Distribution
+        PROVISIONING_PROFILE_SPECIFIER: SmartShadow iOS App Store APNs 20261003
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
