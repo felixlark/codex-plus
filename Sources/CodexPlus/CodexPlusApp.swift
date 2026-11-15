@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CodexPlusCore
 import ServiceManagement
+import Security
 import SwiftUI
 
 @main
@@ -13,7 +14,6 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let toolServer = ToolControlServer()
     private let management = ManagementRuntime()
     private var statusItem: NSStatusItem?
-    private var settingsWindow: NSWindow?
     private var agentSettingsWindow: NSWindow?
     private let settings = SettingsModel()
     private let launcher = CodexLauncher()
@@ -188,23 +188,18 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolWindows.setEnabled(!toolWindows.enabled)
         item.state = toolWindows.enabled ? .on : .off
     }
-    @objc private func showSettings() { presentSettings(activate: true) }
-    private func presentSettings(activate: Bool) {
-        settings.refresh()
-        if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
-                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            window.title = "Codex Plus"
-            window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: 500, height: 340)
-            window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
-            window.center()
-            settingsWindow = window
+    @objc private func showSettings() {
+        let url = URL(fileURLWithPath: "/Applications/SmartShadow.app")
+        var code: SecStaticCode?, requirement: SecRequirement?
+        let expression = "anchor apple generic and identifier \"me.longbiaochen.smart-shadow.app\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
+              SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
+              let code, SecStaticCodeCheckValidity(code, [], requirement) == errSecSuccess else {
+            settings.error = "已安装的 SmartShadow 管理 App 身份核验失败。"; return
         }
-        if activate {
-            settingsWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        } else { settingsWindow?.orderFront(nil) }
+        NSWorkspace.shared.openApplication(at: url, configuration: .init()) { [weak self] _, error in
+            if let error { DispatchQueue.main.async { self?.settings.error = "管理 App 打开失败：\(error.localizedDescription)" } }
+        }
     }
 
     private func presentAgentSettings() {

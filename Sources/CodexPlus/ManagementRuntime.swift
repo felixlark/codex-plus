@@ -9,8 +9,6 @@ final class ManagementRuntime {
     var writeSettings: ((ManagementProtocol.Settings) throws -> Void)?
     var readStatus: (() -> [String: Any])?
     var readComponents: (() -> [String: Any])?
-    var openWorkbench: ((UUID) -> Bool)?
-    var readWorkbench: ((UUID?) -> [String: Any]?)?
 
     private var identity: ManagementProtocol.RuntimeIdentity {
         let components = readComponents?() ?? [:]
@@ -25,7 +23,7 @@ final class ManagementRuntime {
     }
     private var capabilities: [String] {
         ["status"] + (readSettings == nil ? [] : ["settings.read"]) +
-        (writeSettings == nil ? [] : ["settings.write"]) + (openWorkbench == nil ? [] : ["workspace.open"])
+        (writeSettings == nil ? [] : ["settings.write"])
     }
     func handle(_ object: [String: Any]) -> [String: Any] {
         let request: ManagementProtocol.Request
@@ -45,7 +43,6 @@ final class ManagementRuntime {
                 var result = readStatus?() ?? [:]
                 result["permissions"] = ["accessibility": ["trusted": AXIsProcessTrusted(), "bundle_id": identity.bundle_id,
                                                            "path": identity.path, "pid": identity.pid]]
-                result["workspace_request"] = readWorkbench?(request.queryID) as Any? ?? NSNull()
                 return reply(result)
             case .settingsRead:
                 guard let readSettings else { return reply(error: "unsupported") }
@@ -64,9 +61,6 @@ final class ManagementRuntime {
                 try writeSettings(next)
                 let actual = try readSettings()
                 return reply(["settings": try actual.object, "settings_revision": try actual.revision])
-            case .workspaceOpen:
-                guard let openWorkbench else { return reply(error: "unsupported") }
-                return openWorkbench(request.id) ? reply(["request_id": request.id.uuidString, "phase": "requested"]) : reply(error: "workspace_unavailable")
             }
         } catch { return reply(error: "settings_unavailable") }
     }

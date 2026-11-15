@@ -1,7 +1,6 @@
 import Foundation
 
-struct ModuleObservation: Identifiable {
-    let id: String
+struct ModuleObservation {
     let job: String
     let configuration: String
     let selection: String
@@ -52,7 +51,7 @@ final class ServiceControlClient: @unchecked Sendable {
         let layout = value["layout"] as? [String: Any] ?? [:], package = value["package"] as? [String: Any] ?? [:]
         let report = value["runtime_report"] as? [String: Any] ?? [:]
         let selected = layout["configuration_selected"] as? Bool
-        return ModuleObservation(id: role, job: job["state"] as? String ?? "unknown",
+        return ModuleObservation(job: job["state"] as? String ?? "unknown",
             configuration: config["state"] as? String ?? "unknown", selection: selected.map { $0 ? "已选中配置" : "配置未选中" } ?? "选择未知",
             source: package["source_commit"] as? String, report: report["state"] as? String ?? "unknown")
     }

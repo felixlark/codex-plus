@@ -8,7 +8,7 @@ public enum ManagementProtocol {
     public static let command = "management-v1"
     public static let runtimeBundleID = "me.longbiaochen.codex-plus"
     public static let runtimePath = "/Applications/Codex Plus.app"
-    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", workspaceOpen = "workspace.open" }
+    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write" }
     public enum Rejection: String { case unsupported, conflict }
     /// Only these protocol codes attest a pre-effect rejection. Arbitrary
     /// failures may follow an effect and must remain unknown to the client.
@@ -22,31 +22,27 @@ public enum ManagementProtocol {
         public let expectedRuntime: UUID?
         public let expectedRevision: String?
         public let changes: [String: Any]?
-        public let queryID: UUID?
         public static func parse(_ value: [String: Any]) throws -> Self {
             let base: Set<String> = ["command", "protocol", "request_id", "operation"]
             guard value["command"] as? String == command, integer(value["protocol"]) == version,
                   let id = uuid(value["request_id"]), let op = (value["operation"] as? String).flatMap(Operation.init(rawValue:)) else { throw failure("invalid_request") }
             var allowed = base
             switch op {
-            case .status: allowed.formUnion(["expected_runtime", "query_request_id"])
+            case .status: allowed.formUnion(["expected_runtime"])
             case .settingsRead: break
             case .settingsWrite: allowed.formUnion(["expected_runtime", "expected_settings_revision", "changes"])
-            case .workspaceOpen: allowed.insert("expected_runtime")
             }
             guard Set(value.keys).isSubset(of: allowed) else { throw failure("unexpected_field") }
             let runtime = uuid(value["expected_runtime"])
             if value["expected_runtime"] != nil && runtime == nil { throw failure("invalid_runtime") }
-            if op == .settingsWrite || op == .workspaceOpen { guard runtime != nil else { throw failure("runtime_required") } }
-            let query = uuid(value["query_request_id"])
-            if value["query_request_id"] != nil { guard query != nil, runtime != nil else { throw failure("query_runtime_required") } }
+            if op == .settingsWrite { guard runtime != nil else { throw failure("runtime_required") } }
             let revision = value["expected_settings_revision"] as? String
             let changes = value["changes"] as? [String: Any]
             if op == .settingsWrite {
                 guard let revision, isDigest(revision), let changes, !changes.isEmpty else { throw failure("settings_required") }
                 try Settings.validateChanges(changes)
             }
-            return Self(id: id, operation: op, expectedRuntime: runtime, expectedRevision: revision, changes: changes, queryID: query)
+            return Self(id: id, operation: op, expectedRuntime: runtime, expectedRevision: revision, changes: changes)
         }
     }
     public struct RuntimeIdentity: Codable, Equatable {

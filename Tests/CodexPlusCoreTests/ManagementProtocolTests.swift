@@ -20,24 +20,14 @@ final class ManagementProtocolTests: XCTestCase {
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
     }
     func testMutationsRequireExactRuntimeAndSettingsRevision() throws {
-        var value = request("workspace.open")
+        var value = request("settings.write")
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
         value["expected_runtime"] = runtime.uuidString
-        XCTAssertEqual(try ManagementProtocol.Request.parse(value).expectedRuntime, runtime)
-        value = request("settings.write"); value["expected_runtime"] = runtime.uuidString
         value["changes"] = ["workspaceAutoExpand": false]
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
         value["expected_settings_revision"] = try settings().revision
         XCTAssertEqual(try ManagementProtocol.Request.parse(value).changes?["workspaceAutoExpand"] as? Bool, false)
         value["arbitrary_command"] = "never execute"
-        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
-    }
-    func testStatusRequestQueriesOnlyAnExactRuntimeAndOriginalRequestID() throws {
-        var value = request("status"); value["query_request_id"] = UUID().uuidString
-        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
-        value["expected_runtime"] = runtime.uuidString
-        XCTAssertNotNil(try ManagementProtocol.Request.parse(value).queryID)
-        value["query_request_id"] = "invalid"
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
     }
     func testStrictSettingsTypesAndWhitelistRejectNumericBooleanAndExtraFields() {
@@ -81,30 +71,6 @@ final class ManagementProtocolTests: XCTestCase {
         catch { XCTAssertTrue(error is CancellationError) }
     }
 }
-
-final class ManagementWorkspaceRequestTests: XCTestCase {
-    func testReconciliationAlwaysUsesOriginalRuntimeWhenCurrentRuntimeChanges() {
-        let original = UUID(), replacement = UUID(), request = UUID()
-        let pending = ManagementWorkspaceRequest(requestID: request, runtimeID: original)
-        XCTAssertEqual(pending.reconciliationFields["expected_runtime"] as? String, original.uuidString)
-        XCTAssertEqual(pending.reconciliationFields["query_request_id"] as? String, request.uuidString)
-        XCTAssertEqual(pending.observing(["request_id": request.uuidString, "phase": "ready"], runtimeID: replacement), pending)
-    }
-    func testDifferentRequestOrUnknownPhaseCannotClearOriginalPendingRequest() {
-        let instance = UUID(), pending = ManagementWorkspaceRequest(requestID: UUID(), runtimeID: UUID())
-        XCTAssertEqual(pending.observing(["request_id": UUID().uuidString, "phase": "ready"], runtimeID: instance), pending)
-        XCTAssertEqual(pending.observing(["request_id": pending.requestID.uuidString, "phase": "unknown"], runtimeID: pending.runtimeID), pending)
-        XCTAssertEqual(pending.observing(["request_id": UUID().uuidString, "phase": "ready"], runtimeID: pending.runtimeID), pending)
-        XCTAssertNil(pending.observing(["request_id": pending.requestID.uuidString, "phase": "ready"], runtimeID: pending.runtimeID))
-    }
-    func testRecoveryBindsReportedRequestToActualResponseRuntime() {
-        let actual = UUID(), id = UUID()
-        let pending = ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "phase": "accepted"], runtimeID: actual)
-        XCTAssertEqual(pending, .init(requestID: id, runtimeID: actual))
-        XCTAssertNil(ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "phase": "closed"], runtimeID: actual))
-    }
-}
-
 
 final class ManagementRejectionTests: XCTestCase {
     func testExplicitPreEffectRefusalsAreDistinctFromUnknownFailures() {

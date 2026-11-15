@@ -1,34 +1,25 @@
 # SmartShadow 管理接缝 v1
 
-#613 管理 App 只持设置和组件控制客户端。#578 interactiond 保持原 Plus native、controller、移动网关、增强与窗口生命周期。退出管理 App 只取消自己的 IPC，不能调用 launcher.stop/observer.stop/toolWindows.stop，也不能删除虚拟屏。
+独立管理 App 提供设置和组件状态；Plus 原生运行体保留 controller、手机网关、窗口路由和现有增强。管理 App 退出只取消自己的连接，不停止运行体或手机宿主。
 
-复用原 0600 tool-control.sock 和现有 ToolControlServer。一连接一个 JSON 行；原 tool-* 与只读 status.sock 保持原合同。新增 Core 类型不自动装入 handler，不代表新接口已经运行。
+## 当前源码合同
 
-## 运行侧接入
+复用原 `0600 tool-control.sock` 和 `ToolControlServer`，一连接一个 JSON 行。`management-v1` 仅接受：
 
-仅 command=management-v1 进入 ManagementProtocol.Request.parse。实例启动时生成一次真实 UUID；每次响应用 RuntimeIdentity 写准确 native PID、bundle、全局路径、版本/build，未知 controller/mobile 协议或版本为 null。用 response factory 返回 protocol/request_id/runtime/capabilities/result 或 error；capabilities 只列实际支持项。
+- `status`：返回真实 native PID、bundle、全局安装路径、版本、实例 UUID、权限及组件状态。controller/mobile 未知版本为 null，不冒充 iOS 安装版本。
+- `settings.read`：返回原五个设置及其规范化 SHA-256 revision。
+- `settings.write`：校验当前实例、原 revision、严格类型和字段范围，沿既有偏好与回调写入并读回。冲突或实例变化不写入。
 
-build68候选补充实际组件身份：controller启动时读取自身文件计算SHA-256；移动接缝在核验网关签名后，计算实际mobile-access源码与网关二进制的组合SHA-256。管理响应只在当前controller PID与其快照匹配时读取这些版本，尚未启动的移动网关版本仍为null。这里的移动版本指Mac移动适配器和网关，不冒充iOS安装版本。安装采用另验。
+已删除完整工作台操作、查询字段、空状态回执及专用恢复。小看板尚未实现，管理界面明确显示该状态；不能从未知操作拒绝推断历史开窗结果。小看板的数据接口和打开方式待需求确定后再实现，不预留上一版协议或网络适配器。
 
-- status 返回无正文、凭据和环境的运行元数据。query_request_id 必须带 expected_runtime；查询同运行实例对应 workbench request_id/nonce/target/window/phase。无关联记录或实例变更保留 unknown。
-- settings.read 的 result 为 settings、settings_revision。Settings 仅含原五个设置，revision 由实际规范化设置对象计算 SHA256。
-- settings.write 先校验 expected_runtime 与 expected_settings_revision，再用 Settings.applying 校验完整差量，沿原 SettingsModel/偏好与回调写入，最后实际读回 settings/revision。冲突返回 conflict 与当前快照；实例变更不写。原验收模式等运行侧限制继续适用，不能把请求值冒充实际读回。
-- workspace.open 只调用新 launcher.openWorkbench(requestID)，发送一次 controller workbench-open。禁止复用人工 F6 的 launcher.open/place/humanWindows.open，不碰 mobile anchor 或人工窗。同步 handler 仅返回 requested/accepted 与 request_id；原 controller 将同 ID 贯穿 nonce/target/window/phase，status 再读真实状态。pipe write 不代表窗口 ready。
+管理客户端校验 socket/父目录所有者与权限、peer UID，以及返回 PID 对应的真实签名、bundle 和路径。取消只 shutdown 本连接，由原 worker 关闭 fd；没有自动重发写入或重启运行体的回退。未知设置写入只读核对实际值。
 
-权限状态带准确主体 bundle/path/pid；原 native 检查 Plus AX。按钮由该主体处理或打开系统设置中 Plus 条目，Manager 不请求自身 AX 冒充 interactiond 权限。
+## 仍有消费者的设置与状态
 
-## 客户端与验收
+用户菜单和页面设置入口打开已核签名的全局 SmartShadow 管理 App。Agent 设置页仍被 ToolWindowRouter 的显式入口消费，底层 SettingsModel 仍为管理协议提供偏好读写和回调。本轮保留，不把重复界面当作长期要求；唯一入口的迁接尚待决定。
 
-ManagementConnection 是客户端，校验 socket/父目录本 UID 与权限、peer UID；取消只 shutdown 本连接，由原 worker 唯一 close fd，避免 fd 复用误关。没有 launch/reopen/retry fallback。写响应丢失只读实际设置；工作台响应丢失只读同实例、同 query_request_id 的状态，不换键补发。Manager 还必须核响应 PID 对应 NSRunningApplication 的准确 bundle/path，不能只凭自报身份认领运行体。
+管理产品为独立 `SmartShadowManager` target，只依赖 Core 数据和客户端；通过已安装 `ss-service` 读取组件状态，不引入业务看板或另一套发布器。新薄生命周期仍未交付。`build-manager`/`install-manager` 与 Plus/手机构建安装边界保持。
 
-当前单元覆盖严格类型、未知字段、运行实例和 revision 必填、原屏幕选择合同、规范化摘要、未知后端版本、连接前取消。实际 handler、安装版 IPC、I/O 中途取消、设置冲突、F6 并发丢回执和退出 Manager 后原运行体持续运行，仍须真实接入后另验。
+## 精简阶段边界
 
-## 管理产品的独立构建与安装
-
-Package 的 SmartShadowManager 是独立 executable/target，ManagerInfo.plist 保留 me.longbiaochen.smart-shadow.app，版本4.0.0/build4001。仅加载 Core 数据与客户端，不创建旧 native delegate/launcher/controller/observer/ToolWindowRouter。首次启动附着准确 Plus 实例，不存在时只打开已核签名全局路径一次，启动回执后再读实际状态。
-
-管理侧通过正式安装 ss-service 的只读 inspect 分别显示 contextd/taskd job、配置、选择、报告及源码版本；任何未支持/不明确结果如实显示，不合并为业务已采用或 ready。新角色启停仍待准确既有 lifecycle operation 接口采用，不能在 App 内另建发布计划或调度器。
-
-管理UI当前消费 status.result.permissions.accessibility 的 trusted/bundle_id/path/pid，以及 workspace_request 的 request_id/phase/nonce/target/window；无 query 返回原 native 最近一次管理工作台请求，人工F6不能覆盖该关联，重开 manager 先拾起 pending/unknown。设置 result 固定 settings/settings_revision。
-
-scripts/build-manager 仅 release 构建管理产品并沿已有 Developer ID 签名，不构建手机或 Plus controller。scripts/install-manager 接受准确签名候选，原安装存在时保留到 Library/Caches/codex-plus/manager-installs；实际安装前须交清旧客户端，不按进程名杀、退出 Plus 或解除虚拟屏托管。唯一 Release build 和安装/GUI writer 沿原安全点。当前只有 Debug 编译准备，尚未签名新管理包、安装或进行真实三模块控制/退出隔离验收。
+本批仅改源码并做定向检查，不合并或安装。现役 Plus74、iOS53、原窗口、草稿及历史未知结果保持。未来获准切换前按[精简交接](workbench-simplification.md)核对旧完整工作台，不能用删除后的源码接管或结算旧请求。
