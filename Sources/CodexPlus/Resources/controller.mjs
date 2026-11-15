@@ -314,6 +314,7 @@ async function main(){
   }
   if(stopping||quiesced)return;
   try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
+  if(quiesced&&mobile)mobile.quiesced=true;
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
@@ -341,9 +342,9 @@ async function main(){
           source:featureSupported?featureSource:undefined,
         });
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
-        if(session.main){
+        if(session.main&&!quiesced&&!stopping){
           if(suggestionSupported)await updateSuggestionPolicy();
-          if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
+          if(featureSupported&&!quiesced&&!stopping)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
           const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
           if(runtime.result.value===9)state.projectOrder.phase='active';
           else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
@@ -371,6 +372,7 @@ async function main(){
     finally{await publish();}
   }
   if(stopping){cdp.close();return;}
+  if(quiesced)return;
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();

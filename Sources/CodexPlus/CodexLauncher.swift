@@ -276,7 +276,7 @@ final class CodexLauncher: ObservableObject {
     }
 
     private func place(_ host: NSRunningApplication) {
-        guard needsPlacement else { return }
+        guard needsPlacement, !quiesced, !stopping else { return }
         needsPlacement = false
         humanWindows.open(host)
         placementStatus = "dual-window"

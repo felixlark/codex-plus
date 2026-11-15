@@ -102,8 +102,10 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         management.prepareStop = { [weak self] in
             guard let self else { throw ManagementProtocol.failure("unavailable") }
             self.observer.stop()
-            try self.toolWindows.prepareLifecycle()
-            return try await self.launcher.prepareLifecycle()
+            let windowsReady = (try? self.toolWindows.prepareLifecycle()) != nil
+            let scope = try await self.launcher.prepareLifecycle()
+            guard windowsReady else { throw ManagementProtocol.failure("tool_window_pending") }
+            return scope
         }
         management.resumeLifecycle = { [weak self] in
             guard let self else { throw ManagementProtocol.failure("unavailable") }
