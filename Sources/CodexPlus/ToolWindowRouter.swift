@@ -44,6 +44,7 @@ final class ToolWindowRouter {
     private var managed: [Managed] = []
     private var tokens: [NSObjectProtocol] = []
     private var lastOpen: [String: Any] = [:]
+    private var lastRestore: [String: Any] = [:]
     private var currentOpenDocument: URL?
     private var currentOpenID: String?
     private var observationErrors: [pid_t: Int] = [:]
@@ -113,7 +114,7 @@ final class ToolWindowRouter {
         }
         let keys = managed.map { ($0.pid, $0.windowID) }
         var restored = true
-        for (pid, id) in keys { if !restore(pid: pid, id: id) { restored = false } }
+        for (pid, id) in keys { if !restore(pid: pid, id: id, preservingBornHidden: true) { restored = false } }
         guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil, startupRecovery.inFlight == nil else { return false }
         return display.release()
     }
@@ -131,6 +132,18 @@ final class ToolWindowRouter {
 
     private func windows(_ app: NSRunningApplication) -> [AXUIElement] {
         value(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
+    }
+
+    /// A failed AX inventory is unknown, never an empty manual-window baseline.
+    private func verifiedBaseline(_ app: NSRunningApplication) -> [AXUIElement]? {
+        guard let launch = app.launchDate, !app.isTerminated else { return nil }
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),
+            kAXWindowsAttribute as CFString, &raw) == .success,
+            let windows = raw as? [AXUIElement],
+            let live = NSRunningApplication(processIdentifier: app.processIdentifier),
+            !live.isTerminated, live.launchDate == launch else { return nil }
+        return windows
     }
 
     private struct FileOpenSnapshot {
@@ -172,7 +185,7 @@ final class ToolWindowRouter {
             removeWatch(app.processIdentifier)
         }
         if let existing = watches[app.processIdentifier] {
-            if defaultChrome && !existing.defaultChrome { existing.defaultKnown = [] }
+            if defaultChrome && !existing.defaultChrome { existing.defaultKnown = baseline }
             existing.defaultChrome = existing.defaultChrome || defaultChrome
             // Each request contributes its own manual-window baseline. Reusing
             // an observer must never make a later request claim those windows.
@@ -197,6 +210,7 @@ final class ToolWindowRouter {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let watch = Watch(app: app, observer: observer, known: baseline, documents: documents)
         watch.defaultChrome = defaultChrome
+        if defaultChrome { watch.defaultKnown = baseline }
         watches[app.processIdentifier] = watch
         let results = [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification].map {
             AXObserverAddNotification(observer, appElement, $0 as CFString, Unmanaged.passUnretained(self).toOpaque())
@@ -279,16 +293,14 @@ final class ToolWindowRouter {
             if let last = managed[i].lastKnownFrame, ToolWindowPolicy.sameFrame(original, last) { return managed[i].result == "parked" }
             release(managed[i]); lastError = "previous-claim-release-pending"; return false
         }
-        let origin = AgentDisplay.displays().filter { $0.key != display.id && $0.value.contains(CGPoint(x: original.midX, y: original.midY)) }
+        let origin = AgentDisplay.userDisplays().filter { $0.key != display.id && $0.value.contains(CGPoint(x: original.midX, y: original.midY)) }
         // New documents can inherit the previous Agent window's virtual location.
         // They are still exact file claims; never invent a physical restore target.
-        let bornOnAgentDisplay = display.bounds.map { ToolWindowPolicy.contained(original, in: $0) } ?? false
-        guard (!origin.isEmpty || bornOnAgentDisplay), let bounds = display.currentBounds() else { lastError = display.error ?? "original-display-unavailable"; return false }
-        // OCU owns the move and records its real original position. Do not
-        // resize here: the official restore contract currently restores position.
-        guard original.width <= bounds.width, original.height <= bounds.height else {
-            lastError = "agent-window-larger-than-ocu-display"; return false
-        }
+        let bornOnAgentDisplay = display.bounds.map { $0.contains(CGPoint(x: original.midX, y: original.midY)) } ?? false
+        guard (!origin.isEmpty || bornOnAgentDisplay), display.currentBounds() != nil else { lastError = display.error ?? "original-display-unavailable"; return false }
+        // The paired OCU provider captures the complete real frame, fits the
+        // window to its inset area and owns full-frame restoration. Plus never
+        // resizes a window before handing that original geometry to the provider.
         let record = Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
                              originalFrame: original, originalDisplays: origin, lastKnownFrame: original, result: "parking")
         managed.append(record)
@@ -376,7 +388,8 @@ final class ToolWindowRouter {
                       self.chromeUsesAgentDisplay, self.observationEpoch == epoch,
                       self.display.currentBounds() != nil else { return }
                 for app in apps where !app.isTerminated {
-                    _ = self.watch(app, baseline: [], documents: nil, defaultChrome: true)
+                    guard let baseline = self.verifiedBaseline(app) else { continue }
+                    _ = self.watch(app, baseline: baseline, documents: nil, defaultChrome: true)
                 }
             }
         }
@@ -393,7 +406,7 @@ final class ToolWindowRouter {
             let ready: Bool
             switch outcome {
             case .ready(let id): ready = online && self.display.id == id
-            case .unknown: ready = online // Timed-out ensure is idempotent; read back before retry.
+            case .unknown: ready = false // An online screen does not prove full-frame capability; retry idempotent ensure.
             case .unavailable, .unsupported: ready = false
             }
             let current = self.startupRecovery.complete(attempt, now: ProcessInfo.processInfo.systemUptime,
@@ -406,6 +419,7 @@ final class ToolWindowRouter {
 
     private func reconcileOwnership() {
         recoverStartupDisplayIfNeeded()
+        observeDefaultChrome() // Retry only baseline readiness; unknown AX never becomes a claim.
         // AX readiness/minimize/fullscreen changes need not publish window-created.
         for watch in Array(watches.values) where watch.defaultChrome { scan(watch) }
         for record in managed where record.result == "parked" {
@@ -466,7 +480,7 @@ final class ToolWindowRouter {
         return false
     }
 
-    private func restore(pid: pid_t, id: UInt32) -> Bool {
+    private func restore(pid: pid_t, id: UInt32, preservingBornHidden: Bool = false) -> Bool {
         if pid == ProcessInfo.processInfo.processIdentifier, ownAgentWindow?.windowNumber == Int(id) {
             if ownAgentWindow?.isVisible == false { ownAgentWindow = nil; registeredAgentSettings = nil; return agentSettingsRegistration == nil }
             if let window = ownAgentWindow, ownAgentWindowIsParked(window) {
@@ -482,7 +496,10 @@ final class ToolWindowRouter {
             return false
         }
         let info = inventory.first { ($0[kCGWindowNumber as String] as? UInt32) == id }
-        if info == nil || (info?[kCGWindowOwnerPID as String] as? Int32) != pid {
+        if info == nil {
+            managed.remove(at: i); return true
+        }
+        if let owner = info?[kCGWindowOwnerPID as String] as? Int32, owner != pid {
             managed.remove(at: i); return true
         }
         if let launch = NSRunningApplication(processIdentifier: pid)?.launchDate, launch != record.launchDate {
@@ -495,22 +512,24 @@ final class ToolWindowRouter {
         guard ToolWindowPolicy.sameFrame(actual, last) else {
             release(record); return false // User took over: forget the OCU record without moving.
         }
-        if record.originalDisplays.isEmpty,
+        if preservingBornHidden, record.originalDisplays.isEmpty,
            NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.google.Chrome" {
             release(record); return false // Keep born-hidden browser windows alive on OCU's persistent screen.
         }
-        let displays = AgentDisplay.displays()
-        guard record.originalDisplays.contains(where: { displays[$0.key] == $0.value }) else {
-            managed[i].result = record.originalDisplays.isEmpty ? "restore-close-native-agent-window" : "restore-original-display-unavailable"; return false
-        }
+        let physical = AgentDisplay.userDisplays()
+        guard !physical.isEmpty else { managed[i].result = "restore-physical-display-unavailable"; return false }
+        let originalTopologyUnchanged = record.originalDisplays.contains { physical[$0.key] == $0.value }
         managed[i].result = "restoring"
+        lastRestore = ["pid": Int(pid), "windowID": id, "mode": originalTopologyUnchanged ? "exact-original-frame" : "physical-fallback-original-size", "state": "requested"]
         ocu.call(arguments: ocuArguments(pid: pid, id: id, placement: "restore")) { [weak self] outcome in
             guard let self, let i = self.managed.firstIndex(where: { $0.claimID == record.claimID }) else { return }
             if self.definitelyGone(record) { self.managed.remove(at: i); self.finishStopIfReady(); return }
             if case .accepted = outcome, self.live(record), let actual = self.frame(record.element),
-               ToolWindowPolicy.sameFrame(actual, record.originalFrame) {
-                self.managed.remove(at: i); self.finishStopIfReady()
-            } else { self.managed[i].result = "restore-unconfirmed" }
+               ToolWindowPolicy.restorationConfirmed(actual: actual, original: record.originalFrame,
+                    requiresExactFrame: originalTopologyUnchanged,
+                    physicalDisplays: AgentDisplay.userDisplays().map(\.value)) {
+                self.managed.remove(at: i); self.lastRestore["state"] = "restored"; self.finishStopIfReady()
+            } else { self.managed[i].result = "restore-unconfirmed"; self.lastRestore["state"] = "unconfirmed" }
         }
         return false // Asynchronous; status is authoritative, a quit retries after completion.
     }
@@ -782,7 +801,7 @@ final class ToolWindowRouter {
         }
         var windows = managed.map { record -> [String: Any] in
             var result: [String: Any] = ["pid": record.pid, "windowID": record.windowID, "result": record.result,
-                "restoreMode": record.originalDisplays.isEmpty ? "close-agent-window" : "original-frame"]
+                "restoreMode": record.originalDisplays.isEmpty ? "physical-fallback-original-size" : "original-frame-or-physical-fallback"]
             if let f = frame(record.element) { result["frame"] = jsonFrame(f) }
             return result
         }
@@ -790,7 +809,7 @@ final class ToolWindowRouter {
             windows.append(["pid": ProcessInfo.processInfo.processIdentifier, "windowID": ownAgentWindow.windowNumber, "result": "agent-settings"])
         }
         return ["ok": true, "enabled": enabled, "chromeUsesAgentDisplay": chromeUsesAgentDisplay, "displaySummary": displaySummary, "accessibility": AXIsProcessTrusted(), "target": target,
-                "lastOpen": lastOpen, "watchedProcesses": watches.count, "windows": windows,
+                "lastOpen": lastOpen, "lastRestore": lastRestore, "watchedProcesses": watches.count, "windows": windows,
                 "observationErrors": observationErrors.map { ["pid": Int($0.key), "code": $0.value] },
                 "lastError": lastError ?? startupRecovery.lastError ?? display.error ?? ""]
     }

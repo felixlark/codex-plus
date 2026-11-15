@@ -71,6 +71,10 @@ final class AgentDisplay {
     /// Other OCU windows and the persistent display remain untouched.
     func release() -> Bool { id = 0; error = nil; return true }
 
+    static func userDisplays() -> [UInt32: CGRect] {
+        displays().filter { CGDisplayVendorNumber($0.key) != 0x0CAC || CGDisplayModelNumber($0.key) != 0x0CAC }
+    }
+
     static func displays() -> [UInt32: CGRect] {
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return [:] }

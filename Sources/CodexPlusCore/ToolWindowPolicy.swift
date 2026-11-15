@@ -50,6 +50,16 @@ public enum ToolWindowPolicy {
             && abs(a.width - b.width) < 2 && abs(a.height - b.height) < 2
     }
 
+    /// Provider owns fallback selection for a window born on the Agent display.
+    /// Its acknowledged restore must retain original size and put the top-left visible anchor on a physical
+    /// display. A known unchanged physical origin requires the entire exact frame.
+    public static func restorationConfirmed(actual: CGRect, original: CGRect,
+        requiresExactFrame: Bool, physicalDisplays: [CGRect]) -> Bool {
+        if requiresExactFrame { return sameFrame(actual, original) }
+        return abs(actual.width - original.width) < 2 && abs(actual.height - original.height) < 2
+            && physicalDisplays.contains { $0.contains(actual.origin) }
+    }
+
     public static func destination(frame: CGRect, area: CGRect) -> CGRect {
         let width = min(frame.width, area.width)
         let height = min(frame.height, area.height)

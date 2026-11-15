@@ -391,7 +391,7 @@ struct SettingsView: View {
                 get: { model.chromeUsesAgentDisplay }, set: { model.setChromeRouting($0) }
             ))
             .disabled(!model.toolWindowsEnabled)
-            Text("开启后将 Chrome 浏览窗口放到虚拟屏，新窗口自动沿用。手动移出的窗口会解除托管；关闭后已停放窗口保持原位。全屏、最小化或超出虚拟屏大小的窗口需先恢复或缩小。")
+            Text("开启后新建的 Chrome 窗口自动停放，已有人工窗口保留。大窗口自动适配虚拟屏，明确归还时恢复原尺寸；手动移出会解除托管。全屏或最小化窗口需先恢复普通窗口状态。")
                 .font(.caption).foregroundColor(.secondary)
             Button("刷新虚拟屏状态") { model.refresh() }
             Toggle("登录时启动", isOn: Binding(

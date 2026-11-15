@@ -86,4 +86,15 @@ final class ToolWindowPolicyTests: XCTestCase {
         XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: "A", resource: a, latestRequestID: "B", actualDocument: a))
         XCTAssertFalse(ToolWindowPolicy.canReportParked(requestID: nil, resource: nil, latestRequestID: "B", actualDocument: a))
     }
+    func testBornHiddenExplicitRestoreRequiresOriginalSizeOnPhysicalDisplay() {
+        let original = CGRect(x: 2000, y: 0, width: 2048, height: 1122)
+        let physical = CGRect(x: 0, y: 0, width: 1920, height: 1200)
+        let restored = CGRect(x: 0, y: 0, width: 2048, height: 1122)
+        XCTAssertTrue(ToolWindowPolicy.restorationConfirmed(actual: restored, original: original, requiresExactFrame: false, physicalDisplays: [physical]))
+        XCTAssertFalse(ToolWindowPolicy.restorationConfirmed(actual: CGRect(x: 0, y: 0, width: 1840, height: 1000), original: original, requiresExactFrame: false, physicalDisplays: [physical]))
+        XCTAssertFalse(ToolWindowPolicy.restorationConfirmed(actual: original, original: original, requiresExactFrame: false, physicalDisplays: [physical]))
+        XCTAssertFalse(ToolWindowPolicy.restorationConfirmed(actual: restored, original: original, requiresExactFrame: true, physicalDisplays: [physical]))
+        XCTAssertTrue(ToolWindowPolicy.restorationConfirmed(actual: restored, original: original, requiresExactFrame: false, physicalDisplays: [CGRect(x: 0, y: 0, width: 800, height: 600)]))
+    }
+
 }

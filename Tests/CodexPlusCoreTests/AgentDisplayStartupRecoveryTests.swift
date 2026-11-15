@@ -49,9 +49,9 @@ final class AgentDisplayStartupRecoveryTests: XCTestCase {
         func result(_ receipt: [String: Any]) throws -> [String: Any] {
             ["isError": false, "content": [["type": "text", "text": String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)]]]
         }
-        let valid: [String: Any] = ["protocol": 1, "persistent": true, "namespace": "persistent-display", "display_id": 42]
+        let valid: [String: Any] = ["protocol": 2, "geometry": "fit_restore_v1", "persistent": true, "namespace": "persistent-display", "display_id": 42]
         XCTAssertEqual(OCUStartupProtocol.readyDisplayID(try result(valid)), 42)
-        for (key, value) in [("protocol", true), ("display_id", true), ("persistent", 1), ("persistent", false), ("namespace", "orange"), ("protocol", 2)] as [(String, Any)] {
+        for (key, value) in [("protocol", true), ("display_id", true), ("persistent", 1), ("persistent", false), ("namespace", "orange"), ("protocol", 1), ("geometry", "position_only"), ("geometry", NSNull())] as [(String, Any)] {
             var invalid = valid; invalid[key] = value
             XCTAssertNil(OCUStartupProtocol.readyDisplayID(try result(invalid)))
         }
