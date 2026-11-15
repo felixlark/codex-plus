@@ -92,13 +92,20 @@ export class MobileAccess {
     if (!self?.TailscaleIPs?.includes(config.bind) || String(self.ID) !== String(config.nodeId) || String(self.UserID) !== String(config.userId)) throw Error('Mobile Tailscale identity changed');
     return new MobileAccess(config, options);
   }
-  constructor(config, {cdp, command, sessions, stateFile, publish, instance = randomUUID()}) {
+  constructor(config, {cdp, command, sessions, stateFile, publish, requestWindowPlacement, instance = randomUUID()}) {
     this.config = {...config, instance}; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
     this.stateFile = stateFile; this.claimRevision = 0; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
+    this.requestWindowPlacement = requestWindowPlacement;
   }
-  status() { return {phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  status() { return {phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  windowPlacementResult(message) {
+    if (!this.windowPlacementRequested || this.stopped || this.windowPlaced || this.windowPlacementUnknown || message.anchor !== this.config.anchor || message.instance !== this.config.instance || message.targetId !== this.anchorTarget) return;
+    if (message.phase === 'ready' && Number.isSafeInteger(message.windowID) && message.windowID > 0) {
+      this.windowID = message.windowID; this.windowPlaced = true;
+    } else if (message.phase === 'unknown') this.windowPlacementUnknown = true;
+  }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async tick() {
     if (this.busy || this.stopped) return;
@@ -118,6 +125,14 @@ export class MobileAccess {
         const session = [...this.sessions].find(([, s]) => s.target === anchors[0].targetId);
         if (!session) return;
         this.anchorSession = session[0];
+        if (this.requestWindowPlacement && !this.windowPlaced) {
+          this.phase = this.windowPlacementUnknown ? 'window-placement-unknown' : 'awaiting-right-window-placement';
+          if (!this.windowPlacementRequested) {
+            this.windowPlacementRequested = true;
+            this.requestWindowPlacement({anchor: this.config.anchor, instance: this.config.instance, targetId: this.anchorTarget});
+          }
+          return;
+        }
         if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
         this.stage = 'frame-tree';
         const {frameTree} = await this.command(session[0], 'Page.getFrameTree');

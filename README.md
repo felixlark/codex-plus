@@ -2,7 +2,7 @@
 
 0.9.1 在每个窗口左下角的 Codex Plus 圆形按钮中央显示窗口编号（1、2……），点击仍打开设置。编号跟随窗口，切换聊天、移屏、页面重载或重启 Plus 时保持；关闭窗口后编号可以供新窗口使用。无需新增侧栏按钮或重载已有页面。设计见[窗口编号](docs/designs/window-number.md)。
 
-0.10.0 将 Agent 专用工具窗口隔离到不可见虚拟屏。中间与右侧两个人工 Codex 窗口、X 和 X Chat 始终保留原位置与输入焦点。右屏归集、专用应用整进程规则、旧显示器偏好和物理屏恢复入口均已移除。只认领明确文件或准确 PID/窗口 ID；人工设置与 Agent 设置使用不同窗口。
+build69候选按本人最新决定把 Agent 派生窗口放到最右侧物理屏，退役 OCU 虚拟屏及自动恢复。人工 Codex 窗口、X 和 X Chat 保留原位；只认领明确文件或准确 PID/窗口 ID，不按整个应用认领，Chrome 新人工窗也不自动迁移。实际安装与验收另记。
 
 ```sh
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-status
@@ -10,14 +10,14 @@
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-open --app-path "/Applications/Codex Plus.app"
 ```
 
-浏览器等已有正式窗口提供方返回准确窗口身份后，可明确隔离或恢复该 Agent 窗口：
+浏览器等已有正式窗口提供方返回准确窗口身份后，可明确把该 Agent 窗口放右屏，或释放路由归属：
 
 ```sh
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-place --pid PID --window-id ID
 "/Applications/Codex Plus.app/Contents/MacOS/CodexPlus" --tool-restore --pid PID --window-id ID
 ```
 
-命令要求 Plus 已运行，连接失败不启动或重放工具；`requested` 只表示接收请求，开窗异步进行，须从状态确认 `parked` 或 `opened-agent-settings`。复用官方 OCU persistent-display 虚拟屏，Plus 不创建、重排或销毁显示器；该屏不可用时拒绝打开；`--tool-open` 对外部 App 要求实际本地文件，非文件窗口使用准确窗口 ID。所用 OCU 必须支持准确窗口 ID 的停放／归还／release，旧版接口会在开窗前被拒绝；Plus 不缩放外部窗口，超出虚拟屏尺寸的窗口报告无法隔离。暂停取消尚未认领的请求，已隔离窗口继续保留；正常退出会无激活地恢复仍受管的窗口。恢复失败时保留管理记录并报告状态。设计见[Agent 窗口隔离](docs/designs/quiet-tool-windows.md)。
+命令要求 Plus 已运行，连接失败不启动或重放工具；`requested` 只表示接收请求，开窗异步进行，须从状态确认 `parked` 或 `opened-agent-settings`。普通官方 OCU 必须提供准确 `window_id` 和 `right_display`；旧版接口在开文件前拒绝。`--tool-open` 对外部 App 要求实际本地文件，非文件窗口使用准确窗口 ID。过大的窗口适配物理屏；未确认的布局只读核对，不自动再搬。暂停停止尚未派出的请求；退出仅释放归属，Agent 窗口保持右屏。旧名 `--tool-restore` 现在只释放准确窗口归属，返回 `released`，不恢复原屏几何。设计见[Agent 窗口右屏路由](docs/designs/agent-windows-right-screen.md)。
 
 0.8.0 为每个 Codex 窗口独立保存侧栏展开与折叠状态，覆盖自定义分区、Projects 等内置分区和项目内聊天列表。一个窗口收起 Smart Shadow，不会影响另一个窗口；原生项目与聊天内容仍然共享。
 

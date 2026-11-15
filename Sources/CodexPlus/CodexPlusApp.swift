@@ -103,6 +103,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } }
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
+        launcher.onPlaceMobileWindow = { [weak self] host, request in self?.toolWindows.routeMobileAnchor(host, request: request) }
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -120,7 +121,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
-        let quiet = NSMenuItem(title: "Agent 工具窗口使用虚拟屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
+        let quiet = NSMenuItem(title: "Agent 工具窗口使用右屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
         quiet.target = self
         menu.addItem(quiet)
         menu.addItem(.separator())
@@ -381,20 +382,20 @@ struct SettingsView: View {
             Text("ChatGPT 视图保持收起，已展开的任务保留现有标签页。")
                 .font(.callout).foregroundColor(.secondary)
             Divider()
-            Text("OCU 虚拟屏").font(.headline)
+            Text("Agent 窗口右屏路由").font(.headline)
             Text(model.agentDisplaySummary).font(.callout).foregroundColor(.secondary)
-            Text("登录启动后自动恢复虚拟屏，无需先打开工具窗口。Chrome 默认进入；若 OCU 尚未就绪会自动重试。")
+            Text("Agent 工具窗口使用当前最右侧物理屏；不创建虚拟屏。")
                 .font(.caption).foregroundColor(.secondary)
-            Toggle("Agent 工具窗口使用虚拟屏", isOn: Binding(
+            Toggle("Agent 工具窗口使用右屏", isOn: Binding(
                 get: { model.toolWindowsEnabled }, set: { model.setToolRouting($0) }
             ))
-            Toggle("Google Chrome 默认使用虚拟屏", isOn: Binding(
+            Toggle("Agent Chrome 窗口使用右屏", isOn: Binding(
                 get: { model.chromeUsesAgentDisplay }, set: { model.setChromeRouting($0) }
             ))
             .disabled(!model.toolWindowsEnabled)
-            Text("开启后新建的 Chrome 窗口自动停放，已有人工窗口保留。大窗口自动适配虚拟屏，明确归还时恢复原尺寸；手动移出会解除托管。全屏或最小化窗口需先恢复普通窗口状态。")
+            Text("只路由明确登记的 Agent 窗口；人工窗口保留。超大窗口适配右屏，手动移动后解除托管，停止路由不搬回原屏。")
                 .font(.caption).foregroundColor(.secondary)
-            Button("刷新虚拟屏状态") { model.refresh() }
+            Button("刷新物理屏状态") { model.refresh() }
             Toggle("登录时启动", isOn: Binding(
                 get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }
             ))
@@ -438,9 +439,9 @@ struct SettingsView: View {
                     }
                 )) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(AgentDisplay.isPersistentScreen(display.displayID) ? "OCU 虚拟屏" : displayTitle(display))
+                        Text(displayTitle(display))
                         Text(display.identityUsable
-                             ? "\(AgentDisplay.isPersistentScreen(display.displayID) ? "不可见虚拟屏" : display.isBuiltin ? "内屏" : "外屏") · \(Int(display.bounds.width)) × \(Int(display.bounds.height)) pt"
+                             ? "\(display.isBuiltin ? "内屏" : "外屏") · \(Int(display.bounds.width)) × \(Int(display.bounds.height)) pt"
                              : "屏幕身份暂不可用")
                             .font(.caption).foregroundColor(.secondary)
                     }

@@ -79,10 +79,10 @@ struct ManagerView: View {
                             displaySettings(settings.workspaceAutoExpandDisplaySelection).disabled(!settings.workspaceAutoExpand)
                         }.padding(6)
                     }
-                    GroupBox("OCU 虚拟屏") {
+                    GroupBox("Agent 窗口右屏路由") {
                         VStack(alignment: .leading, spacing: 10) {
-                            setting("Agent 工具窗口使用虚拟屏", key: "agentToolWindowsEnabled", value: settings.agentToolWindowsEnabled)
-                            setting("Google Chrome 默认使用虚拟屏", key: "chromeUsesAgentDisplay", value: settings.chromeUsesAgentDisplay)
+                            setting("Agent 工具窗口使用右屏", key: "agentToolWindowsEnabled", value: settings.agentToolWindowsEnabled)
+                            setting("Agent Chrome 窗口使用右屏", key: "chromeUsesAgentDisplay", value: settings.chromeUsesAgentDisplay)
                                 .disabled(!settings.agentToolWindowsEnabled)
                             Text("窗口由 interactiond 持续托管；管理 App 退出后继续运行。")
                                 .font(.caption).foregroundColor(.secondary)

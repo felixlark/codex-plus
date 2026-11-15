@@ -139,6 +139,28 @@ function blankHarness() {
   return {manager, state, commands, contexts, commit};
 }
 
+test('mobile window waits for exact current right-screen acknowledgement before losing its nonce document', async () => {
+  const h = blankHarness(), requests = [];
+  h.manager.requestWindowPlacement = request => requests.push(request);
+  await h.manager.tick(); await h.manager.tick();
+  assert.equal(requests.length, 1);
+  assert.equal(h.commands.some(c => c.method === 'Page.navigate'), false);
+  h.manager.windowPlacementResult({...requests[0], instance: 'old', phase: 'ready', windowID: 42});
+  await h.manager.tick(); assert.equal(h.manager.windowPlaced, undefined);
+  h.manager.windowPlacementResult({...requests[0], phase: 'ready', windowID: 42});
+  await h.manager.tick();
+  assert.equal(h.manager.status().windowID, 42);
+  assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), ['about:blank']);
+  const unknown = blankHarness(); unknown.manager.requestWindowPlacement = () => {};
+  await unknown.manager.tick();
+  const reply = {anchor: unknown.manager.config.anchor, instance: unknown.manager.config.instance, targetId: unknown.manager.anchorTarget};
+  unknown.manager.windowPlacementResult({...reply, phase: 'unknown'});
+  unknown.manager.windowPlacementResult({...reply, phase: 'ready', windowID: 42});
+  await unknown.manager.tick();
+  assert.equal(unknown.manager.phase, 'window-placement-unknown');
+  assert.equal(unknown.commands.some(c => c.method === 'Page.navigate'), false);
+});
+
 test('the captured blank host repairs only its original preload world before opening the gateway', async () => {
   const h = blankHarness(); await h.manager.tick();
   assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), ['about:blank']);

@@ -10,6 +10,8 @@ final class CodexLauncher: ObservableObject {
     @Published private(set) var sidebarSummary = "等待页面接入"
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
+    var onPlaceMobileWindow: ((NSRunningApplication, [String: Any]) -> [String: Any]?)?
+    private var mobileWindowRequest: [String: Any]?
     private var controllerOutput: Pipe?
     private var controllerInput: FileHandle?
     private var outputBuffer = Data()
@@ -158,6 +160,16 @@ final class CodexLauncher: ObservableObject {
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
         }
+        if let host = ownedHost(), let request = mobileWindowRequest,
+           let placement = onPlaceMobileWindow?(host, request) {
+            if let id = placement["windowID"] { mobileWindowRequest?["windowID"] = id }
+            if ["ready", "unknown"].contains(placement["phase"] as? String ?? "") {
+                var reply = request; reply["type"] = "mobile-window-result"
+                reply["phase"] = placement["phase"]; reply["windowID"] = placement["windowID"]
+                mobileWindowRequest = nil
+                if let data = try? JSONSerialization.data(withJSONObject: reply) { try? controllerInput?.write(contentsOf: data + Data([10])) }
+            }
+        }
         let entries = snapshot["pageEntries"] as? [String: Any]
         let order = snapshot["projectOrder"] as? [String: Any]
         let connected = controller?.isRunning == true
@@ -241,6 +253,7 @@ final class CodexLauncher: ObservableObject {
             self.controllerOutput?.fileHandleForReading.readabilityHandler = nil
             self.controllerOutput = nil
             self.controllerInput = nil
+            self.mobileWindowRequest = nil
             self.outputBuffer.removeAll()
             self.controller = nil; self.refresh()
             if self.stopping { self.stopped?(); self.stopped = nil; return }
@@ -265,6 +278,11 @@ final class CodexLauncher: ObservableObject {
             let line = outputBuffer.prefix(upTo: newline)
             outputBuffer.removeSubrange(...newline)
             guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+            if value["type"] as? String == "mobile-window-request", value["version"] as? Int == 1 {
+                guard !stopping, mobileWindowRequest == nil else { continue }
+                mobileWindowRequest = value
+                continue
+            }
             if value["type"] as? String == "enhancement-reconnect-result" {
                 if value["ok"] as? Bool == true { reconnectResult = "页面增强已重新接入。" }
                 else if let count = value["reloaded"] as? Int, count > 0 { reconnectResult = "部分页面已重连，其余尚未接入；自动发送保持关闭。" }
