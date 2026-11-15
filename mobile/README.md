@@ -24,6 +24,8 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 手机草稿、项目选择和页面偏好独立存入本 App 的 Application Support，原持久化协议收到原子写入回执后才发布更新，不读取或覆盖 Mac 草稿/窗口布局。允许的键随准确原前端登记；未知键明确报告页面状态失败，附件引用使用独立回执。
 - 账户摘要沿原后台 `accountInfo.readAccountInfo()` 读取；`accessInputs.readLocalChatGptAuth()` 不开放给手机，Mac 访问令牌不随摘要转发。
 - 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
+- 权限默认值就绪沿原 `statsigEvaluations.subscribe()` 的真实 publication 三态与可释放订阅确定，发送链只读查询 `hasReadyExecutionAssignments()`；不以空对象替代快照、不开放评估写入。缺少该订阅会使原界面停在配置延迟队列，Mac 投递函数返回不能证明消息已提交。
+- 原模型缓存只允许 `chatgpt-work-models-v1/` 后两个非空编码身份段；输入历史、会话活动时间与摘要按准确静态键登记，均留手机私有原子文件。身份段和缓存值不进诊断日志。
 - 原网页请求使用现役 `httpFetch`，身份注入仍留 Mac；返回体在手机本地会话逐块建立流归属，消费或取消后释放原租约，只取消本手机仍持有的请求。
 - iOS 资源适配移除原前端的旧 `hatch-pet` 桌面迁移触发钩子，避免手机初始化重复写 Mac 技能配置；Mac 原厂资源不变。手机缓存可包含身份 ID、页面预览和 profile 业务数据，不把这些缓存当作账号访问令牌。
 
@@ -53,5 +55,5 @@ node scripts/configure-mobile.mjs --thread <existing-thread-uuid>
 node scripts/configure-mobile.mjs --disable
 ```
 
-当前验收只覆盖原会话读取、单次发送、文本流式、Mac 同会话对账和断线不重发。
+已完成首批验收覆盖原会话读取、单次发送、文本流式、Mac 同会话对账和断线不重发。后续完整功能增量仍需以对应安装版逐项验收，首批证据不代表新候选全覆盖。
 原前端的其他宿主功能与物理 iPhone 跨节点访问尚未验收；更换原 Codex 版本时须重新核对准确版本和资源摘要。

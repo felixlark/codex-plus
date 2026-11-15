@@ -73,7 +73,13 @@ export function selectMobileServices(original, RpcTarget) {
     readAll(...args) { return original.settings.readAll(...args); }
     subscribe(...args) { return original.settings.subscribe(...args); }
   }
-  class Evaluations extends RpcTarget { readExecutionAssignments(...args) { return original.statsigEvaluations.readExecutionAssignments(...args); } }
+  class Evaluations extends RpcTarget {
+    readExecutionAssignments(...args) { return original.statsigEvaluations.readExecutionAssignments(...args); }
+    hasReadyExecutionAssignments(...args) { return original.statsigEvaluations.hasReadyExecutionAssignments(...args); }
+    // The original renderer waits for the real publication snapshot before
+    // resolving guardian permission defaults. Retain its callback/lease contract.
+    subscribe(...args) { return original.statsigEvaluations.subscribe(...args); }
+  }
   class AppInfo extends RpcTarget {
     get(...args) { return original.appInfo.get(...args); }
     // Original platform query describes the execution host (paths and tools),

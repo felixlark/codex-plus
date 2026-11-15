@@ -111,6 +111,31 @@ test('reviewed per-thread activity and account-scoped profile keys persist while
   } finally { f.cleanup(); }
 });
 
+test('model cache uses exactly two encoded identity segments and personal history stays phone-local', async () => {
+  const f = setup();
+  try {
+    const entries = [
+      ['chatgpt-work-models-v1/user%2Fid/account', {fetchedAt: 123, response: {models: [{slug: 'real-model'}]}}],
+      ['prompt-history', {global: [{plain: '中文🙂', document: {type: 'doc'}}]}],
+      ['thread-user-activity-times-v1', {'["local","thread"]': 123}],
+      ['thread-descriptions-v1', {thread: 'own chat summary'}],
+    ];
+    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
+    await flush(); await flush(); await flush();
+    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
+    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
+    for (const key of ['chatgpt-work-models-v1/', 'chatgpt-work-models-v1/a', 'chatgpt-work-models-v1/a/', 'chatgpt-work-models-v1/a/b/c', 'chatgpt-work-models-v1/%GG/b', 'chatgpt-work-models-v1/%ED%A0%80/b', 'prompt-history-extra']) {
+      f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
+    }
+    await flush(); await flush(); await flush();
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, entries.length);
+    const warnings = f.messages.filter(m => m.operation === 'local-state-warning');
+    assert.equal(warnings.length, 7);
+    assert.ok(warnings.slice(0,6).every(m => m.key === 'chatgpt-work-models-v1'));
+    assert.equal(JSON.stringify(warnings).includes('PRIVATE'), false);
+  } finally { f.cleanup(); }
+});
+
 test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
   const rpc = await rpcLibrary(t); if (!rpc) return;
   const f = setup(), wire = new MessageChannel();
@@ -188,6 +213,45 @@ test('original settings initialization reads all values and retains a read-only 
     await assert.rejects(async () => await module.appServices.settings.write('conversation-detail-mode', 'changed'));
     lease[Symbol.dispose](); pending[Symbol.dispose]();
     await module.appServices.settings.readAll();
+    for (let i=0;i<8;i++) await flush(); assert.equal(disposed, 1);
+  } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); }
+});
+
+test('original evaluation publication reaches permission readiness with its real disposable subscription', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), channel = new MessageChannel();
+  let notify, disposed = 0;
+  class Subscription extends rpc.TF {
+    constructor(callback) { super(); this.callback = callback; }
+    [Symbol.dispose]() { this.callback[Symbol.dispose](); disposed++; }
+  }
+  class Evaluations extends rpc.TF {
+    subscribe(callback) {
+      const held = callback.dup(); notify = value => held(value);
+      void held({hasEvaluations: undefined}); return new Subscription(held);
+    }
+    hasReadyExecutionAssignments() { return true; }
+    readExecutionAssignments() { return {permissionRefresh: {enabled: true}}; }
+    publish() { throw Error('Phone must not publish Mac evaluations'); }
+  }
+  class Root extends rpc.TF { get services() { return {statsigEvaluations: new Evaluations()}; } }
+  const server = rpc.ab(channel.port1, new Root()), client = rpc.ab(channel.port2, new rpc.TF());
+  const original = await client.services;
+  const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    const snapshots = [];
+    const pending = module.appServices.statsigEvaluations.subscribe(value => { snapshots.push(value); });
+    const lease = await pending;
+    await notify({hasEvaluations: false});
+    const ready = {hasEvaluations: true, defaultEnableFeatures: {guardian_approval: true}, executionValues: {permissionRefresh: {enabled: true}}};
+    await notify(ready); await flush();
+    assert.deepEqual(snapshots, [{hasEvaluations: undefined}, {hasEvaluations: false}, ready]);
+    assert.equal(await module.appServices.statsigEvaluations.hasReadyExecutionAssignments(), true);
+    assert.deepEqual(await module.appServices.statsigEvaluations.readExecutionAssignments(), {permissionRefresh: {enabled: true}});
+    await assert.rejects(async () => await module.appServices.statsigEvaluations.publish({}));
+    lease[Symbol.dispose](); pending[Symbol.dispose]();
+    await module.appServices.statsigEvaluations.hasReadyExecutionAssignments();
     for (let i=0;i<8;i++) await flush(); assert.equal(disposed, 1);
   } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); channel.port1.close(); channel.port2.close(); }
 });

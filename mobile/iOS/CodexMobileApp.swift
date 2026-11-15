@@ -179,7 +179,11 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
                 // the associated draft, account data or state value.
                 if let key = value["key"] as? String, key.range(of: #"^[a-zA-Z_][a-zA-Z0-9_.-]*$"#, options: .regularExpression) != nil {
                     NSLog("CodexMobile local state failed at key: %@", key)
-                } else { NSLog("CodexMobile local state failure has no static key") }
+                } else {
+                    let prefix = value["key"] as? String ?? ""
+                    let digest = SHA256.hash(data: Data(prefix.utf8)).map { String(format: "%02x", $0) }.joined()
+                    NSLog("CodexMobile local state opaque key: hash=%@ length=%d", String(digest.prefix(12)), prefix.count)
+                }
                 let alert = UIAlertController(title: "页面状态未能保存", message: "请保留当前页面，重新连接前先核对草稿。", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "好", style: .default))
                 if presentedViewController == nil { present(alert, animated: true) }

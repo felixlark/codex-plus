@@ -9,6 +9,12 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   function allowedAtom(key) {
     if (typeof key !== 'string') return false;
     if (atomKeys.has(key) || (keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) return true;
+    if ((keys.identityPathAtomPrefixes ?? []).some(prefix => {
+      if (!key.startsWith(prefix)) return false;
+      const ids = key.slice(prefix.length).split('/');
+      try { return ids.length === 2 && ids.every(id => id.length > 0 && decodeURIComponent(id).length > 0); }
+      catch { return false; }
+    })) return true;
     return (keys.identityAtomPrefixes ?? []).some(prefix => {
       if (!key.startsWith(prefix)) return false;
       try { const ids = JSON.parse(key.slice(prefix.length)); return Array.isArray(ids) && ids.length === 2 && ids.every(id => typeof id === 'string' && id.length > 0); }
@@ -32,7 +38,8 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     const key = error?.phoneStateKey;
     // Dynamic keys can include a chat identity. Report only their static
     // protocol prefix, never the suffix or the associated persisted value.
-    const prefix = typeof key === 'string' ? key.split(':')[0] : 'unknown-key';
+    const identityPath = typeof key === 'string' && (keys.identityPathAtomPrefixes ?? []).find(prefix => key.startsWith(prefix));
+    const prefix = identityPath ? identityPath.slice(0, -1) : typeof key === 'string' ? key.split(':')[0] : 'unknown-key';
     void native('local-state-warning', {key: prefix}).catch(() => {});
   }
   async function commit(change) {

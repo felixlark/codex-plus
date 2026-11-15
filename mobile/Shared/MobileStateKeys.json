@@ -39,7 +39,10 @@
     "space-page-pins-local-backup-v1",
     "unified-sidebar-pinned-order-v1",
     "space-page-pin-projection-owners-v1",
-    "pull-request-attachment-records-v3"
+    "pull-request-attachment-records-v3",
+    "prompt-history",
+    "thread-user-activity-times-v1",
+    "thread-descriptions-v1"
   ],
   "atomPrefixes": [
     "thread-client-id-v1:local%3A",
@@ -53,5 +56,8 @@
     "selected-project",
     "selected-remote-host-id",
     "active-remote-project-id"
+  ],
+  "identityPathAtomPrefixes": [
+    "chatgpt-work-models-v1/"
   ]
 }
