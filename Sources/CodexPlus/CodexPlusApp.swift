@@ -89,6 +89,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          agentToolWindowsEnabled: self.toolWindows.enabled, chromeUsesAgentDisplay: self.toolWindows.chromeUsesAgentDisplay)
         }
         management.writeSettings = { [weak self] value in self?.settings.applyManagement(value) }
+        management.readComponents = { [weak self] in self?.launcher.runtimeComponents() ?? [:] }
         management.readStatus = { [weak self] in
             guard let self else { return [:] }
             let tools = self.toolWindows.command(["command": "tool-status"])

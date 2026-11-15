@@ -8,14 +8,20 @@ final class ManagementRuntime {
     var readSettings: (() throws -> ManagementProtocol.Settings)?
     var writeSettings: ((ManagementProtocol.Settings) throws -> Void)?
     var readStatus: (() -> [String: Any])?
+    var readComponents: (() -> [String: Any])?
     var openWorkbench: ((UUID) -> Bool)?
     var readWorkbench: ((UUID?) -> [String: Any]?)?
 
     private var identity: ManagementProtocol.RuntimeIdentity {
-        .init(instanceID: instance, pid: ProcessInfo.processInfo.processIdentifier,
+        let components = readComponents?() ?? [:]
+        return .init(instanceID: instance, pid: ProcessInfo.processInfo.processIdentifier,
               bundleID: Bundle.main.bundleIdentifier ?? "unknown", path: Bundle.main.bundleURL.standardizedFileURL.path,
               version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-              build: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown")
+              build: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+              controllerProtocol: components["controller_protocol"] as? Int,
+              controllerVersion: components["controller_version"] as? String,
+              mobileProtocol: components["mobile_protocol"] as? Int,
+              mobileVersion: components["mobile_version"] as? String)
     }
     private var capabilities: [String] {
         ["status"] + (readSettings == nil ? [] : ["settings.read"]) +

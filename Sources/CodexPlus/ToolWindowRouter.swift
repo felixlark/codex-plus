@@ -69,6 +69,7 @@ final class ToolWindowRouter {
 
     func start() {
         guard tokens.isEmpty else { return }
+        ownershipTimer?.invalidate()
         ownershipTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.reconcileOwnership() }
         for key in ["quietToolDisplayUUID", "quietToolWindowsEnabled"] { UserDefaults.standard.removeObject(forKey: key) }
         let center = NSWorkspace.shared.notificationCenter
@@ -100,7 +101,9 @@ final class ToolWindowRouter {
     func stop() -> Bool {
         stopping = true
         startupRecovery.request(enabled: false)
-        ownershipTimer?.invalidate(); ownershipTimer = nil
+        // Keep the existing observer alive until restoration completes. A window
+        // can close while an asynchronous restore is pending; its exact record
+        // must then be reconciled without retrying an unknown restore effect.
         observationEpoch = UUID()
         tokens.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         tokens.removeAll()
@@ -116,7 +119,9 @@ final class ToolWindowRouter {
         var restored = true
         for (pid, id) in keys { if !restore(pid: pid, id: id, preservingBornHidden: true) { restored = false } }
         guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil, startupRecovery.inFlight == nil else { return false }
-        return display.release()
+        guard display.release() else { return false }
+        ownershipTimer?.invalidate(); ownershipTimer = nil
+        return true
     }
 
     private func removeWatch(_ pid: pid_t) {
@@ -418,6 +423,14 @@ final class ToolWindowRouter {
     }
 
     private func reconcileOwnership() {
+        managed.removeAll { definitelyGone($0) }
+        if stopping {
+            if let window = ownAgentWindow, !window.isVisible, agentSettingsRegistration == nil {
+                ownAgentWindow = nil; registeredAgentSettings = nil
+            }
+            finishStopIfReady()
+            return
+        }
         recoverStartupDisplayIfNeeded()
         observeDefaultChrome() // Retry only baseline readiness; unknown AX never becomes a claim.
         // AX readiness/minimize/fullscreen changes need not publish window-created.

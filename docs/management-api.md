@@ -8,6 +8,8 @@
 
 仅 command=management-v1 进入 ManagementProtocol.Request.parse。实例启动时生成一次真实 UUID；每次响应用 RuntimeIdentity 写准确 native PID、bundle、全局路径、版本/build，未知 controller/mobile 协议或版本为 null。用 response factory 返回 protocol/request_id/runtime/capabilities/result 或 error；capabilities 只列实际支持项。
 
+build68候选补充实际组件身份：controller启动时读取自身文件计算SHA-256；移动接缝在核验网关签名后，计算实际mobile-access源码与网关二进制的组合SHA-256。管理响应只在当前controller PID与其快照匹配时读取这些版本，尚未启动的移动网关版本仍为null。这里的移动版本指Mac移动适配器和网关，不冒充iOS安装版本。安装采用另验。
+
 - status 返回无正文、凭据和环境的运行元数据。query_request_id 必须带 expected_runtime；查询同运行实例对应 workbench request_id/nonce/target/window/phase。无关联记录或实例变更保留 unknown。
 - settings.read 的 result 为 settings、settings_revision。Settings 仅含原五个设置，revision 由实际规范化设置对象计算 SHA256。
 - settings.write 先校验 expected_runtime 与 expected_settings_revision，再用 Settings.applying 校验完整差量，沿原 SettingsModel/偏好与回调写入，最后实际读回 settings/revision。冲突返回 conflict 与当前快照；实例变更不写。原验收模式等运行侧限制继续适用，不能把请求值冒充实际读回。

@@ -25,7 +25,8 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-let state={phase:'preparing',protocol:6,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
+const controllerVersion='sha256:'+createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex');
+let state={phase:'preparing',protocol:6,version:controllerVersion,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;

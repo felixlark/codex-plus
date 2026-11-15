@@ -122,6 +122,16 @@ final class CodexLauncher: ObservableObject {
          "suggestionAutoSend": snapshot["suggestionAutoSend"] ?? ["enabled": false, "phase": "unavailable"]]
     }
 
+    func runtimeComponents() -> [String: Any] {
+        guard let controller, controller.isRunning,
+              (snapshot["controllerPID"] as? NSNumber)?.int32Value == controller.processIdentifier else { return [:] }
+        let mobile = snapshot["mobile"] as? [String: Any]
+        return ["controller_protocol": snapshot["protocol"] ?? NSNull(),
+                "controller_version": snapshot["version"] ?? NSNull(),
+                "mobile_protocol": mobile?["protocol"] ?? NSNull(),
+                "mobile_version": mobile?["version"] ?? NSNull()]
+    }
+
     private func ownedHost() -> NSRunningApplication? {
         guard let number = snapshot["pid"] as? NSNumber,
               let app = NSRunningApplication(processIdentifier: number.int32Value), !app.isTerminated,

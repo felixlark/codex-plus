@@ -98,7 +98,7 @@ export class MobileAccess {
     this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
   }
-  status() { return {phase: this.phase, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  status() { return {phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async tick() {
     if (this.busy || this.stopped) return;
@@ -182,6 +182,8 @@ export class MobileAccess {
   async startGateway() {
     const gatewayPath = fileURLToPath(new URL('./MobileGateway', import.meta.url));
     execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus.mobile-gateway" and certificate leaf[subject.OU] = "HJG65XBC25"', gatewayPath], {stdio: 'pipe'});
+    // Identify the adapter and verified gateway actually loaded by this runtime.
+    this.version = 'sha256:' + createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).update(await fs.readFile(gatewayPath)).digest('hex');
     this.gateway = spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
     this.gateway.stderr.resume();
     this.gateway.once('exit', () => { if (!this.stopped) { this.phase = 'gateway-exited'; void this.close(); } });
