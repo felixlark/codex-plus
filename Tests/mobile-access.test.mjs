@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
+import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness, mobileAnchorRoute, mobileDocumentURL, mobileDocumentHTML} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
+import {isHumanWindowURL} from '../Sources/CodexPlus/Resources/human-window.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
 import {encodeMobileValue, decodeMobileValue} from '../Sources/CodexPlus/Resources/mobile-codec.mjs';
 
@@ -45,7 +46,7 @@ test('a duplicate app-host handshake closes instead of replacing the native view
   const window = new EventTarget();
   window.electronBridge = {subscribeToSystemThemeVariant: () => () => {}};
   window.postMessage = (data, origin) => { native.push(data.type); ports.push(data.port); origins.push(origin); };
-  const context = vm.createContext({window, location: {origin: 'null', href: 'about:blank'}, MessageChannel, MessageEvent: EventMessage, CustomEvent, MessagePort,
+  const context = vm.createContext({window, location: {origin: 'app://-', href: 'app://-/index.html'}, MessageChannel, MessageEvent: EventMessage, CustomEvent, MessagePort,
     __codexPlusMobileOutbound: text => sent.push(JSON.parse(text))});
   vm.runInContext(`(${installMobileEndpoint.toString()})({side:'host',connection:'test'},${encodeMobileValue.toString()},${decodeMobileValue.toString()})`, context);
   const endpoint = context.__codexPlusMobileEndpoint;
@@ -54,7 +55,7 @@ test('a duplicate app-host handshake closes instead of replacing the native view
   endpoint.receive(JSON.stringify({connection: 'test', kind: 'port-open', id: 'two'}));
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(native, ['connect-app-host']);
-  assert.deepEqual(origins, ['*']);
+  assert.deepEqual(origins, ['app://-']);
   assert.ok(endpoint.inspect().closed);
   assert.ok(sent.some(event => event.kind === 'fatal'));
   for (const port of ports) port.close();
@@ -108,104 +109,129 @@ test('revoked binding installation and old fatal cannot replace or release its s
   assert.equal(manager.clients.get('B'), b);
 });
 
-test('the captured native target navigates once to blank and waits for its new loader', async () => {
-  const config = {threadId: 'thread', anchor: 'anchor'}, url = new URL('app://-/index.html');
-  url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
-  const commands = []; let starts = 0, loader = 'old', probes = 0;
-  let document = {complete: true, preload: true, isolated: false, ui: true};
-  const manager = new MobileAccess(config, {
-    cdp: {call: async () => ({targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]})},
+function anchorHarness({fulfillError = false} = {}) {
+  const commands = [], contexts = new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]]);
+  const state = {loader: 'old', target: 'owned', starts: 0, probes: [], ready: false};
+  const manager = new MobileAccess({threadId: 'thread', anchor: 'anchor'}, {
+    instance: 'fixture', scriptPatterns: [{urlPattern: 'app://-/assets/original.js', resourceType: 'Script', requestStage: 'Response'}],
+    cdp: {call: async (method, args) => {
+      commands.push({method, params: args});
+      return method === 'Target.getTargets' ? {targetInfos: [{type: 'page', targetId: state.target, url: state.url}]} : {};
+    }},
     command: async (session, method, params) => {
       commands.push({session, method, params});
-      return method === 'Page.getFrameTree' ? {frameTree: {frame: {id: 'root', loaderId: loader, url: loader === 'old' ? url.href : 'about:blank'}}} : {};
-    },
-    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts: new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]])}]]),
-    stateFile: '/unused', publish: async () => {},
-  });
-  manager.evaluate = async () => { probes++; return document; };
-  manager.startGateway = async () => { starts++; manager.gateway = {}; manager.phase = 'listening'; };
-  await manager.tick();
-  assert.equal(starts, 0); assert.equal(manager.status().anchorReady, false);
-  assert.deepEqual(commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), ['about:blank']);
-  // Navigation can ACK while the old complete document is still committed.
-  await manager.tick(); assert.equal(probes, 0); assert.equal(starts, 0); assert.equal(manager.stopped, false);
-  loader = 'new'; document = {blank: true, complete: false, preload: true, isolated: false, ui: false};
-  await manager.tick(); assert.equal(starts, 0);
-  document = {blank: true, complete: true, preload: true, isolated: true, ui: false};
-  await manager.tick(); await manager.tick();
-  assert.equal(starts, 1); assert.equal(manager.status().anchorReady, true);
-  assert.equal(commands.filter(c => c.method === 'Page.navigate').length, 1);
-  assert.equal(commands.filter(c => c.method === 'Runtime.evaluate').length, 0);
-});
-
-test('a new loader that remains unisolated closes without replaying navigation or creating a second window', async () => {
-  const config = {threadId: 'thread', anchor: 'anchor'}, url = new URL('app://-/index.html');
-  url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
-  let navigations = 0, closes = 0, starts = 0, loader = 'old';
-  const manager = new MobileAccess(config, {
-    cdp: {call: async method => { if (method === 'Target.closeTarget') { closes++; return {}; } return {targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]}; }},
-    command: async (_, method) => { if (method === 'Page.getFrameTree') return {frameTree: {frame: {id: 'root', loaderId: loader, url: loader === 'old' ? url.href : 'about:blank'}}}; assert.equal(method, 'Page.navigate'); navigations++; return {}; },
-    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts: new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]])}]]),
-    stateFile: '/unused', publish: async () => {},
-  });
-  manager.evaluate = async () => ({blank: true, complete: true, preload: true, isolated: false, ui: true});
-  manager.startGateway = async () => { starts++; };
-  await manager.tick(); loader = 'new'; await manager.tick(); await manager.tick();
-  assert.equal(navigations, 1); assert.equal(closes, 1); assert.equal(starts, 0);
-  assert.equal(manager.stopped, true); assert.equal(manager.status().anchorReady, false);
-});
-
-test('anchor probes use the new context when navigation commits during frame-tree lookup', async () => {
-  const url = new URL('app://-/index.html'); url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
-  const contexts = new Map([[1, {id: 1, auxData: {isDefault: true, frameId: 'root'}}]]);
-  let swap = false, loader = 'old', starts = 0;
-  const manager = new MobileAccess({threadId: 'thread', anchor: 'anchor'}, {
-    cdp: {call: async () => ({targetInfos: [{type: 'page', targetId: 'owned', url: url.href}]})},
-    sessions: new Map([['anchor-session', {target: 'owned', frame: 'root', contexts}]]), stateFile: '/unused', publish: async () => {},
-    command: async (_, method) => {
+      if (method === 'Fetch.enable') await state.fetchGate;
+      if (method === 'Fetch.fulfillRequest' && fulfillError) throw Error('Controlled document failure');
       if (method === 'Page.getFrameTree') {
-        if (swap) { contexts.clear(); contexts.set(2, {id: 2, auxData: {isDefault: true, frameId: 'root'}}); loader = 'new'; }
-        return {frameTree: {frame: {id: 'root', loaderId: loader, url: loader === 'old' ? url.href : 'about:blank'}}};
+        state.onFrameTree?.();
+        return {frameTree: {frame: {id: 'root', loaderId: state.loader, url: state.frameURL}}};
       }
-      assert.equal(method, 'Page.navigate'); return {};
+      return {};
     },
+    sessions: new Map([['anchor', {target: 'owned', frame: 'root', contexts}]]), stateFile: '/unused', publish: async () => {},
   });
-  manager.evaluate = async (_, __, contextId) => {
-    assert.equal(contextId, swap ? 2 : 1);
-    return {blank: true, complete: true, preload: true, isolated: swap, ui: !swap};
+  const initial = new URL('app://-/index.html'); initial.searchParams.set('initialRoute', mobileAnchorRoute(manager.config));
+  state.url = state.frameURL = initial.href;
+  manager.evaluate = async (_, __, context) => {
+    state.probes.push(context);
+    return state.probe ?? {url: true, origin: true, blank: true, complete: state.ready, preload: true, isolated: true, ui: false};
   };
-  manager.startGateway = async () => { starts++; manager.gateway = {}; };
-  await manager.tick(); swap = true; await manager.tick();
-  assert.equal(starts, 1); assert.equal(manager.stopped, false);
+  manager.startGateway = async () => { state.starts++; manager.gateway = {stdin: {end() { state.gatewayClosed = true; }}}; };
+  const commit = () => {
+    state.loader = 'new'; state.url = state.frameURL = manager.documentURL;
+    contexts.clear(); contexts.set(2, {id: 2, auxData: {isDefault: true, frameId: 'root'}});
+  };
+  const document = extra => ({resourceType: 'Document', frameId: 'root', requestId: 'document-1', request: {url: manager.documentURL}, ...extra});
+  return {manager, state, commands, contexts, commit, document};
+}
+
+test('the owned document waits for Fetch acknowledgement, fulfillment and a new original app-origin loader', async () => {
+  const h = anchorHarness(); let release;
+  h.state.fetchGate = new Promise(resolve => { release = resolve; });
+  const preparing = h.manager.tick();
+  while (!h.commands.some(c => c.method === 'Fetch.enable')) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.commands.filter(c => c.method === 'Page.navigate').length, 0);
+  release(); await preparing;
+  const patterns = h.commands.find(c => c.method === 'Fetch.enable').params.patterns;
+  assert.equal(patterns[0].resourceType, 'Script'); assert.equal(patterns[1].resourceType, 'Document');
+  assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), [h.manager.documentURL]);
+  await h.manager.tick(); assert.equal(h.state.probes.length, 0);
+  h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0); assert.equal(h.state.probes.length, 0);
+  assert.equal(await h.manager.handleDocument('anchor', h.document()), true);
+  const fulfilled = h.commands.find(c => c.method === 'Fetch.fulfillRequest').params;
+  assert.equal(fulfilled.responseCode, 200); assert.ok(Buffer.from(fulfilled.body, 'base64').toString().includes('codex-plus-mobile-instance'));
+  await h.manager.handleDocument('anchor', h.document());
+  assert.equal(h.commands.filter(c => c.method === 'Fetch.fulfillRequest').length, 1);
+  await h.manager.tick(); assert.equal(h.state.starts, 0);
+  h.state.ready = true; await h.manager.tick(); await h.manager.tick();
+  assert.equal(h.state.starts, 1); assert.equal(h.manager.status().anchorReady, true);
+  assert.deepEqual(h.state.probes, [2, 2, 2]);
 });
 
-
-test('a captured target disappearing cannot adopt another matching nonce target', async () => {
-  const url = new URL('app://-/index.html'); url.searchParams.set('initialRoute', '/local/thread?codexPlusMobileAnchor=anchor');
-  let target = 'owned'; const closed = [], navigated = [];
-  const manager = new MobileAccess({threadId: 'thread', anchor: 'anchor'}, {
-    cdp: {call: async (method, args) => { if (method === 'Target.closeTarget') { closed.push(args.targetId); return {}; } return {targetInfos: [{type: 'page', targetId: target, url: url.href}]}; }},
-    sessions: new Map([['session', {target: 'owned', frame: 'root', contexts: new Map()}]]), stateFile: '/unused', publish: async () => {},
-    command: async (_, method, args) => { if (method === 'Page.getFrameTree') return {frameTree: {frame: {id: 'root', loaderId: 'old', url: url.href}}}; assert.equal(method, 'Page.navigate'); navigated.push(args.url); return {}; },
-  });
-  await manager.tick(); target = 'replacement'; await manager.tick();
-  assert.equal(manager.anchorTarget, 'owned'); assert.equal(manager.stopped, true);
-  assert.deepEqual(navigated, ['about:blank']); assert.deepEqual(closed, ['owned']);
+test('unexpected Documents and failed fulfillment never resume the original UI', async () => {
+  for (const variant of ['url', 'frame', 'response-stage', 'fulfill']) {
+    const h = anchorHarness({fulfillError: variant === 'fulfill'}); await h.manager.tick();
+    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: 200} : {});
+    assert.equal(await h.manager.handleDocument('anchor', event), true);
+    await h.manager.tick();
+    assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
+    assert.equal(h.commands.filter(c => c.method === 'Fetch.failRequest').length, 1);
+    assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
+    assert.equal(h.commands.filter(c => c.method === 'Fetch.continueRequest').length, 0);
+  }
 });
 
-test('blank marker writes require exact blank, complete document, original preload and no scripts', () => {
-  for (const fixture of [{}, {href: 'app://-/index.html'}, {ready: 'loading'}, {preload: false}, {script: true}]) {
-    const children = [], body = {};
-    const document = {readyState: fixture.ready ?? 'complete', title: '', body,
-      createElement: () => ({}), head: {append: (...nodes) => children.push(...nodes)},
-      querySelector: selector => selector === 'script' ? (fixture.script ? {} : null) : children.find(n => n.name === 'codex-plus-mobile-anchor') ?? null,
+test('a fulfilled owned page cannot reload the vendor Document while a phone is connected', async () => {
+  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
+  h.commit(); h.state.ready = true; await h.manager.tick();
+  assert.equal(await h.manager.handleDocument('anchor', h.document({requestId: 'reload'})), true);
+  assert.equal(h.manager.stopped, true); assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
+  assert.equal(h.commands.filter(c => c.method === 'Fetch.fulfillRequest').length, 1);
+});
+
+test('foreign sessions remain untouched and a replaced sticky target is never adopted', async () => {
+  const h = anchorHarness(); await h.manager.tick();
+  const before = h.commands.length;
+  assert.equal(await h.manager.handleDocument('human', h.document()), false); assert.equal(h.commands.length, before);
+  h.state.target = 'replacement'; await h.manager.tick();
+  assert.equal(h.manager.anchorTarget, 'owned'); assert.equal(h.manager.stopped, true);
+  assert.deepEqual(h.commands.filter(c => c.method === 'Target.closeTarget').map(c => c.params.targetId), ['owned']);
+});
+
+test('per-controller document identities exclude orphan anchors and all human enhancement entry points', async () => {
+  const h = anchorHarness(), old = {...h.manager.config, instance: 'previous'};
+  assert.ok(isAnchorURL(h.manager.documentURL, h.manager.config));
+  assert.equal(isAnchorURL(mobileDocumentURL(old), h.manager.config), false);
+  assert.equal(isHumanWindowURL(h.manager.documentURL), false); assert.equal(isHumanWindowURL(h.state.url), false);
+  h.state.url = h.state.frameURL = mobileDocumentURL(old); await h.manager.tick();
+  assert.equal(h.manager.anchorTarget, undefined); assert.equal(h.commands.some(c => c.method === 'Page.navigate'), false);
+});
+
+test('an unisolated new document closes even after the expected response was fulfilled', async () => {
+  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
+  h.commit(); h.state.probe = {url: true, origin: false, blank: true, complete: true, preload: true, isolated: true, ui: false};
+  await h.manager.tick(); assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
+});
+
+test('the new context wins when navigation commits during frame-tree lookup', async () => {
+  const h = anchorHarness(); await h.manager.tick(); await h.manager.handleDocument('anchor', h.document());
+  h.state.onFrameTree = h.commit; h.state.ready = true;
+  await h.manager.tick(); assert.deepEqual(h.state.probes, [2]); assert.equal(h.state.starts, 1);
+});
+
+test('the app-origin probe requires the already fulfilled marker, CSP, preload and script-free body', () => {
+  const config = {threadId: 'thread', anchor: 'anchor', instance: 'fixture'}, url = mobileDocumentURL(config);
+  const html = mobileDocumentHTML(config); assert.equal(/<script/i.test(html), false);
+  assert.throws(() => mobileDocumentHTML({...config, anchor: '<script>'}));
+  for (const change of [{}, {origin: 'null'}, {url: 'about:blank'}, {script: true}, {preload: false}, {marker: 'other'}, {policy: 'default-src *'}]) {
+    const document = {readyState: 'complete', body: {textContent: 'Codex Plus 移动接入专用窗口'},
+      querySelector: selector => selector === 'script' ? (change.script ? {} : null) :
+        {content: selector.includes('http-equiv') ? change.policy ?? "default-src 'none'; base-uri 'none'" : selector.includes('instance') ? 'fixture' : change.marker ?? 'anchor'},
     };
-    const context = vm.createContext({document, window: {electronBridge: fixture.preload === false ? undefined : {}}, location: {href: fixture.href ?? 'about:blank'}});
-    const result = vm.runInContext(`(${prepareMobileAnchor.toString()})('anchor')`, context);
-    const allowed = Object.keys(fixture).length === 0;
-    assert.equal(result.isolated, allowed); assert.equal(children.length, allowed ? 2 : 0);
-    if (allowed) { assert.equal(children[0].content, "default-src 'none'"); assert.equal(document.title, 'Codex Plus Mobile'); }
-    else assert.equal(body.textContent, undefined);
+    const context = vm.createContext({document, window: {electronBridge: change.preload === false ? undefined : {}}, location: {href: change.url ?? url, origin: change.origin ?? 'app://-'}});
+    const probe = vm.runInContext(`(${prepareMobileAnchor.toString()})('anchor','fixture',${JSON.stringify(url)})`, context);
+    const accepted = probe.url && probe.origin && probe.blank && probe.complete && probe.preload && probe.isolated && !probe.ui;
+    assert.equal(accepted, Object.keys(change).length === 0);
   }
 });
 

@@ -30,7 +30,15 @@
     "primary-aeon-selection-v1",
     "last-observed-cloud-pet-selection-v1",
     "space-pinned-page-previews-v1",
-    "sidebar-custom-sections-v3"
+    "sidebar-custom-sections-v3",
+    "mcp-global-entrypoints-v3",
+    "new-task-project-by-computer",
+    "new-task-execution-by-account-project",
+    "new-task-remote-host-by-account-project",
+    "space-page-pins-local-backup-v1",
+    "unified-sidebar-pinned-order-v1",
+    "space-page-pin-projection-owners-v1",
+    "pull-request-attachment-records-v3"
   ],
   "atomPrefixes": [
     "thread-client-id-v1:local%3A"

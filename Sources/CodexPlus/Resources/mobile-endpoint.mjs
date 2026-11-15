@@ -69,8 +69,8 @@ export function installMobileEndpoint(config, encode, decode) {
         const channel = new MessageChannel(); attachPort(channel.port1, message.id);
         // This literal same-window handoff on our captured blank page cannot
         // address another window. The original preload checks event.source.
-        const targetOrigin = location.href === 'about:blank' && location.origin === 'null' ? '*' : location.origin;
-        window.postMessage({type: 'connect-app-host', port: channel.port2}, targetOrigin, [channel.port2]);
+        if (location.origin !== 'app://-') throw Error('Original app-origin host unavailable');
+        window.postMessage({type: 'connect-app-host', port: channel.port2}, location.origin, [channel.port2]);
         break;
       }
       case 'worker-subscribe': {

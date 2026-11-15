@@ -7,6 +7,7 @@ import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpo
 import {installMobileDrafts} from '../Sources/CodexPlus/Resources/mobile-drafts.mjs';
 import {installMobileLocalState} from '../Sources/CodexPlus/Resources/mobile-local-state.mjs';
 import {selectMobileServices} from '../Sources/CodexPlus/Resources/mobile-services.mjs';
+import {mobileDiagnostic} from '../Sources/CodexPlus/Resources/mobile-diagnostics.mjs';
 const cache = path.join(os.homedir(), 'Library/Caches/codex-plus/mobile');
 await fs.mkdir(cache, {recursive: true});
 const stateKeys = JSON.parse(await fs.readFile(new URL('../mobile/Shared/MobileStateKeys.json', import.meta.url), 'utf8'));
@@ -24,8 +25,9 @@ globalThis.__codexPlusMobileLifecycle = {routeChanged(location) {
 }};
 (${installMobileDrafts.toString()})(b.connection);
 globalThis.__codexPlusMobileNativeSend('page-ready');
-window.addEventListener('error',()=>window.webkit.messageHandlers.diagnostic.postMessage({event:'script-error'}));
-window.addEventListener('unhandledrejection',()=>window.webkit.messageHandlers.diagnostic.postMessage({event:'unhandled-rejection'}));
+const diagnostic=${mobileDiagnostic.toString()};
+window.addEventListener('error',event=>window.webkit.messageHandlers.diagnostic.postMessage(diagnostic('script-error',event.error)));
+window.addEventListener('unhandledrejection',event=>window.webkit.messageHandlers.diagnostic.postMessage(diagnostic('unhandled-rejection',event.reason)));
 })();`;
 await fs.writeFile(path.join(cache, 'mobile-preload.js'), source);
 console.log('Mobile preload assembled');

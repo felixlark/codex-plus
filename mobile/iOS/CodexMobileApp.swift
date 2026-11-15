@@ -139,7 +139,15 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         guard generation == epoch, message.webView === web, message.frameInfo.isMainFrame,
               let frameURL = message.frameInfo.request.url, frameURL.scheme == "app", frameURL.host == "-", frameURL.path == "/index.html" else { return }
         if message.name == "diagnostic" {
-            if let value = message.body as? [String: Any], let event = value["event"] as? String, ["script-error", "unhandled-rejection"].contains(event) { print("CodexMobile diagnostic: \(event)") }
+            if let value = message.body as? [String: Any], let event = value["event"] as? String, ["script-error", "unhandled-rejection"].contains(event) {
+                var fields = [event]
+                if let method = value["missingMethod"] as? String, method.range(of: #"^[a-zA-Z][a-zA-Z0-9_.]*$"#, options: .regularExpression) != nil { fields.append("method=" + method) }
+                for frame in (value["frames"] as? [[String: Any]] ?? []).prefix(3) {
+                    if let file = frame["file"] as? String, file.range(of: #"^[0-9]+\.[a-f0-9]+\.js$"#, options: .regularExpression) != nil,
+                       let line = frame["line"] as? Int, let column = frame["column"] as? Int, line >= 0, column >= 0 { fields.append("\(file):\(line):\(column)") }
+                }
+                print("CodexMobile diagnostic: " + fields.joined(separator: " "))
+            }
             return
         }
         if message.name == "lifecycle" {
