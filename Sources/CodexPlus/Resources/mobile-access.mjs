@@ -135,7 +135,7 @@ export class MobileAccess {
           this.documentFrame = frameTree.frame.id;
           // Retain the controller's existing Script patterns. This exact owned
           // session also keeps a Document guard for its entire lifetime.
-          await this.command(session[0], 'Fetch.enable', {patterns: [...this.scriptPatterns, {urlPattern: '*', resourceType: 'Document', requestStage: 'Request'}]});
+          await this.command(session[0], 'Fetch.enable', {patterns: [...this.scriptPatterns, {urlPattern: '*', resourceType: 'Document', requestStage: 'Response'}]});
           if (this.stopped) return;
           this.documentArmed = true;
           const navigation = await this.command(session[0], 'Page.navigate', {url: this.documentURL});
@@ -188,7 +188,7 @@ export class MobileAccess {
     // text may carry private data and must never enter persistent status.
     this.documentCheck = {armed: !!this.documentArmed, first: !this.documentRequestId,
       frame: event.frameId === this.documentFrame, url: event.request?.url === this.documentURL,
-      requestStage: event.responseStatusCode === undefined, requestId: typeof event.requestId === 'string'};
+      responseStage: event.responseStatusCode === 200, requestId: typeof event.requestId === 'string'};
     try {
       const url = new URL(event.request?.url);
       this.documentCheck.urlKind = url.protocol === 'app:' ? 'app' : url.protocol === 'about:' ? 'about' : ['https:', 'http:'].includes(url.protocol) ? 'web' : 'other';
@@ -207,7 +207,7 @@ export class MobileAccess {
       return true;
     }
     if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
-        event.request?.url === this.documentURL && event.responseStatusCode === undefined && typeof event.requestId === 'string') {
+        event.request?.url === this.documentURL && event.responseStatusCode === 200 && typeof event.requestId === 'string') {
       this.documentRequestId = event.requestId; this.documentArmed = false;
       try {
         await this.command(sessionId, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200,

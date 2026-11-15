@@ -141,7 +141,7 @@ function anchorHarness({fulfillError = false} = {}) {
     state.loader = 'new'; state.url = state.frameURL = manager.documentURL;
     contexts.clear(); contexts.set(2, {id: 2, auxData: {isDefault: true, frameId: 'root'}});
   };
-  const document = extra => ({resourceType: 'Document', frameId: 'root', requestId: 'document-1', request: {url: manager.documentURL}, ...extra});
+  const document = extra => ({resourceType: 'Document', frameId: 'root', requestId: 'document-1', responseStatusCode: 200, request: {url: manager.documentURL}, ...extra});
   return {manager, state, commands, contexts, commit, document};
 }
 
@@ -153,7 +153,7 @@ test('the owned document waits for Fetch acknowledgement, fulfillment and a new 
   assert.equal(h.commands.filter(c => c.method === 'Page.navigate').length, 0);
   release(); await preparing;
   const patterns = h.commands.find(c => c.method === 'Fetch.enable').params.patterns;
-  assert.equal(patterns[0].resourceType, 'Script'); assert.equal(patterns[1].resourceType, 'Document');
+  assert.equal(patterns[0].resourceType, 'Script'); assert.equal(patterns[1].resourceType, 'Document'); assert.equal(patterns[1].requestStage, 'Response');
   assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), [h.manager.documentURL]);
   await h.manager.tick(); assert.equal(h.state.probes.length, 0);
   h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0); assert.equal(h.state.probes.length, 0);
@@ -172,7 +172,7 @@ test('unexpected Documents and failed fulfillment never resume the original UI',
   for (const variant of ['url', 'frame', 'response-stage', 'fulfill']) {
     const h = anchorHarness({fulfillError: variant === 'fulfill'}); await h.manager.tick();
     if (variant === 'frame') h.state.rootFrame = 'other';
-    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: 200} : {});
+    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: undefined} : {});
     assert.equal(await h.manager.handleDocument('anchor', event), true);
     await h.manager.tick();
     assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
