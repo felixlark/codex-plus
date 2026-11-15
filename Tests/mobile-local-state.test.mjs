@@ -98,13 +98,28 @@ test('business account stubs survive the phone-only service session and preserve
   }
   class Managers extends rpc.TF { openAccount() { return new Account(); } }
   class AccountInfo extends rpc.TF { readAccountInfo() { return {status: 'ready', data: {hasChatGptToken: true}}; } }
-  class Root extends rpc.TF { get services() { return {appServerManagers: new Managers(), accountInfo: new AccountInfo(), accessInputs: new AccountInfo()}; } }
+  class AppInfo extends rpc.TF {
+    getSystemInfo() { return {platform: 'darwin', osRelease: '25.0.0', isCodexRunningInsideWsl: false}; }
+    getLocaleInfo() { return {ideLocale: 'en-US', systemLocale: 'zh-CN'}; }
+    getPackagingInfo() { return {isPackaged: true}; }
+  }
+  class HttpFetch extends rpc.TF {
+    fetch() { return {response: new Response(JSON.stringify({ready: true}), {headers: {'content-type': 'application/json'}})}; }
+  }
+  class Root extends rpc.TF { get services() { return {appServerManagers: new Managers(), accountInfo: new AccountInfo(), accessInputs: new AccountInfo(), appInfo: new AppInfo(), httpFetch: new HttpFetch()}; } }
   const server = rpc.ab(wire.port1, new Root()), client = rpc.ab(wire.port2, new rpc.TF());
   const original = await client.services;
   const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
   try {
     await f.api.install(module, rpc, () => ({}));
     assert.equal((await module.appServices.accountInfo.readAccountInfo()).data.hasChatGptToken, true);
+    assert.equal((await module.appServices.appInfo.getSystemInfo()).platform, 'darwin');
+    assert.equal((await module.appServices.appInfo.getLocaleInfo()).systemLocale, 'zh-CN');
+    assert.equal((await module.appServices.appInfo.getPackagingInfo()).isPackaged, true);
+    const response = await module.appServices.httpFetch.fetch('phone-request', {method: 'GET'});
+    assert.deepEqual(await response.response.json(), {ready: true});
+    response[Symbol.dispose]?.();
+    await assert.rejects(async () => await module.appServices.appInfo.getThirdPartyNotices());
     assert.equal(module.appServices.accessInputs, undefined);
     await assert.rejects(async () => await module.appServices.accountInfo.readLocalChatGptAuth());
     const account = module.appServices.appServerManagers.openAccount('local');
@@ -171,4 +186,49 @@ test('phone renderer readiness waits for the original local phase without advanc
     await assert.rejects(async () => await module.appServices.startup.reach('invented'));
     pending[Symbol.dispose]();
   } finally { f.cleanup(); }
+});
+
+
+test('HTTP bodies stream across both original RPC sessions and cancel only phone-owned requests', {timeout: 10000}, async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), wire = new MessageChannel();
+  const cancelled = [], bodyCancelled = [], enc = new TextEncoder();
+  let progress;
+  class HTTP extends rpc.TF {
+    async fetch(id, request, callback) {
+      if (callback) { await callback({loaded: 3}); progress = true; }
+      if (id === 'late') await new Promise(resolve => { late = resolve; });
+      if (id === 'error') return {error: 'test failure', status: 503};
+      let index = 0;
+      return {response: new Response(new ReadableStream({
+        pull(controller) { if (index < 2) controller.enqueue(enc.encode(['中文', '🙂'][index++])); else if (id === 'normal') controller.close(); },
+        cancel() { bodyCancelled.push(id); },
+      }), {status: 201, headers: {'x-test': 'original'}})};
+    }
+    cancel(id) { cancelled.push(id); }
+  }
+  let late;
+  class Root extends rpc.TF { get services() { return {httpFetch: new HTTP()}; } }
+  const server = rpc.ab(wire.port1, new Root()), client = rpc.ab(wire.port2, new rpc.TF());
+  const original = await client.services;
+  const module = {appServices: original, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, () => ({}));
+    let loaded;
+    const normal = await module.appServices.httpFetch.fetch('normal', {method: 'GET'}, value => { loaded = value.loaded; });
+    assert.equal(normal.response.status, 201); assert.equal(normal.response.headers.get('x-test'), 'original');
+    assert.equal(await normal.response.text(), '中文🙂'); assert.equal(loaded, 3); assert.equal(progress, true); normal[Symbol.dispose]();
+    await module.appServices.httpFetch.cancel('unknown'); await flush(); assert.deepEqual(cancelled, []);
+    const active = await module.appServices.httpFetch.fetch('active', {method: 'GET'});
+    const reader = active.response.body.getReader(); assert.equal(new TextDecoder().decode((await reader.read()).value), '中文');
+    await reader.cancel(); active[Symbol.dispose]();
+    for (let i=0;i<8;i++) await flush(); assert.equal(cancelled.filter(id => id === 'active').length, 1);
+    const error = await module.appServices.httpFetch.fetch('error', {method: 'GET'}); assert.equal(error.status, 503); error[Symbol.dispose]();
+    const delayed = module.appServices.httpFetch.fetch('late', {method: 'GET'});
+    while (!late) await flush();
+    const caught = Promise.resolve(delayed).then(() => null, error => error);
+    await module.appServices.httpFetch.cancel('late'); late();
+    assert.ok(await caught); for (let i=0;i<8;i++) await flush();
+    assert.equal(cancelled.filter(id => id === 'late').length, 1);
+  } finally { f.cleanup(); original[Symbol.dispose]?.(); client[Symbol.dispose]?.(); server[Symbol.dispose]?.(); wire.port1.close(); wire.port2.close(); }
 });

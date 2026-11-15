@@ -23,6 +23,8 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 - 手机草稿、项目选择和页面偏好独立存入本 App 的 Application Support，原持久化协议收到原子写入回执后才发布更新，不读取或覆盖 Mac 草稿/窗口布局。允许的键随准确原前端登记；未知键明确报告页面状态失败，附件引用使用独立回执。
 - 账户摘要沿原后台 `accountInfo.readAccountInfo()` 读取；`accessInputs.readLocalChatGptAuth()` 不开放给手机，Mac 访问令牌不随摘要转发。
 - 原设置初始化所需的 `readAll` 和 `subscribe` 只读转发；手机原渲染器的 `renderer_ready` 在本地确认，不写入 Mac 窗口启动阶段或伪造宿主计时。
+- 原网页请求使用现役 `httpFetch`，身份注入仍留 Mac；返回体在手机本地会话逐块建立流归属，消费或取消后释放原租约，只取消本手机仍持有的请求。
+- iOS 资源适配移除原前端的旧 `hatch-pet` 桌面迁移触发钩子，避免手机初始化重复写 Mac 技能配置；Mac 原厂资源不变。手机缓存可包含身份 ID、页面预览和 profile 业务数据，不把这些缓存当作账号访问令牌。
 
 ## 当前可执行增量
 

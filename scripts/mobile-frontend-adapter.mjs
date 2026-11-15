@@ -53,8 +53,12 @@ export async function adaptMobileFrontend(relative, bytes) {
 async function adaptPhoneServices(source) {
   const {parse} = await parser();
   const ast = parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
-  const modules = [];
-  walk(ast, node => { if (node.type === 'Property' && (node.key.name ?? node.key.value) === 'wRZ2' && node.value.type === 'FunctionExpression') modules.push(node); });
+  const modules = [], petModules = [];
+  walk(ast, node => {
+    if (node.type !== 'Property' || node.value.type !== 'FunctionExpression') return;
+    if ((node.key.name ?? node.key.value) === 'wRZ2') modules.push(node);
+    if ((node.key.name ?? node.key.value) === 'gKJK') petModules.push(node);
+  });
   if (modules.length !== 1) throw Error('Original AppView module changed');
   const module = modules[0], imports = [], installs = [];
   walk(module.value.body, (node, parents) => {
@@ -70,7 +74,17 @@ async function adaptPhoneServices(source) {
     {at: load.at, text: `const __codexPlusPhoneRPC=${load.alias},__codexPlusPhoneRecord=${requireName}("waIq").m;`},
     {at: install.at, text: `,await globalThis.__codexPlusMobileLocal.install(${install.module},__codexPlusPhoneRPC,__codexPlusPhoneRecord)`},
   ];
-  for (const edit of edits.sort((a,b) => b.at - a.at)) source = source.slice(0, edit.at) + edit.text + source.slice(edit.at);
+  // This desktop-only onMount migrates a legacy Mac skill by writing its
+  // configuration. A second renderer on the phone must not repeat that effect.
+  const migrations = [];
+  if (petModules.length === 1) walk(petModules[0].value.body, node => {
+    if (node.type !== 'VariableDeclarator' || node.id.name !== 'T' || node.init?.type !== 'CallExpression') return;
+    const options = node.init.arguments[2];
+    if (options?.type === 'ObjectExpression' && options.properties.length === 1 && options.properties[0].key.name === 'onMount') migrations.push(options);
+  });
+  if (migrations.length !== 1 || !source.slice(migrations[0].start, migrations[0].end).includes('"skills/config/write"') || !source.slice(migrations[0].start, migrations[0].end).includes('"hatch-pet"')) throw Error('Original desktop skill migration changed');
+  edits.push({at: migrations[0].start, end: migrations[0].end, text: '{}'});
+  for (const edit of edits.sort((a,b) => b.at - a.at)) source = source.slice(0, edit.at) + edit.text + source.slice(edit.end ?? edit.at);
   parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
   return source;
 }

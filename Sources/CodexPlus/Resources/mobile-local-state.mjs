@@ -108,9 +108,11 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
       readText() { return native('clipboard-read'); }
       writeText(text) { return native('clipboard-write', {text}); }
     }
+    const selected = selectServices(original, rpc.TF);
+    owned.push(() => selected[Symbol.dispose]?.());
     class Services extends rpc.TF {
       get services() {
-        return {...selectServices(original, rpc.TF), applicationState: application, startup, projectCatalog: new ProjectCatalog(),
+        return {...selected, applicationState: application, startup, projectCatalog: new ProjectCatalog(),
           windowTitle: new WindowTitle(), windowNavigation: new WindowNavigation(), clipboard: new Clipboard()};
       }
     }

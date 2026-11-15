@@ -1,19 +1,42 @@
 {
   "atoms": [
-    "composer-prompt-drafts-v2", "composer-prompt-drafts-v1",
-    "chatgpt-conversation-prompt-drafts-v2", "chatgpt-conversation-prompt-drafts-v1",
-    "draft-thread-identities-v1", "composer-retained-documents-v1",
-    "composer-pull-request-attachment-drafts-v1", "composer-response-annotation-drafts-v1",
-    "composer-presentation-suggestion-drafts-v1", "thread-workspace-draft-tabs-v1",
-    "composer-auto-context-enabled", "composer-recent-model-configurations-v1",
-    "composer-model-picker-selection-mode-v1", "chatgpt-home-model-picker-selection-mode-v1",
-    "chatgpt-work-model-picker-selection-mode-v1", "home-composer-mode-v1",
-    "flat-project-sidebar-preferences-v1", "sidebar-mcp-destination-discovery-by-account-id-v1",
+    "composer-prompt-drafts-v2",
+    "composer-prompt-drafts-v1",
+    "chatgpt-conversation-prompt-drafts-v2",
+    "chatgpt-conversation-prompt-drafts-v1",
+    "draft-thread-identities-v1",
+    "composer-retained-documents-v1",
+    "composer-pull-request-attachment-drafts-v1",
+    "composer-response-annotation-drafts-v1",
+    "composer-presentation-suggestion-drafts-v1",
+    "thread-workspace-draft-tabs-v1",
+    "composer-auto-context-enabled",
+    "composer-recent-model-configurations-v1",
+    "composer-model-picker-selection-mode-v1",
+    "chatgpt-home-model-picker-selection-mode-v1",
+    "chatgpt-work-model-picker-selection-mode-v1",
+    "home-composer-mode-v1",
+    "flat-project-sidebar-preferences-v1",
+    "sidebar-mcp-destination-discovery-by-account-id-v1",
     "sidebar-more-menu-seen-mcp-destination-ids-by-account-id-v1",
     "plugin-oauth-install-reconciliation-by-state-v1",
-    "spaces-workspace-chats-v1", "settings-workspace-owner-v1",
-    "appearance-analytics-snapshots-v1", "recent-workspace-files-v3"
+    "spaces-workspace-chats-v1",
+    "settings-workspace-owner-v1",
+    "appearance-analytics-snapshots-v1",
+    "recent-workspace-files-v3",
+    "local-document-identity",
+    "sidebar-customization-snapshots-v2",
+    "mini-style-cache",
+    "primary-aeon-selection-v1",
+    "last-observed-cloud-pet-selection-v1",
+    "space-pinned-page-previews-v1"
   ],
-  "atomPrefixes": ["thread-client-id-v1:local%3A"],
-  "application": ["selected-project", "selected-remote-host-id", "active-remote-project-id"]
+  "atomPrefixes": [
+    "thread-client-id-v1:local%3A"
+  ],
+  "application": [
+    "selected-project",
+    "selected-remote-host-id",
+    "active-remote-project-id"
+  ]
 }
