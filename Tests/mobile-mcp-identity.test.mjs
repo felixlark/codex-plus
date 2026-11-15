@@ -72,3 +72,20 @@ test('default-host callers and Native exception replies preserve an owned numeri
     assert.equal(f.events()[1].update.delivery.requestId, 10);
   } finally { f.endpoint.close(); }
 });
+
+test('same IDs across hosts and types stay separate while an explicit same-request dispatch keeps its Native identity', async () => {
+  const f = fixture();
+  try {
+    const request = {type: 'mcp-request', hostId: 'local', request: {id: 1, method: 'config/read'}};
+    await f.call(request); await f.call(request);
+    await f.call({...request, hostId: 'remote'});
+    await f.call({...request, request: {...request.request, id: '1'}});
+    const [a, same, otherHost, otherType] = f.native.map(message => message.request.id);
+    assert.equal(a, same); assert.equal(new Set([a, otherHost, otherType]).size, 3);
+    await f.event({type: 'mcp-response', hostId: 'local', message: {id: a, result: null}});
+    await f.event({type: 'mcp-request-delivery', hostId: 'local', update: {type: 'outcome-unknown', delivery: {requestId: a}}});
+    assert.equal(f.events().length, 1);
+    await f.call({type: 'mcp-request-abandon', hostId: 'local', requestId: 1});
+    assert.equal(f.native.length, 4);
+  } finally { f.endpoint.close(); }
+});

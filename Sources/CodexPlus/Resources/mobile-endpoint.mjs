@@ -80,9 +80,11 @@ export function installMobileEndpoint(config, encode, decode) {
           const request = args[0].request;
           if (!request || !['string', 'number'].includes(typeof request.id)) throw Error('Invalid original request');
           const key = requestKey(args[0].hostId, request.id);
-          if (requestIDs.has(key)) throw Error('Original request is still pending');
-          const id = `${config.connection}:${++sequence}`;
-          ids.set(id, {original: request.id, host: args[0].hostId, method: request.method}); requestIDs.set(key, id);
+          let id = requestIDs.get(key);
+          if (!id) {
+            id = `${config.connection}:${++sequence}`;
+            ids.set(id, {original: request.id, host: args[0].hostId, method: request.method}); requestIDs.set(key, id);
+          }
           args = [{...args[0], request: {...request, id}}];
         } else if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request-abandon') {
           const id = requestIDs.get(requestKey(args[0].hostId, args[0].requestId));
