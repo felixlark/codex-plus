@@ -20,3 +20,13 @@
 ManagementConnection 是客户端，校验 socket/父目录本 UID 与权限、peer UID；取消只 shutdown 本连接，由原 worker 唯一 close fd，避免 fd 复用误关。没有 launch/reopen/retry fallback。写响应丢失只读实际设置；工作台响应丢失只读同实例、同 query_request_id 的状态，不换键补发。Manager 还必须核响应 PID 对应 NSRunningApplication 的准确 bundle/path，不能只凭自报身份认领运行体。
 
 当前单元覆盖严格类型、未知字段、运行实例和 revision 必填、原屏幕选择合同、规范化摘要、未知后端版本、连接前取消。实际 handler、安装版 IPC、I/O 中途取消、设置冲突、F6 并发丢回执和退出 Manager 后原运行体持续运行，仍须真实接入后另验。
+
+## 管理产品的独立构建与安装
+
+Package 的 SmartShadowManager 是独立 executable/target，ManagerInfo.plist 保留 me.longbiaochen.smart-shadow.app，版本4.0.0/build4001。仅加载 Core 数据与客户端，不创建旧 native delegate/launcher/controller/observer/ToolWindowRouter。首次启动附着准确 Plus 实例，不存在时只打开已核签名全局路径一次，启动回执后再读实际状态。
+
+管理侧通过正式安装 ss-service 的只读 inspect 分别显示 contextd/taskd job、配置、选择、报告及源码版本；任何未支持/不明确结果如实显示，不合并为业务已采用或 ready。新角色启停仍待准确既有 lifecycle operation 接口采用，不能在 App 内另建发布计划或调度器。
+
+管理UI当前消费 status.result.permissions.accessibility 的 trusted/bundle_id/path/pid，以及 workspace_request 的 request_id/phase/nonce/target/window；无 query 返回原 native 最近一次管理工作台请求，人工F6不能覆盖该关联，重开 manager 先拾起 pending/unknown。设置 result 固定 settings/settings_revision。
+
+scripts/build-manager 仅 release 构建管理产品并沿已有 Developer ID 签名，不构建手机或 Plus controller。scripts/install-manager 接受准确签名候选，原安装存在时保留到 Library/Caches/codex-plus/manager-installs；实际安装前须交清旧客户端，不按进程名杀、退出 Plus 或解除虚拟屏托管。唯一 Release build 和安装/GUI writer 沿原安全点。当前只有 Debug 编译准备，尚未签名新管理包、安装或进行真实三模块控制/退出隔离验收。
