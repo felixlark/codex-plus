@@ -183,6 +183,12 @@ final class ToolWindowRouter {
         for window in windows(watch.app) where !handled.contains(where: { CFEqual($0, window) }) {
             if watch.defaultChrome {
                 guard value(window, kAXSubroleAttribute) as? String == "AXStandardWindow" else { continue }
+                // Already parked windows may belong to another OCU client.
+                // The default is satisfied; preserve that client's restore record.
+                if let bounds = display.currentBounds(), let current = frame(window),
+                   ToolWindowPolicy.contained(current, in: bounds) {
+                    watch.defaultKnown.append(window); continue
+                }
             } else if let documents = watch.documents {
                 guard let raw = value(window, kAXDocumentAttribute) as? String,
                       let url = URL(string: raw), documents.contains(url.standardizedFileURL) else {
