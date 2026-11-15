@@ -2,6 +2,10 @@
 
 独立管理 App 提供设置和组件状态；Plus 原生运行体保留 controller、手机网关、窗口路由和现有增强。管理 App 退出只取消自己的连接，不停止运行体或手机宿主。
 
+## 正式原生生命周期
+
+78已通过正式ss-service纳管与实际停启。沿[生命周期合同](designs/interactiond-lifecycle.md)使用`--lifecycle-status`、`--lifecycle-prepare-stop`、`--lifecycle-stop`及`--lifecycle-resume`，不新增常驻进程。CLI request-id先规范化，再与回执核对；stop响应写出后通过RunLoop common modes发起AppKit退出，controller结束回调沿同一RunLoop完成。完整停机、重启及手机恢复证据见[验收](acceptance.md)。关闭管理窗口与明确停止interactiond是两个独立动作。
+
 ## 当前源码合同
 
 复用原 `0600 tool-control.sock` 和 `ToolControlServer`，一连接一个 JSON 行。`management-v1` 仅接受：

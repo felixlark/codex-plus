@@ -1,3 +1,17 @@
+## 原生生命周期 78（2026-11-16）
+
+Plus 77 首次真实停机发现两项缺陷：小写request-id与大写UUID回执比对不一致；GCD主队列发起AppKit terminate后，controller退出回调无法进入同队列。修复候选6ced626，后续与main合并f6cd943保持相同源码树；78由#613固定导出、签名、安装。小写request-id在正式78成功返回规范化的同一UUID，不再误报空响应。
+
+旧77的已接受stop已保存完整scope；controller/gateway/anchor均消失后，仅原生壳24519残留。#613经同一正式操作的finish-native精确核PID/出生并发送一次SIGTERM收尾，未重发stop；这项恢复不冒充78正常退出验收。
+
+78通过正式ss-service完成prepare→stop→start：native33498、其controller、gateway34073和targetF9319E5655AB9296DB277B29C62C82AE均按停前身份确认消失，原Codex3333/app-server3406保持。该次正常停止无辅助信号。随后正式start得到新native37093/controller37101/gateway37806/target427A010675451182ECF4B36FE154B9E8/window13890；iOS53只点击一次原“重新连接”，新实例fresh connected=1，原N完成历史与O完整未发草稿均在，不重发旧消息。
+
+管理窗口独立性已在77实测：关闭Manager13772全部窗口，CG为空，手机仍连接同一gateway/anchor。78对此模块无改动，复用该证据。手机读取、发送、流式、冷恢复沿前述Q及原候选有效证据，本次未重复新建业务。旧完整工作台9785/target6FA692D9D77F55920A82B336A9431B4A已在74正常退出时核CG及CDP双消失，不恢复旧界面。历史P/其它unknown及所有未发草稿保持，不自动结算。
+
+本次只证明指定模拟器、原签名Codex版本与本机IPv4 Tailscale接入；不外推物理手机跨节点网络。私有证据归`Library/Logs/codex-plus/mobile-complete-20261115/`的native77/native78文件及#613的同次native-finish/native-stop操作记录。当前保持78与手机连接运行。
+
+同批从正式Manager的停止/启动按钮再次核验原入口，均经同一ss-service正常完成。最终保留native40410/controller40422/gateway41150/targetD8C10B7A1607573E594F45D738C576C5/window13929，手机一次Reconnect后connected=1，N历史与O原草稿分别由全页和编辑器AX读回；原3333/3406保持。生命周期修复PR35合入852b93f；最终实例的30分钟资源观测由#613继续负责，未在此记录冒称已完成。
+
 ## 统一小看板 4103（2026-11-15）
 
 PR31 最终候选63962a7由#613签名安装，原Plus74与iOS53保持。安装版PID90676、主13267/看板13274经官方OCU移至右侧物理屏。原Electron只读得到8个活动会话，taskd登记2事项，其中#610当前thread/run准确匹配并去重，安装UI总计9/执行中8/完成0；原Run结束后执行中降至7，未把delivered当全案完成。源数据与安装UI分别留证。
