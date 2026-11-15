@@ -124,14 +124,14 @@ test('model cache uses exactly two encoded identity segments and personal histor
     await flush(); await flush(); await flush();
     const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
     for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
-    for (const key of ['chatgpt-work-models-v1/', 'chatgpt-work-models-v1/a', 'chatgpt-work-models-v1/a/', 'chatgpt-work-models-v1/a/b/c', 'chatgpt-work-models-v1/%GG/b', 'chatgpt-work-models-v1/%ED%A0%80/b', 'prompt-history-extra']) {
+    for (const key of ['chatgpt-work-models-v1/', 'chatgpt-work-models-v1/a', 'chatgpt-work-models-v1/a/', 'chatgpt-work-models-v1/a/b/c', 'chatgpt-work-models-v1/%GG/b', 'chatgpt-work-models-v1/%ED%A0%80/b', 'chatgpt-work-models-v1/\uD800/b', 'prompt-history-extra']) {
       f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
     }
     await flush(); await flush(); await flush();
     assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, entries.length);
     const warnings = f.messages.filter(m => m.operation === 'local-state-warning');
-    assert.equal(warnings.length, 7);
-    assert.ok(warnings.slice(0,6).every(m => m.key === 'chatgpt-work-models-v1'));
+    assert.equal(warnings.length, 8);
+    assert.ok(warnings.slice(0,7).every(m => m.key === 'chatgpt-work-models-v1'));
     assert.equal(JSON.stringify(warnings).includes('PRIVATE'), false);
   } finally { f.cleanup(); }
 });

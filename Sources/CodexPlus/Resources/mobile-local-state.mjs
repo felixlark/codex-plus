@@ -12,7 +12,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     if ((keys.identityPathAtomPrefixes ?? []).some(prefix => {
       if (!key.startsWith(prefix)) return false;
       const ids = key.slice(prefix.length).split('/');
-      try { return ids.length === 2 && ids.every(id => id.length > 0 && decodeURIComponent(id).length > 0); }
+      try { return ids.length === 2 && ids.every(id => { const decoded = decodeURIComponent(id); encodeURIComponent(decoded); return id.length > 0 && decoded.length > 0; }); }
       catch { return false; }
     })) return true;
     return (keys.identityAtomPrefixes ?? []).some(prefix => {
