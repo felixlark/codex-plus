@@ -25,8 +25,10 @@ export async function adaptMobileFrontend(relative, bytes) {
 @media(pointer:coarse){html body input,html body textarea,html body [contenteditable="true"]{font-size:max(16px,1em)}}
 @media(pointer:coarse) and (orientation:landscape) and (max-height:240px){
 body:has([contenteditable="true"]:focus) [data-window-titlebar],body:has([contenteditable="true"]:focus) [data-app-shell-header-layout]{display:none}
-html body [data-composer-input-layout="multiline"]{--composer-editor-min-height:24px;--frame-height-cap:24px;font-size:16px;line-height:24px;min-height:24px;max-height:24px}
-html body [data-composer-input-layout="multiline"]>[contenteditable="true"]{min-height:24px;max-height:none;overflow:visible}
+}
+@media(pointer:coarse) and (max-height:650px){
+html body:has([contenteditable="true"]:focus) [data-composer-input-layout="multiline"]{--composer-editor-min-height:24px;--frame-height-cap:24px;font-size:16px;line-height:24px;min-height:24px;max-height:24px}
+html body:has([contenteditable="true"]:focus) [data-composer-input-layout="multiline"]>[contenteditable="true"]{min-height:24px;max-height:none;overflow:visible}
 }
 </style>`;
     return Buffer.from(source.replace('</head>', style + '</head>'));

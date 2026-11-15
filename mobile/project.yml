@@ -6,11 +6,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
-    GENERATE_INFOPLIST_FILE: YES
-    INFOPLIST_KEY_CFBundleDisplayName: Codex Mobile
-    INFOPLIST_KEY_UILaunchScreen_Generation: YES
-    INFOPLIST_KEY_UIFileSharingEnabled: YES
-    INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+    GENERATE_INFOPLIST_FILE: NO
     TARGETED_DEVICE_FAMILY: '1,2'
     CODE_SIGNING_ALLOWED: YES
     CODE_SIGN_IDENTITY: "-"
@@ -21,6 +17,15 @@ targets:
   CodexMobile:
     type: application
     platform: iOS
+    info:
+      path: CodexMobile-Info.plist
+      properties:
+        CFBundleDisplayName: Codex Mobile
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
     sources:
       - path: ${CODEX_PLUS_SOURCE_ROOT}/Sources/CodexPlusCore/MobileBootstrapScript.swift
       - path: ${CODEX_PLUS_SOURCE_ROOT}/mobile/iOS
@@ -34,4 +39,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.longbiaochen.codex-plus.mobile
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 50
+        CURRENT_PROJECT_VERSION: 53
