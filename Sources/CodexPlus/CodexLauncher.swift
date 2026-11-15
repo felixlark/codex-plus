@@ -11,11 +11,6 @@ final class CodexLauncher: ObservableObject {
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
     var onPlaceMobileWindow: ((NSRunningApplication, [String: Any]) -> [String: Any]?)?
-    var onPlaceWorkbench: ((NSRunningApplication, [String: Any]) -> [String: Any]?)?
-    var runtimeInstance: UUID?
-    private var workbenchWindowRequests: [String: [String: Any]] = [:]
-    private var workbenchRequests: [UUID: [String: Any]] = [:]
-    private var latestWorkbenchRequest: UUID?
     private var mobileWindowRequest: [String: Any]?
     private var controllerOutput: Pipe?
     private var controllerInput: FileHandle?
@@ -112,32 +107,6 @@ final class CodexLauncher: ObservableObject {
         } catch { reconnectResult = "连接暂不可用，页面未重新接入。" }
     }
 
-    func openWorkbench(requestID: UUID) -> Bool {
-        if workbenchRequests[requestID] != nil { return true }
-        guard !stopping, let controller, controller.isRunning,
-              (snapshot["controllerPID"] as? NSNumber)?.int32Value == controller.processIdentifier,
-              snapshot["phase"] as? String == "active", ownedHost() != nil,
-              (snapshot["workbench"] as? [String: Any])?["protocol"] as? Int == 1,
-              (snapshot["workbench"] as? [String: Any])?["supported"] as? Bool == true,
-              let input = controllerInput, let runtimeInstance else { return false }
-        let request: [String: Any] = ["request_id": requestID.uuidString, "origin_runtime": runtimeInstance.uuidString, "phase": "requested"]
-        workbenchRequests[requestID] = request; latestWorkbenchRequest = requestID
-        var message = request; message["type"] = "workbench-open"; message["version"] = 1
-        do { try input.write(contentsOf: JSONSerialization.data(withJSONObject: message) + Data([10])) }
-        catch { workbenchRequests[requestID]?["phase"] = "unknown" }
-        // Once registered, a failed pipe write is unknown, never a rejection
-        // that would let the Manager silently issue a second creation.
-        return true
-    }
-
-    func workbenchStatus(requestID: UUID?) -> [String: Any]? {
-        guard let id = requestID ?? latestWorkbenchRequest, var result = workbenchRequests[id] else { return nil }
-        if controller?.isRunning != true || (snapshot["controllerPID"] as? NSNumber)?.int32Value != controller?.processIdentifier {
-            result["phase"] = "unknown"
-        }
-        return result
-    }
-
     func status() -> [String: Any] {
         ["hotKey": "F6", "hotKeySource": "Karabiner", "dockItem": false,
          "phase": snapshot["phase"] ?? "idle", "hostPID": snapshot["pid"] ?? NSNull(),
@@ -190,28 +159,6 @@ final class CodexLauncher: ObservableObject {
         publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
-        }
-        if let controller, controller.isRunning, (snapshot["controllerPID"] as? NSNumber)?.int32Value == controller.processIdentifier,
-           let workbench = snapshot["workbench"] as? [String: Any], let requests = workbench["requests"] as? [[String: Any]] {
-            for request in requests {
-                guard let id = ManagementProtocol.uuid(request["request_id"]), ManagementProtocol.uuid(request["origin_runtime"]) != nil else { continue }
-                workbenchRequests[id] = request
-            }
-            if latestWorkbenchRequest == nil { latestWorkbenchRequest = requests.last.flatMap { ManagementProtocol.uuid($0["request_id"]) } }
-        }
-        if let host = ownedHost() {
-            for (nonce, request) in workbenchWindowRequests {
-                guard let placement = onPlaceWorkbench?(host, request) else { continue }
-                if let id = placement["windowID"] { workbenchWindowRequests[nonce]?["windowID"] = id }
-                if let dispatched = placement["effectDispatched"] { workbenchWindowRequests[nonce]?["effectDispatched"] = dispatched }
-                let phase = placement["phase"] as? String
-                if phase == "identified" || phase == "ready" || phase == "closed" || phase == "unknown" && request["reportedUnknown"] as? Bool != true {
-                    var reply = request; reply["type"] = "workbench-window-result"; reply["phase"] = phase; reply["windowID"] = placement["windowID"]
-                    if phase == "identified" || phase == "ready" || phase == "closed" { workbenchWindowRequests[nonce] = nil }
-                    else { workbenchWindowRequests[nonce]?["reportedUnknown"] = true }
-                    if let data = try? JSONSerialization.data(withJSONObject: reply) { try? controllerInput?.write(contentsOf: data + Data([10])) }
-                }
-            }
         }
         if let host = ownedHost(), let request = mobileWindowRequest,
            let placement = onPlaceMobileWindow?(host, request) {
@@ -309,8 +256,6 @@ final class CodexLauncher: ObservableObject {
             self.controllerOutput = nil
             self.controllerInput = nil
             self.mobileWindowRequest = nil
-            self.workbenchWindowRequests.removeAll()
-            for id in self.workbenchRequests.keys { self.workbenchRequests[id]?["phase"] = "unknown" }
             self.outputBuffer.removeAll()
             self.controller = nil; self.refresh()
             if self.stopping { self.stopped?(); self.stopped = nil; return }
@@ -335,12 +280,6 @@ final class CodexLauncher: ObservableObject {
             let line = outputBuffer.prefix(upTo: newline)
             outputBuffer.removeSubrange(...newline)
             guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
-            if value["type"] as? String == "workbench-window-request", value["version"] as? Int == 1,
-               let nonce = value["nonce"] as? String, UUID(uuidString: nonce) != nil {
-                guard !stopping, workbenchWindowRequests[nonce] == nil else { continue }
-                workbenchWindowRequests[nonce] = value
-                continue
-            }
             if value["type"] as? String == "mobile-window-request", value["version"] as? Int == 1 {
                 guard !stopping, mobileWindowRequest == nil else { continue }
                 mobileWindowRequest = value

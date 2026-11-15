@@ -11,7 +11,6 @@ import Security
     @Published private(set) var status: [String: Any] = [:]
     @Published private(set) var busy = false
     @Published private(set) var message = "正在读取 interactiond…"
-    @Published private(set) var pendingOpen: ManagementWorkspaceRequest?
     @Published private(set) var modules: [String: ModuleObservation] = [:]
     @Published private(set) var moduleErrors: [String: String] = [:]
     private var serviceConnection: ServiceControlClient?
@@ -34,11 +33,9 @@ import Security
             }
             let state = try await self.call(.status)
             self.status = state.result
-            self.adoptPendingOpen(state.result, instance: state.runtime.instance_id)
             let result = try await self.call(.settingsRead)
             try self.acceptSettings(result.result)
-            self.message = self.pendingOpen.map { $0.runtimeID != state.runtime.instance_id } == true
-                ? "已连接新运行实例，原工作台请求仍待核实" : "已连接 interactiond 运行主体"
+            self.message = "已连接 interactiond 运行主体"
         }
     }
     private func acceptSettings(_ result: [String: Any]) throws {
@@ -69,46 +66,6 @@ import Security
                 self.message = "写入回执未确认，已尝试只读核对当前值：\(reason)"
             }
         }
-    }
-    func openWorkbench() {
-        guard !busy, pendingOpen == nil, let runtime else { return }
-        let id = UUID(); let pending = ManagementWorkspaceRequest(requestID: id, runtimeID: runtime.instance_id); pendingOpen = pending
-        perform {
-            do {
-                _ = try await self.call(.workspaceOpen, id: id, extra: ["expected_runtime": runtime.instance_id.uuidString])
-                self.message = "工作台请求已接收；正在读取实际窗口状态"
-            } catch let rejection as Rejected {
-                if self.pendingOpen == pending { self.pendingOpen = nil }
-                self.message = rejection.code == .unsupported ? "当前运行接口不支持打开工作台，本次请求未执行" : "本次工作台请求已拒绝，未执行"
-                return
-            } catch { self.message = "工作台回执未知，保留原请求并只读核对：\(error.localizedDescription)" }
-            await self.reconcileOpen(pending)
-        }
-    }
-    private func adoptPendingOpen(_ state: [String: Any], instance: UUID) {
-        guard let open = state["workspace_request"] as? [String: Any] else { return }
-        if let pendingOpen { self.pendingOpen = pendingOpen.observing(open, runtimeID: instance) }
-        else { pendingOpen = ManagementWorkspaceRequest.recovering(open, runtimeID: instance) }
-    }
-    func checkOpen() {
-        guard !busy, let pendingOpen else { return }
-        perform { await self.reconcileOpen(pendingOpen) }
-    }
-    private func reconcileOpen(_ pending: ManagementWorkspaceRequest) async {
-        do {
-            // Discover the currently verified native instance, then query the
-            // old request only. This never submits another workspace.open.
-            let current = try await call(.status)
-            let reply = try await call(.status, extra: ["expected_runtime": current.runtime.instance_id.uuidString,
-                                                       "query_request_id": pending.requestID.uuidString])
-            status = reply.result
-            adoptPendingOpen(reply.result, instance: reply.runtime.instance_id)
-            guard let open = reply.result["workspace_request"] as? [String: Any],
-                  ManagementProtocol.uuid(open["request_id"]) == pending.requestID else {
-                message = "原工作台请求结果未知，保留请求 ID"; return
-            }
-            message = "工作台状态：\(open["phase"] as? String ?? "unknown")"
-        } catch { message = "原工作台请求仍待核对：\(error.localizedDescription)" }
     }
     func attach() {
         guard !busy else { return }

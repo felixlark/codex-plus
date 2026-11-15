@@ -5,13 +5,10 @@ import CodexPlusCore
 /// The existing signed native body owns effects; the management App is a client.
 final class ManagementRuntime {
     private let instance = UUID()
-    var instanceID: UUID { instance }
     var readSettings: (() throws -> ManagementProtocol.Settings)?
     var writeSettings: ((ManagementProtocol.Settings) throws -> Void)?
     var readStatus: (() -> [String: Any])?
     var readComponents: (() -> [String: Any])?
-    var openWorkbench: ((UUID) -> Bool)?
-    var readWorkbench: ((UUID?) -> [String: Any]?)?
 
     private var identity: ManagementProtocol.RuntimeIdentity {
         let components = readComponents?() ?? [:]
@@ -26,7 +23,7 @@ final class ManagementRuntime {
     }
     private var capabilities: [String] {
         ["status"] + (readSettings == nil ? [] : ["settings.read"]) +
-        (writeSettings == nil ? [] : ["settings.write"]) + (openWorkbench == nil ? [] : ["workspace.open"])
+        (writeSettings == nil ? [] : ["settings.write"])
     }
     func handle(_ object: [String: Any]) -> [String: Any] {
         let request: ManagementProtocol.Request
@@ -46,7 +43,7 @@ final class ManagementRuntime {
                 var result = readStatus?() ?? [:]
                 result["permissions"] = ["accessibility": ["trusted": AXIsProcessTrusted(), "bundle_id": identity.bundle_id,
                                                            "path": identity.path, "pid": identity.pid]]
-                result["workspace_request"] = readWorkbench?(request.queryID) as Any? ?? NSNull()
+                result["workspace_request"] = NSNull()
                 return reply(result)
             case .settingsRead:
                 guard let readSettings else { return reply(error: "unsupported") }
@@ -66,8 +63,8 @@ final class ManagementRuntime {
                 let actual = try readSettings()
                 return reply(["settings": try actual.object, "settings_revision": try actual.revision])
             case .workspaceOpen:
-                guard let openWorkbench else { return reply(error: "unsupported") }
-                return openWorkbench(request.id) ? reply(["request_id": request.id.uuidString, "phase": "requested"]) : reply(error: "workspace_unavailable")
+                // Reserved wire operation; the compact board is not implemented.
+                return reply(error: "unsupported")
             }
         } catch { return reply(error: "settings_unavailable") }
     }

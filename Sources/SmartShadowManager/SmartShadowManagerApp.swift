@@ -48,11 +48,7 @@ struct ManagerView: View {
                             Text("controller：\(runtime.controller_version ?? "未知") · 移动接口：\(runtime.mobile_version ?? "未知")")
                                 .font(.caption).foregroundColor(.secondary)
                         } else { Text("尚未核验运行主体").foregroundColor(.secondary) }
-                        HStack {
-                            Button("打开工作台") { model.openWorkbench() }
-                                .disabled(model.busy || model.runtime == nil || model.pendingOpen != nil || !model.capabilities.contains("workspace.open"))
-                            if model.pendingOpen != nil { Button("核对原请求") { model.checkOpen() }.disabled(model.busy) }
-                        }
+                        Text("小型任务看板尚未实现").foregroundColor(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
                 GroupBox("contextd · taskd") {

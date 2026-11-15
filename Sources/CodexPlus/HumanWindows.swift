@@ -146,22 +146,6 @@ final class HumanWindows {
         return (matches[0].0, matches[0].1)
     }
 
-    func workbench(_ app: NSRunningApplication, nonce: String) -> (element: AXUIElement, id: UInt32)? {
-        guard let launch = app.launchDate, !app.isTerminated else { return nil }
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        let matches = (value(root, kAXWindowsAttribute) as? [AXUIElement] ?? []).compactMap { element -> (AXUIElement, UInt32)? in
-            guard let url = webURL(element), url.scheme == "app", url.host == "-", url.path == "/index.html" else { return nil }
-            let outer = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let route = outer.first(where: { $0.name == "initialRoute" })?.value ?? "/"
-            let inner = URLComponents(string: "https://codex.invalid" + route)?.queryItems ?? []
-            guard (outer + inner).first(where: { $0.name == "codexPlusWorkbench" })?.value == nonce else { return nil }
-            let id = cp_window_id(element)
-            return id == 0 ? nil : (element, id)
-        }
-        guard matches.count == 1, app.launchDate == launch else { return nil }
-        return (matches[0].0, matches[0].1)
-    }
-
     private func windows(_ app: NSRunningApplication) -> [Window] {
         guard !app.isTerminated else { return [] }
         let root = AXUIElementCreateApplication(app.processIdentifier)

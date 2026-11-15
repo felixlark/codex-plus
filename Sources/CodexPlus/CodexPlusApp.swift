@@ -90,9 +90,6 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         management.writeSettings = { [weak self] value in self?.settings.applyManagement(value) }
         management.readComponents = { [weak self] in self?.launcher.runtimeComponents() ?? [:] }
-        launcher.runtimeInstance = management.instanceID
-        management.openWorkbench = { [weak self] id in self?.launcher.openWorkbench(requestID: id) ?? false }
-        management.readWorkbench = { [weak self] id in self?.launcher.workbenchStatus(requestID: id) }
         management.readStatus = { [weak self] in
             guard let self else { return [:] }
             let tools = self.toolWindows.command(["command": "tool-status"])
@@ -107,7 +104,6 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.onPlaceMobileWindow = { [weak self] host, request in self?.toolWindows.routeMobileAnchor(host, request: request) }
-        launcher.onPlaceWorkbench = { [weak self] host, request in self?.toolWindows.routeWorkbench(host, request: request) }
         launcher.start()
         if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

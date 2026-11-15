@@ -19,6 +19,8 @@ cp "$ROOT/AppInfo.plist" "$APP/Contents/Info.plist"
 rm -f "$APP/Contents/LICENSE"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 cp "$ROOT/third_party/OpenComputerUse-LICENSE" "$APP/Contents/Resources/OpenComputerUse-LICENSE"
+# Retired complete-workbench modules must not survive a reused build directory.
+rm -f "$APP/Contents/Resources/workbench.mjs" "$APP/Contents/Resources/workbench-view.mjs"
 cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$APP/Contents/Resources/"
 "$ROOT/scripts/build-mobile-gateway"
 cp "$HOME/Library/Caches/codex-plus/mobile/bin/MobileGateway" "$APP/Contents/Resources/MobileGateway"
