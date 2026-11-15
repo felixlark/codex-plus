@@ -11,6 +11,7 @@ final class ToolWindowRouter {
         let observer: AXObserver
         var known: [AXUIElement]
         var documents: Set<URL>?
+        var defaultChrome = false
         init(app: NSRunningApplication, observer: AXObserver, known: [AXUIElement], documents: Set<URL>?) {
             self.app = app; self.observer = observer; self.known = known; self.documents = documents
         }
@@ -46,6 +47,10 @@ final class ToolWindowRouter {
     private var observationErrors: [pid_t: Int] = [:]
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
+    private var preparingChrome = false
+    private(set) var chromeUsesAgentDisplay = UserDefaults.standard.object(forKey: ToolWindowPolicy.chromeEnabledKey) as? Bool ?? true
+    var displaySummary: String { display.summary }
+
     private(set) var enabled = UserDefaults.standard.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
 
     func start() {
@@ -57,10 +62,16 @@ final class ToolWindowRouter {
             guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             self?.remove(app.processIdentifier)
         })
+        observeDefaultChrome()
+        tokens.append(center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.observeDefaultChrome()
+        })
         screenToken = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 // Only still-pending windows; handled/user-moved windows stay put.
+                self.display.prepare { _ in }
+                self.observeDefaultChrome()
                 for w in Array(self.watches.values) { self.scan(w) }
             }
     }
@@ -105,20 +116,22 @@ final class ToolWindowRouter {
 
     @discardableResult
     private func watch(_ app: NSRunningApplication, baseline: [AXUIElement], documents: Set<URL>?,
-                       remainder: ((Set<URL>?) -> Void)? = nil) -> Bool {
+                       defaultChrome: Bool = false, remainder: ((Set<URL>?) -> Void)? = nil) -> Bool {
         func reportRemainder(_ watch: Watch) {
             remainder?(documents.map { $0.intersection(watch.documents ?? []) })
         }
         guard enabled, !stopping, AXIsProcessTrusted(), app.processIdentifier > 0,
               !ToolWindowPolicy.protectedBundles.contains(app.bundleIdentifier ?? "") else { return false }
         if let existing = watches[app.processIdentifier] {
+            if defaultChrome && !existing.defaultChrome { existing.known = [] }
+            existing.defaultChrome = existing.defaultChrome || defaultChrome
             // Each request contributes its own manual-window baseline. Reusing
             // an observer must never make a later request claim those windows.
             for window in baseline where !existing.known.contains(where: { CFEqual($0, window) }) {
                 existing.known.append(window)
                 AXObserverAddNotification(existing.observer, window, kAXTitleChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
             }
-            if let documents { existing.documents?.formUnion(documents) }
+            if let documents { existing.documents = (existing.documents ?? []).union(documents) }
             scan(existing); reportRemainder(existing); return true
         }
         var observer: AXObserver?
@@ -134,6 +147,7 @@ final class ToolWindowRouter {
         }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let watch = Watch(app: app, observer: observer, known: baseline, documents: documents)
+        watch.defaultChrome = defaultChrome
         watches[app.processIdentifier] = watch
         let results = [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification].map {
             AXObserverAddNotification(observer, appElement, $0 as CFString, Unmanaged.passUnretained(self).toOpaque())
@@ -162,10 +176,12 @@ final class ToolWindowRouter {
             // Opening a file as a tab in an existing manual window consumes
             // the request without taking ownership of that window.
             watch.documents = ToolWindowPolicy.remainingClaims(claims, knownDocuments: Set(watch.known.compactMap(document)))
-            if watch.documents?.isEmpty == true { removeWatch(watch.app.processIdentifier); return }
+            if !ToolWindowPolicy.retainsObservation(defaultChrome: watch.defaultChrome, documents: watch.documents) { removeWatch(watch.app.processIdentifier); return }
         }
         for window in windows(watch.app) where !watch.known.contains(where: { CFEqual($0, window) }) {
-            if let documents = watch.documents {
+            if watch.defaultChrome {
+                guard value(window, kAXSubroleAttribute) as? String == "AXStandardWindow" else { continue }
+            } else if let documents = watch.documents {
                 guard let raw = value(window, kAXDocumentAttribute) as? String,
                       let url = URL(string: raw), documents.contains(url.standardizedFileURL) else {
                     // Document metadata may become available after AXWindowCreated.
@@ -181,7 +197,7 @@ final class ToolWindowRouter {
             }
         }
         // A mixed-use app is observed only until this exact document is claimed.
-        if watch.documents?.isEmpty == true { removeWatch(watch.app.processIdentifier) }
+        if !ToolWindowPolicy.retainsObservation(defaultChrome: watch.defaultChrome, documents: watch.documents) { removeWatch(watch.app.processIdentifier) }
     }
 
     @discardableResult
@@ -256,7 +272,45 @@ final class ToolWindowRouter {
         if stopping && managed.isEmpty && agentSettingsRegistration == nil && ownAgentWindow == nil { NSApp.terminate(nil) }
     }
 
+    func setChromeUsesAgentDisplay(_ flag: Bool) {
+        chromeUsesAgentDisplay = flag
+        UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.chromeEnabledKey)
+        if flag { observeDefaultChrome() }
+        else {
+            for watch in Array(watches.values) where watch.defaultChrome {
+                watch.defaultChrome = false
+                if !ToolWindowPolicy.retainsObservation(defaultChrome: false, documents: watch.documents) { removeWatch(watch.app.processIdentifier) }
+            }
+        }
+    }
+
+    private func observeDefaultChrome() {
+        guard enabled, !stopping, chromeUsesAgentDisplay, !preparingChrome, AXIsProcessTrusted() else { return }
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            ToolWindowPolicy.defaultsToAgentDisplay(bundleID: $0.bundleIdentifier ?? "", enabled: chromeUsesAgentDisplay)
+                && watches[$0.processIdentifier]?.defaultChrome != true
+        }
+        guard !apps.isEmpty else { return }
+        display.prepare { [weak self] bounds in
+            guard let self, bounds != nil else { return }
+            self.preparingChrome = true
+            let epoch = self.observationEpoch
+            self.ocu.call { [weak self] outcome in
+                guard let self else { return }
+                self.preparingChrome = false
+                guard case .accepted = outcome, self.enabled, !self.stopping,
+                      self.chromeUsesAgentDisplay, self.observationEpoch == epoch,
+                      self.display.currentBounds() != nil else { return }
+                for app in apps where !app.isTerminated {
+                    _ = self.watch(app, baseline: [], documents: nil, defaultChrome: true)
+                }
+            }
+        }
+    }
+
     private func reconcileOwnership() {
+        // AX readiness/minimize/fullscreen changes need not publish window-created.
+        for watch in Array(watches.values) where watch.defaultChrome { scan(watch) }
         for record in managed where record.result == "parked" {
             if definitelyGone(record) { managed.removeAll { $0.claimID == record.claimID }; continue }
             guard live(record), let actual = frame(record.element), let last = record.lastKnownFrame else { continue }
@@ -344,6 +398,10 @@ final class ToolWindowRouter {
         guard ToolWindowPolicy.sameFrame(actual, last) else {
             release(record); return false // User took over: forget the OCU record without moving.
         }
+        if record.originalDisplays.isEmpty,
+           NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.google.Chrome" {
+            release(record); return false // Keep born-hidden browser windows alive on OCU's persistent screen.
+        }
         let displays = AgentDisplay.displays()
         guard record.originalDisplays.contains(where: { displays[$0.key] == $0.value }) else {
             managed[i].result = record.originalDisplays.isEmpty ? "restore-close-native-agent-window" : "restore-original-display-unavailable"; return false
@@ -410,6 +468,7 @@ final class ToolWindowRouter {
         UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
         if flag {
             if tokens.isEmpty { start() }
+            observeDefaultChrome()
         } else {
             for pid in Array(watches.keys) { removeWatch(pid) }
         }
@@ -584,6 +643,7 @@ final class ToolWindowRouter {
     }
 
     private func status() -> [String: Any] {
+        display.prepare { _ in }
         var target: [String: Any] = ["type": "agent-virtual-display", "owner": "OCU persistent-display", "supported": display.supported, "preparing": display.isPreparing]
         if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
         if let bounds = display.bounds {
@@ -599,7 +659,7 @@ final class ToolWindowRouter {
         if let ownAgentWindow, ownAgentWindow.isVisible {
             windows.append(["pid": ProcessInfo.processInfo.processIdentifier, "windowID": ownAgentWindow.windowNumber, "result": "agent-settings"])
         }
-        return ["ok": true, "enabled": enabled, "accessibility": AXIsProcessTrusted(), "target": target,
+        return ["ok": true, "enabled": enabled, "chromeUsesAgentDisplay": chromeUsesAgentDisplay, "displaySummary": displaySummary, "accessibility": AXIsProcessTrusted(), "target": target,
                 "lastOpen": lastOpen, "watchedProcesses": watches.count, "windows": windows,
                 "observationErrors": observationErrors.map { ["pid": Int($0.key), "code": $0.value] },
                 "lastError": lastError ?? display.error ?? ""]

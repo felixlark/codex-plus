@@ -2,6 +2,23 @@ import XCTest
 @testable import CodexPlusCore
 
 final class ToolWindowPolicyTests: XCTestCase {
+    func testChromeAndFileRequestsKeepTheirIndependentObservationLifetime() {
+        let file = URL(fileURLWithPath: "/tmp/chrome-file.html")
+        let pending: Set<URL> = [file]
+        let consumed = ToolWindowPolicy.remainingClaims(pending, knownDocuments: pending)
+        XCTAssertTrue(ToolWindowPolicy.retainsObservation(defaultChrome: true, documents: consumed))
+        XCTAssertTrue(ToolWindowPolicy.retainsObservation(defaultChrome: true, documents: nil))
+        XCTAssertTrue(ToolWindowPolicy.retainsObservation(defaultChrome: false, documents: pending))
+        XCTAssertFalse(ToolWindowPolicy.retainsObservation(defaultChrome: false, documents: consumed))
+        XCTAssertFalse(ToolWindowPolicy.retainsObservation(defaultChrome: false, documents: nil))
+    }
+    func testChromeDefaultNeverClaimsWebAppsOrOtherBrowsers() {
+        XCTAssertTrue(ToolWindowPolicy.defaultsToAgentDisplay(bundleID: "com.google.Chrome", enabled: true))
+        XCTAssertFalse(ToolWindowPolicy.defaultsToAgentDisplay(bundleID: "com.google.Chrome", enabled: false))
+        for bundle in ["com.google.Chrome.app.ehpoaimemjameeijlpblkfpomemadkke", "com.google.Chrome.beta", "com.apple.Safari", "com.openai.codex", ""] {
+            XCTAssertFalse(ToolWindowPolicy.defaultsToAgentDisplay(bundleID: bundle, enabled: true))
+        }
+    }
     func testOnlyExplicitFileClaimsAndProtectedBundles() {
         let resource = URL(fileURLWithPath: "/tmp/tool.txt")
         for bundle in ["com.apple.TextEdit", "com.google.Chrome", "me.longbiaochen.dock-switch.settings", "com.deskvncviewer.desktop", "my.generated.tool"] {

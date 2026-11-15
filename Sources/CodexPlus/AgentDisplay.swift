@@ -34,6 +34,17 @@ final class AgentDisplay {
             mirrored: CGDisplayIsInMirrorSet(candidate) != 0 || CGDisplayMirrorsDisplay(candidate) != 0,
             online: online)
     }
+    var summary: String {
+        prepare { _ in }
+        if let bounds = currentBounds() {
+            return "已连接 · \(Int(bounds.width)) × \(Int(bounds.height)) pt · 跨回合保留"
+        }
+        return supported ? "已配置 · 等待 OCU 虚拟屏连接" : "尚未配置 OCU 持久虚拟屏"
+    }
+    static func isPersistentScreen(_ id: UInt32) -> Bool {
+        let reference = AgentDisplay()
+        return reference.eligible(id, in: displays())
+    }
     func currentBounds() -> CGRect? {
         let online = Self.displays()
         guard persistentConfigurationEnabled, id != 0, eligible(id, in: online) else {

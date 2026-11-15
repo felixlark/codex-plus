@@ -4,6 +4,13 @@ import Foundation
 public enum ToolWindowPolicy {
     public enum Scope: Equatable { case document(URL), none }
     public static let enabledKey = "agentToolWindowsEnabled"
+    public static let chromeEnabledKey = "chromeUsesAgentDisplay"
+    public static func defaultsToAgentDisplay(bundleID: String, enabled: Bool) -> Bool {
+        enabled && bundleID == "com.google.Chrome"
+    }
+    public static func retainsObservation(defaultChrome: Bool, documents: Set<URL>?) -> Bool {
+        defaultChrome || documents?.isEmpty == false
+    }
     public static let protectedBundles: Set<String> = [
         "com.openai.codex", "me.longbiaochen.codex-plus", "com.webcatalog.juli.x-chat",
         "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
