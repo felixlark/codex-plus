@@ -105,8 +105,9 @@ final class CodexLauncher: ObservableObject {
             guard let identity = ProcessIdentity.read(pid) else { throw ManagementProtocol.failure("gateway_identity_unknown") }
             scope["gateway"] = identity
         } else { scope["gateway"] = NSNull() }
-        let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: scope, options:.sortedKeys)).map { String(format:"%02x", $0) }.joined()
-        return ["state":"prepared", "owned_scope":scope, "scope_revision":digest]
+        let canonical = try JSONSerialization.data(withJSONObject: scope, options:.sortedKeys)
+        let digest = SHA256.hash(data: canonical).map { String(format:"%02x", $0) }.joined()
+        return ["state":"prepared", "owned_scope":scope, "scope_revision":digest, "scope_canonical_base64":canonical.base64EncodedString()]
     }
     func resumeLifecycle() async throws {
         _ = try await controllerLifecycle("resume")
