@@ -54,30 +54,44 @@ private final class TaskBoardClient: @unchecked Sendable {
 }
 
 @MainActor final class TaskBoardModel: ObservableObject {
-    @Published private(set) var snapshot: TaskBoardSnapshot?
     @Published private(set) var updatedAt: Date?
     @Published private(set) var busy = false
     @Published private(set) var error: String?
+    @Published private(set) var codexError: String?
+    @Published private(set) var board = UnifiedTaskBoard(tasks: nil, codex: nil, expectedSourceCommit: nil)
     private var work: Task<Void, Never>?
     private var service: ServiceControlClient?
     private var client: TaskBoardClient?
+    private var catalog: TaskCatalogClient?
     func refresh() {
         guard !busy else { return }
-        busy = true; error = nil
+        busy = true; error = nil; codexError = nil
         work = Task {
-            defer { busy = false; work = nil; service = nil; client = nil }
+            defer { busy = false; work = nil; service = nil; client = nil; catalog = nil }
+            var tasks: TaskBoardSnapshot?, source: String?, codex: CodexTaskCatalog?
             do {
                 let service = ServiceControlClient(); self.service = service
                 let observation = try await service.inspect("taskd")
+                source = observation.source
                 try Task.checkCancellation()
                 guard observation.installed, let command = observation.mcp else { throw NSError(domain:"TaskBoard", code:1, userInfo:[NSLocalizedDescriptionKey:"taskd 正式读取入口尚未安装"]) }
                 let client = TaskBoardClient(); self.client = client
                 let value = try await client.read(command)
                 try Task.checkCancellation()
-                snapshot = value; updatedAt = Date()
+                tasks = value
             } catch is CancellationError { }
-            catch { snapshot = nil; updatedAt = nil; self.error = error.localizedDescription }
+            catch { self.error = error.localizedDescription }
+            if Task.isCancelled { return }
+            do {
+                let catalog = TaskCatalogClient(); self.catalog = catalog
+                codex = try await catalog.read(sourceCommit: source)
+                self.codexError = codex?.error
+            } catch is CancellationError { return }
+            catch { self.codexError = "Codex 当前任务读取不可用" }
+            if Task.isCancelled { return }
+            board = UnifiedTaskBoard(tasks: tasks, codex: codex, expectedSourceCommit: source)
+            updatedAt = Date()
         }
     }
-    func cancel() { work?.cancel(); service?.cancel(); client?.cancel() }
+    func cancel() { work?.cancel(); service?.cancel(); client?.cancel(); catalog?.cancel() }
 }

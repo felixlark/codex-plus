@@ -24,6 +24,7 @@ public struct TaskBoardSnapshot: Decodable {
     }
     public struct Action: Decodable, Identifiable {
         public let action_id: String
+        public let host_id: String?
         public let input_revision: String
         public let thread_id: String?
         public let run_id: String?
