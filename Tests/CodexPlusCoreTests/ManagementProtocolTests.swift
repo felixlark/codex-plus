@@ -103,6 +103,14 @@ final class ManagementWorkspaceRequestTests: XCTestCase {
         XCTAssertEqual(pending, .init(requestID: id, runtimeID: actual))
         XCTAssertNil(ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "phase": "closed"], runtimeID: actual))
     }
+    func testNewRuntimeCanSettleOnlyAnExactlyCorrelatedOriginalRequest() {
+        let original = UUID(), replacement = UUID(), id = UUID()
+        let pending = ManagementWorkspaceRequest(requestID: id, runtimeID: original)
+        XCTAssertEqual(pending.observing(["request_id": id.uuidString, "origin_runtime": UUID().uuidString, "phase": "ready"], runtimeID: replacement), pending)
+        XCTAssertEqual(pending.observing(["request_id": id.uuidString, "origin_runtime": original.uuidString, "phase": "unknown"], runtimeID: replacement), pending)
+        XCTAssertNil(pending.observing(["request_id": id.uuidString, "origin_runtime": original.uuidString, "phase": "closed"], runtimeID: replacement))
+        XCTAssertEqual(ManagementWorkspaceRequest.recovering(["request_id": id.uuidString, "origin_runtime": original.uuidString, "phase": "unknown"], runtimeID: replacement), pending)
+    }
 }
 
 

@@ -96,7 +96,11 @@ import Security
     }
     private func reconcileOpen(_ pending: ManagementWorkspaceRequest) async {
         do {
-            let reply = try await call(.status, extra: pending.reconciliationFields)
+            // Discover the currently verified native instance, then query the
+            // old request only. This never submits another workspace.open.
+            let current = try await call(.status)
+            let reply = try await call(.status, extra: ["expected_runtime": current.runtime.instance_id.uuidString,
+                                                       "query_request_id": pending.requestID.uuidString])
             status = reply.result
             adoptPendingOpen(reply.result, instance: reply.runtime.instance_id)
             guard let open = reply.result["workspace_request"] as? [String: Any],

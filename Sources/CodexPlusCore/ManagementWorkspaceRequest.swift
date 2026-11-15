@@ -10,13 +10,14 @@ public struct ManagementWorkspaceRequest: Equatable {
         ["expected_runtime": runtimeID.uuidString, "query_request_id": requestID.uuidString]
     }
     public func observing(_ status: [String: Any], runtimeID: UUID) -> Self? {
-        guard self.runtimeID == runtimeID, ManagementProtocol.uuid(status["request_id"]) == requestID,
+        guard (self.runtimeID == runtimeID || ManagementProtocol.uuid(status["origin_runtime"]) == self.runtimeID),
+              ManagementProtocol.uuid(status["request_id"]) == requestID,
               let phase = status["phase"] as? String else { return self }
         return ["ready", "failed", "closed"].contains(phase) ? nil : self
     }
     public static func recovering(_ status: [String: Any], runtimeID: UUID) -> Self? {
         guard let id = ManagementProtocol.uuid(status["request_id"]), let phase = status["phase"] as? String,
               !["ready", "failed", "closed"].contains(phase) else { return nil }
-        return .init(requestID: id, runtimeID: runtimeID)
+        return .init(requestID: id, runtimeID: ManagementProtocol.uuid(status["origin_runtime"]) ?? runtimeID)
     }
 }

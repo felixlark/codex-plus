@@ -276,6 +276,34 @@ final class ToolWindowRouter {
         return ["phase": "placing", "windowID": window.id]
     }
 
+    func routeWorkbench(_ host: NSRunningApplication, request: [String: Any]) -> [String: Any]? {
+        guard enabled, !stopping, host.bundleIdentifier == "com.openai.codex",
+              host.bundleURL?.path == "/Applications/ChatGPT.app",
+              let nonce = request["nonce"] as? String, UUID(uuidString: nonce) != nil,
+              let instance = request["instance"] as? String, UUID(uuidString: instance) != nil else { return nil }
+        if request["operation"] as? String == "inspect-absence", let id = request["windowID"] as? UInt32 {
+            let info = windowInfo(id)
+            return ["phase": info == nil || (info?[kCGWindowOwnerPID as String] as? Int32) != host.processIdentifier ? "closed" : "unknown", "windowID": id]
+        }
+        guard let window = hostWindows.workbench(host, nonce: nonce) else { return nil }
+        if request["operation"] as? String == "identify" { return ["phase": "identified", "windowID": window.id] }
+        if let id = request["windowID"] as? UInt32 {
+            guard id == window.id else { return ["phase": "unknown", "windowID": id] }
+            if request["operation"] as? String == "place", request["effectDispatched"] as? Bool != true {
+                guard place(window.element, pid: host.processIdentifier, mobileAnchor: true) else { return nil }
+                return ["phase": "placing", "windowID": id, "effectDispatched": true]
+            }
+            if managed.contains(where: { $0.pid == host.processIdentifier && $0.windowID == id && $0.result == "parking" }) {
+                return ["phase": "placing", "windowID": id]
+            }
+            // A recovered/unknown exact window is inspected only. Never repeat
+            // the geometry effect, even when this native process has restarted.
+            let ready = frame(window.element).flatMap { actual in display.currentBounds().map { ToolWindowPolicy.contained(actual, in: $0) } } ?? false
+            return ["phase": ready ? "ready" : "unknown", "windowID": id]
+        }
+        return ["phase": "unknown"]
+    }
+
     private func finishStopIfReady() {
         guard stopping, placementRequests == 0, !terminationScheduled else { return }
         terminationScheduled = true

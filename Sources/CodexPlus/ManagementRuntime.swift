@@ -5,6 +5,7 @@ import CodexPlusCore
 /// The existing signed native body owns effects; the management App is a client.
 final class ManagementRuntime {
     private let instance = UUID()
+    var instanceID: UUID { instance }
     var readSettings: (() throws -> ManagementProtocol.Settings)?
     var writeSettings: ((ManagementProtocol.Settings) throws -> Void)?
     var readStatus: (() -> [String: Any])?

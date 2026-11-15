@@ -5,6 +5,7 @@ export function isHumanWindowURL(value) {
     const url=new URL(value),route=new URL(url.searchParams.get('initialRoute')??'/','https://codex.invalid');
     return url.protocol==='app:'&&url.hostname==='-'&&url.pathname==='/index.html'&&
       !url.searchParams.has('codexPlusMobileAnchor')&&!route.searchParams.has('codexPlusMobileAnchor')&&
+      !url.searchParams.has('codexPlusWorkbench')&&!route.searchParams.has('codexPlusWorkbench')&&
       !/^\/(avatar-overlay|spotlight|global-dictation|hotkey-window)(\/|$)/.test(route.pathname);
   }catch{return false;}
 }

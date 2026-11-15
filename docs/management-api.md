@@ -10,16 +10,20 @@
 
 build68候选补充实际组件身份：controller启动时读取自身文件计算SHA-256；移动接缝在核验网关签名后，计算实际mobile-access源码与网关二进制的组合SHA-256。管理响应只在当前controller PID与其快照匹配时读取这些版本，尚未启动的移动网关版本仍为null。这里的移动版本指Mac移动适配器和网关，不冒充iOS安装版本。安装采用另验。
 
-- status 返回无正文、凭据和环境的运行元数据。query_request_id 必须带 expected_runtime；查询同运行实例对应 workbench request_id/nonce/target/window/phase。无关联记录或实例变更保留 unknown。
+- status 返回无正文、凭据和环境的运行元数据。query_request_id 必须带当前已核验实例的expected_runtime；查询 workbench request_id/origin_runtime/nonce/target/window/phase。跨实例只读恢复核原origin_runtime和真实终态，无关联记录保留unknown。
 - settings.read 的 result 为 settings、settings_revision。Settings 仅含原五个设置，revision 由实际规范化设置对象计算 SHA256。
 - settings.write 先校验 expected_runtime 与 expected_settings_revision，再用 Settings.applying 校验完整差量，沿原 SettingsModel/偏好与回调写入，最后实际读回 settings/revision。冲突返回 conflict 与当前快照；实例变更不写。原验收模式等运行侧限制继续适用，不能把请求值冒充实际读回。
 - workspace.open 只调用新 launcher.openWorkbench(requestID)，发送一次 controller workbench-open。禁止复用人工 F6 的 launcher.open/place/humanWindows.open，不碰 mobile anchor 或人工窗。同步 handler 仅返回 requested/accepted 与 request_id；原 controller 将同 ID 贯穿 nonce/target/window/phase，status 再读真实状态。pipe write 不代表窗口 ready。
+
+build72候选接入此入口：同一运行内每个request_id关联同一准确工作台；重复ID不重发，新的显式ID可复用同窗。已经登记/可能发出后只报accepted或unknown，不以workspace_unavailable清除请求。原controller state.json原子保存nonce/target/CG及origin_runtime；创建IPC前保存nonce，布局前先identify CG并持久化dispatched，再发一次place，重启只读inspect。关闭target须native再核CG消失，无法确定保留unknown，原宿主退出才可结算未捕获target的旧创建。管理端实例改变后先读新身份，再以新expected_runtime查询原ID，只有origin_runtime与原请求一致的真实终态才能清pending。详见[工作台设计](designs/interaction-workbench.md)。
+
+Plus菜单/页面的用户设置入口改打开准确签名的全局SmartShadow管理App。仍被正式tool-open消费的Agent设置窗与SettingsModel内部偏好回调暂保留，随#613准确消费者迁接后退役，不冒称全部设置代码已零消费者。
 
 权限状态带准确主体 bundle/path/pid；原 native 检查 Plus AX。按钮由该主体处理或打开系统设置中 Plus 条目，Manager 不请求自身 AX 冒充 interactiond 权限。
 
 ## 客户端与验收
 
-ManagementConnection 是客户端，校验 socket/父目录本 UID 与权限、peer UID；取消只 shutdown 本连接，由原 worker 唯一 close fd，避免 fd 复用误关。没有 launch/reopen/retry fallback。写响应丢失只读实际设置；工作台响应丢失只读同实例、同 query_request_id 的状态，不换键补发。Manager 还必须核响应 PID 对应 NSRunningApplication 的准确 bundle/path，不能只凭自报身份认领运行体。
+ManagementConnection 是客户端，校验 socket/父目录本 UID 与权限、peer UID；取消只 shutdown 本连接，由原 worker 唯一 close fd，避免 fd 复用误关。没有 launch/reopen/retry fallback。写响应丢失只读实际设置；工作台响应丢失只读同query_request_id，并核当前实例和原origin_runtime，不换键补发。Manager 还必须核响应 PID 对应 NSRunningApplication 的准确 bundle/path，不能只凭自报身份认领运行体。
 
 当前单元覆盖严格类型、未知字段、运行实例和 revision 必填、原屏幕选择合同、规范化摘要、未知后端版本、连接前取消。实际 handler、安装版 IPC、I/O 中途取消、设置冲突、F6 并发丢回执和退出 Manager 后原运行体持续运行，仍须真实接入后另验。
 

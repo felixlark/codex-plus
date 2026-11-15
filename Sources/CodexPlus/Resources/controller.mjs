@@ -17,6 +17,7 @@ import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarV
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
 import {MobileAccess,mobileHostSupported,probeUnclaimedMobileThread} from './mobile-access.mjs';
+import {Workbench,workbenchBinding} from './workbench.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
@@ -25,12 +26,15 @@ const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/Cha
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
 const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-const controllerVersion='sha256:'+createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex');
+const controllerDigest=createHash('sha256');
+for(const name of (await fs.readdir(new URL('.',import.meta.url))).filter(name=>name.endsWith('.mjs')).sort())controllerDigest.update(name+'\0').update(await fs.readFile(new URL(name,import.meta.url)));
+const controllerVersion='sha256:'+controllerDigest.digest('hex');
+let previousState;try{previousState=JSON.parse(await fs.readFile(stateFile,'utf8'));}catch{}
 let state={phase:'preparing',protocol:6,version:controllerVersion,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
-let mobile, mobileSupported=false;
+let mobile, mobileSupported=false, workbench;
 const sessions=new Map();
 const inFlight=new Set();
 let stopping=false;
@@ -186,7 +190,7 @@ function suggestionSettings(line){try{const message=JSON.parse(line);if(message.
 const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='workbench-open'){workbench?.open(reply);return;}if(reply.type==='workbench-window-result'&&reply.version===1){workbench?.placementResult(reply);return;}if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -303,6 +307,7 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
+  workbench=new Workbench({cdp,command,sessions,hostPID:state.pid,previous:previousState,persist:async()=>{state.workbench=workbench.status();await publish();},requestPlacement:request=>process.stdout.write(JSON.stringify({type:'workbench-window-request',version:1,...request})+'\n')});state.workbench=workbench.status();
   try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
@@ -312,7 +317,7 @@ async function main(){
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
     if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
     if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
-    if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
+    if(message.method==='Runtime.bindingCalled'){void workbench?.onBinding(message).catch(()=>{});void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
@@ -327,7 +332,7 @@ async function main(){
       if(targetInfo.type==='page'&&!stopping){
         session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
           patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
-          bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
+          bindings:[workbenchBinding,...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
           source:featureSupported?featureSource:undefined,
         });
         const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
@@ -372,6 +377,7 @@ async function main(){
     if(inspecting||stopping)return;inspecting=true;
     try{
       if(mobile){await mobile.tick();const current=mobile.status();if(JSON.stringify(current)!==JSON.stringify(state.mobile)){state.mobile=current;await publish();}}
+      await workbench.tick();const workspace=workbench.status();if(JSON.stringify(workspace)!==JSON.stringify(state.workbench)){state.workbench=workspace;await publish();}
       await settleHumanCreations();
       await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
@@ -417,6 +423,7 @@ async function shutdown(){
   const cleanup=(async()=>{
     if(!cdp?.open)return;
     await mobile?.close();
+    await workbench?.close();if(workbench)state.workbench=workbench.status();
     // Revoke visible entry points first, even if a page is no longer marked main.
     const resumed=Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
     await removeFeatureEntries(sessions,command);
