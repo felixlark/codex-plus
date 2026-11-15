@@ -62,7 +62,7 @@ try{
    const r=(await import(moduleURL)).__webpack_require__;if(closed)throw Error('cancelled');
    if(window.electronBridge.getSentryInitOptions().appVersion!=='26.1111.21308')throw Error('original version changed');
    const services=r('GaA7').appServices;
-   await new Promise((resolve,reject)=>{rejectWait=reject;pending=services.appServerManagers.subscribe('local',e=>{if(closed)return;if(e.status==='ready'&&!manager){manager=e.manager.dup();resolve();}});pending.then(value=>{if(closed)value?.[Symbol.dispose]?.();});pending.onRpcBroken(()=>reject(Error('backend unavailable')));});
+   await new Promise((resolve,reject)=>{rejectWait=reject;pending=services.appServerManagers.subscribe('local',e=>{if(closed)return;if(e.status==='ready'&&!manager){manager=e.manager.dup();resolve();}});pending.then(value=>{if(closed)value?.[Symbol.dispose]?.();},()=>{});pending.onRpcBroken(()=>reject(Error('backend unavailable')));});
    lease=await pending;if(closed){lease?.[Symbol.dispose]?.();throw Error('cancelled');}
    const rows=[],seen=new Set();let cursor=null;
    do{const p=await manager.sendRequest('thread/list',{archived:false,currentAccountOnly:true,useStateDbOnly:true,cursor,limit:100,sortKey:'updated_at',sourceKinds:['cli','vscode','exec','appServer','subAgent','subAgentReview','subAgentCompact','subAgentThreadSpawn','subAgentOther','unknown']});if(closed)throw Error('cancelled');rows.push(...p.data);cursor=p.nextCursor;if(cursor&&seen.has(cursor))throw Error('cursor repeated');if(cursor)seen.add(cursor);}while(cursor);

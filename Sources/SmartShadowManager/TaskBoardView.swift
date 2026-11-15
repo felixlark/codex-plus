@@ -2,7 +2,7 @@ import SwiftUI
 import CodexPlusCore
 
 struct TaskBoardView: View {
-    @StateObject private var model = TaskBoardModel()
+    @ObservedObject var model: TaskBoardModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
