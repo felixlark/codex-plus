@@ -6,8 +6,9 @@ Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app
 Codex Web App enhancements, workspace observation, settings, the status CLI, and exact placement of Agent-owned windows on the rightmost physical screen. OCU virtual displays and their automatic recovery are retired.
 
 The native runtime and existing Codex enhancements remain owned here. The independent
-SmartShadow management App provides settings and component status; the small task
-board is not implemented. Preserve the original mobile frontend and its Mac host.
+SmartShadow management App provides settings and component status. Its separate small
+task board reads taskd registered cases through the installed MCP client; independent
+Codex tasks are not yet included. Preserve the original mobile frontend and its Mac host.
 The page's Codex Plus button is the first item in the lower-left navigation footer;
 the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
 

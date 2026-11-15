@@ -16,6 +16,7 @@ import CodexPlusCore
             ManagerView(model: model)
                 .onAppear { delegate.model = model }
         }
+        Window("任务看板", id: "task-board") { TaskBoardView() }.defaultSize(width: 460, height: 380)
         .commands {
             CommandGroup(replacing: .appInfo) { Button("关于 SmartShadow") { NSApp.orderFrontStandardAboutPanel() } }
         }
@@ -23,6 +24,7 @@ import CodexPlusCore
 }
 
 struct ManagerView: View {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: ManagerModel
     @StateObject private var catalog = CodexWorkspaceDisplayCatalog()
     @State private var login = SMAppService.mainApp.status == .enabled
@@ -36,6 +38,7 @@ struct ManagerView: View {
                         Text("配置、组件状态与权限").foregroundColor(.secondary)
                     }
                     Spacer()
+                    Button("任务看板") { openWindow(id: "task-board") }
                     Button("启动或附着 interactiond") { model.attach() }.disabled(model.busy)
                     Button("刷新") { catalog.refresh(); model.refresh() }.disabled(model.busy)
                 }
@@ -48,7 +51,6 @@ struct ManagerView: View {
                             Text("controller：\(runtime.controller_version ?? "未知") · 移动接口：\(runtime.mobile_version ?? "未知")")
                                 .font(.caption).foregroundColor(.secondary)
                         } else { Text("尚未核验运行主体").foregroundColor(.secondary) }
-                        Text("小型任务看板尚未实现").foregroundColor(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
                 GroupBox("系统服务") {
