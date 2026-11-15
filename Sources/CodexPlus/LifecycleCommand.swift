@@ -11,12 +11,12 @@ enum LifecycleCommand {
                 let operations = ["--lifecycle-status":"status", "--lifecycle-prepare-stop":"lifecycle.prepare-stop", "--lifecycle-stop":"lifecycle.stop", "--lifecycle-resume":"lifecycle.resume"]
                 guard let operation = operations[args[0]] else { throw ManagementProtocol.failure("invalid_operation") }
                 var request: [String: Any] = ["command":ManagementProtocol.command, "protocol":1, "request_id":UUID().uuidString, "operation":operation]
-                var i = 1
+                var i = 1; var seen = Set<String>()
                 while i < args.count {
                     guard i + 1 < args.count else { throw ManagementProtocol.failure("invalid_option") }
-                    let field = ["--expected-instance":"expected_runtime", "--expected-scope":"expected_scope_revision"][args[i]]
-                    guard let field, request[field] == nil else { throw ManagementProtocol.failure("invalid_option") }
-                    request[field] = args[i+1]; i += 2
+                    let field = ["--expected-instance":"expected_runtime", "--expected-scope":"expected_scope_revision", "--request-id":"request_id"][args[i]]
+                    guard let field, !seen.contains(field), field == "request_id" || request[field] == nil else { throw ManagementProtocol.failure("invalid_option") }
+                    seen.insert(field); request[field] = args[i+1]; i += 2
                 }
                 _ = try ManagementProtocol.Request.parse(request)
                 // Authenticate the original respondent before sending any lifecycle effect.

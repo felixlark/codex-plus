@@ -15,6 +15,7 @@ final class ManagementRuntime {
     var verifyPreparedScope: (([String: Any]) async -> Bool)?
     private var lifecyclePhase = "running"
     private var preparedScope: [String: Any]?
+    private var prepareRequestID: UUID?
     var allowsEffects: Bool { lifecyclePhase == "running" }
 
     private var identity: ManagementProtocol.RuntimeIdentity {
@@ -48,7 +49,7 @@ final class ManagementRuntime {
             switch request.operation {
             case .status:
                 var result = readStatus?() ?? [:]
-                result["lifecycle"] = ["phase": lifecyclePhase, "owned_scope": preparedScope as Any? ?? NSNull()]
+                result["lifecycle"] = ["phase": lifecyclePhase, "prepare_request_id": prepareRequestID?.uuidString as Any? ?? NSNull(), "owned_scope": preparedScope as Any? ?? NSNull()]
                 result["permissions"] = ["accessibility": ["trusted": AXIsProcessTrusted(), "bundle_id": identity.bundle_id,
                                                            "path": identity.path, "pid": identity.pid]]
                 return reply(result)
@@ -73,6 +74,7 @@ final class ManagementRuntime {
             case .prepareStop:
                 if lifecyclePhase == "prepared", let scope = preparedScope { return reply(scope) }
                 guard lifecyclePhase == "running", let prepareStop else { return reply(error: "prepare_unknown") }
+                prepareRequestID = request.id
                 lifecyclePhase = "preparing"
                 do { preparedScope = try await prepareStop(); lifecyclePhase = "prepared"; return reply(preparedScope) }
                 catch { lifecyclePhase = "prepare_unknown"; return reply(error: "prepare_unknown") }
@@ -91,7 +93,7 @@ final class ManagementRuntime {
                 lifecyclePhase = "resuming"
                 do { try await resumeLifecycle() }
                 catch { lifecyclePhase = "prepare_unknown"; return reply(error: "resume_unknown") }
-                lifecyclePhase = "running"; preparedScope = nil
+                lifecyclePhase = "running"; preparedScope = nil; prepareRequestID = nil
                 return reply(["state":"running"])
             }
         } catch { return reply(error: "settings_unavailable") }
