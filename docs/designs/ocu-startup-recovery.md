@@ -19,3 +19,11 @@ Plus 已有登录启动、Chrome 默认规则和 OCU 精确窗口托管。AgentD
 OCU 原维护者已确认无在途writer，维护fork main为 cb3f3493b6ffa3c143b58d1717884f6852b11dc1（felixlark/open-computer-use）。canonical source仅写本案hunks，私有index投影到该已验基线、缓存导出干净构建输入，不编译或提交既有Nov12输入/滚动等foreign dirty；安装复用正式签名身份且先核当前隐藏窗口/恢复记录及实际维护安全点。provider 升级与 Plus 升级串行，保留旧包。缺新工具时明确显示需更新提供方，不能用临时窗口、另一个虚拟显示器或旧协议静默兜底。
 
 验收：纯单元验证 provider 工具开关/schema/保留语义，Plus 恢复状态与取消/迟到响应/重试；真实正式安装从无虚拟屏、提供方冷启动的登录等价入口自动建立空屏，Chrome 随后新窗自动进入；重复启动/重连复用单屏，关闭总开关停止恢复，正常 Plus 退出不销屏，登录启动状态实际读回。记录真实启动版本、签名、窗口/显示器身份和物理屏相对位置。需要整机重启时先核共享任务/用户现场安全点，不把重启进程当作整机重启证明；整个启动链的冷启动证据与实际重启证据分开报告。由本案原负责人完成提交/PR/合并/安装及原目标验收。
+
+## 独立审查修订（实施前冻结）
+
+- 新启动恢复 RPC 设置整次请求与临时 client 收尾的期限，默认20秒（UserDefaults `ocuDisplayRecoveryRequestTimeout` 可调整），不限制总尝试次数。Core 行读取器支持可选 monotonic deadline，通过 poll 等待管道，旧窗口路径保持原默认行为。超时只关闭/终止本次临时 MCP proxy，必要时回收该准确子进程，绝不杀共享 OCU owner；完成回调只触发一次。初始化、tools/list、ensure、工具成功后 proxy 不退出分别作进程内假提供方回归。超时结果未知，先只读按 namespace 重新发现，再决定是否重试幂等 ensure；取消与迟到回调由 generation 对账。
+- 恢复工具不沿用窗口调用强制环境：仅传 namespace、正式配置路径及动作读回/动画关闭标志，显式剔除继承的 enabled/restore环境覆盖。provider在锁内读取当前配置快照，必须 enabled=true、restoreOnSessionEnd=false才创建持久空屏；disabled/缺失/损坏/瞬态配置均拒绝且不创建。旧窗口调用的配置行为本批不扩大修改。
+- 新增限制记录：默认2秒恢复重试间隔及20秒单次RPC期限，均位于Plus恢复策略、可配置；前者避免登录期间连续启动proxy，后者消除单在途永久卡住。无次数/总时长上限，超时不触碰共享owner。PR正文将明确此两个默认参数及依据。
+
+实现说明：总期限包含临时client清退，内部为结束通知预留最后10%的时间；默认20秒仍为全部往返和清退的总期限。窗口/文件旧RPC路径不加新期限。

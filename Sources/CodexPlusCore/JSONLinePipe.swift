@@ -8,12 +8,21 @@ public final class JSONLinePipeReader {
     private var buffer = Data()
     public init(input: FileHandle) { self.input = input }
 
-    public func response(matchingID id: Int) -> [String: Any]? {
+    public func response(matchingID id: Int, deadline: DispatchTime? = nil) -> [String: Any]? {
         while true {
             while let newline = buffer.firstIndex(of: 10) {
                 let line = buffer.prefix(upTo: newline)
                 buffer.removeSubrange(...newline)
                 if let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], object["id"] as? Int == id { return object }
+            }
+            if let deadline {
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard now < deadline.uptimeNanoseconds else { return nil }
+                let milliseconds = min(UInt64(Int32.max), (deadline.uptimeNanoseconds - now + 999_999) / 1_000_000)
+                var descriptor = pollfd(fd: input.fileDescriptor, events: Int16(POLLIN | POLLHUP), revents: 0)
+                let ready = Darwin.poll(&descriptor, 1, Int32(milliseconds))
+                if ready < 0 && errno == EINTR { continue }
+                guard ready > 0 else { return nil }
             }
             var bytes = [UInt8](repeating: 0, count: 4096)
             let count = bytes.withUnsafeMutableBytes { Darwin.read(input.fileDescriptor, $0.baseAddress, $0.count) }

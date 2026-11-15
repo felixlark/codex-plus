@@ -50,8 +50,19 @@ final class ToolWindowRouter {
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
     private var preparingChrome = false
+    private var startupRecovery = AgentDisplayStartupRecovery()
     private(set) var chromeUsesAgentDisplay = UserDefaults.standard.object(forKey: ToolWindowPolicy.chromeEnabledKey) as? Bool ?? true
-    var displaySummary: String { display.summary }
+    var displaySummary: String {
+        guard enabled, !startupRecovery.isReady else { return display.summary }
+        guard display.supported else { return display.summary }
+        if let error = startupRecovery.lastError { return "自动恢复等待重试 · " + error }
+        return startupRecovery.inFlight != nil ? "正在自动恢复 OCU 虚拟屏" : "等待自动恢复 OCU 虚拟屏"
+    }
+    private func recoveryParameter(_ key: String, fallback: TimeInterval) -> TimeInterval {
+        let value = UserDefaults.standard.object(forKey: key) as? Double ?? fallback
+        return value.isFinite && value > 0 ? value : fallback
+    }
+
 
     private(set) var enabled = UserDefaults.standard.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
 
@@ -64,7 +75,11 @@ final class ToolWindowRouter {
             guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             self?.remove(app.processIdentifier)
         })
-        observeDefaultChrome()
+        startupRecovery.request(enabled: enabled)
+        recoverStartupDisplayIfNeeded()
+        tokens.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.recoverStartupDisplayIfNeeded()
+        })
         tokens.append(center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.observeDefaultChrome()
         })
@@ -73,6 +88,7 @@ final class ToolWindowRouter {
                 guard let self else { return }
                 // Only still-pending windows; handled/user-moved windows stay put.
                 self.display.prepare { _ in }
+                self.recoverStartupDisplayIfNeeded()
                 self.observeDefaultChrome()
                 for w in Array(self.watches.values) { self.scan(w) }
             }
@@ -82,6 +98,7 @@ final class ToolWindowRouter {
     @discardableResult
     func stop() -> Bool {
         stopping = true
+        startupRecovery.request(enabled: false)
         ownershipTimer?.invalidate(); ownershipTimer = nil
         observationEpoch = UUID()
         tokens.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
@@ -97,7 +114,7 @@ final class ToolWindowRouter {
         let keys = managed.map { ($0.pid, $0.windowID) }
         var restored = true
         for (pid, id) in keys { if !restore(pid: pid, id: id) { restored = false } }
-        guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil else { return false }
+        guard restored, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil, startupRecovery.inFlight == nil else { return false }
         return display.release()
     }
 
@@ -203,7 +220,7 @@ final class ToolWindowRouter {
     }
 
     private func scan(_ watch: Watch) {
-        guard enabled, watches[watch.app.processIdentifier] === watch,
+        guard enabled, startupRecovery.isReady, watches[watch.app.processIdentifier] === watch,
               let launchDate = watch.app.launchDate else { return }
         guard let live = NSRunningApplication(processIdentifier: watch.app.processIdentifier),
               !live.isTerminated, live.launchDate == launchDate else {
@@ -314,7 +331,7 @@ final class ToolWindowRouter {
     }
 
     private func finishStopIfReady() {
-        guard stopping, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil,
+        guard stopping, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil, startupRecovery.inFlight == nil,
               !terminationScheduled else { return }
         terminationScheduled = true
         // AppKit may run a nested event loop while awaiting terminateLater.
@@ -324,7 +341,7 @@ final class ToolWindowRouter {
             guard let self else { return }
             self.terminationScheduled = false
             guard self.stopping, self.managed.isEmpty, self.agentSettingsRegistration == nil,
-                  self.ownAgentWindow == nil else { return }
+                  self.ownAgentWindow == nil, self.startupRecovery.inFlight == nil else { return }
             NSApp.terminate(nil)
         }
     }
@@ -342,7 +359,7 @@ final class ToolWindowRouter {
     }
 
     private func observeDefaultChrome() {
-        guard enabled, !stopping, chromeUsesAgentDisplay, !preparingChrome, AXIsProcessTrusted() else { return }
+        guard enabled, !stopping, startupRecovery.isReady, chromeUsesAgentDisplay, !preparingChrome, AXIsProcessTrusted() else { return }
         let apps = NSWorkspace.shared.runningApplications.filter {
             ToolWindowPolicy.defaultsToAgentDisplay(bundleID: $0.bundleIdentifier ?? "", enabled: chromeUsesAgentDisplay)
                 && watches[$0.processIdentifier]?.defaultChrome != true
@@ -365,7 +382,30 @@ final class ToolWindowRouter {
         }
     }
 
+    private func recoverStartupDisplayIfNeeded() {
+        guard enabled, !stopping,
+              let attempt = startupRecovery.begin(now: ProcessInfo.processInfo.systemUptime, configured: display.supported) else { return }
+        let timeout = recoveryParameter("ocuDisplayRecoveryRequestTimeout", fallback: 20)
+        ocu.ensurePersistentDisplay(timeout: timeout) { [weak self] outcome in
+            guard let self else { return }
+            var online = false
+            self.display.prepare { online = $0 != nil }
+            let ready: Bool
+            switch outcome {
+            case .ready(let id): ready = online && self.display.id == id
+            case .unknown: ready = online // Timed-out ensure is idempotent; read back before retry.
+            case .unavailable, .unsupported: ready = false
+            }
+            let current = self.startupRecovery.complete(attempt, now: ProcessInfo.processInfo.systemUptime,
+                ready: ready, error: outcome.diagnostic,
+                retryInterval: self.recoveryParameter("ocuDisplayRecoveryRetryInterval", fallback: 2))
+            if self.stopping { self.finishStopIfReady(); return }
+            if current, self.enabled { self.observeDefaultChrome() }
+        }
+    }
+
     private func reconcileOwnership() {
+        recoverStartupDisplayIfNeeded()
         // AX readiness/minimize/fullscreen changes need not publish window-created.
         for watch in Array(watches.values) where watch.defaultChrome { scan(watch) }
         for record in managed where record.result == "parked" {
@@ -522,9 +562,11 @@ final class ToolWindowRouter {
         }
         stopping = false
         enabled = flag
+        startupRecovery.request(enabled: flag)
         UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
         if flag {
             if tokens.isEmpty { start() }
+            recoverStartupDisplayIfNeeded()
             observeDefaultChrome()
         } else {
             for pid in Array(watches.keys) { removeWatch(pid) }
@@ -554,6 +596,10 @@ final class ToolWindowRouter {
     }
 
     private func prepareDisplay(id: String, epoch: UUID, operation: @escaping () -> Void) {
+        guard startupRecovery.isReady else {
+            if lastOpen["id"] as? String == id { lastOpen["state"] = "failed"; lastOpen["error"] = "OCU display startup recovery is not ready" }
+            return
+        }
         display.prepare { [weak self] bounds in
             guard let self else { return }
             guard self.enabled, !self.stopping, self.observationEpoch == epoch else {
@@ -728,7 +774,7 @@ final class ToolWindowRouter {
 
     private func status() -> [String: Any] {
         display.prepare { _ in }
-        var target: [String: Any] = ["type": "agent-virtual-display", "owner": "OCU persistent-display", "supported": display.supported, "preparing": display.isPreparing]
+        var target: [String: Any] = ["type": "agent-virtual-display", "owner": "OCU persistent-display", "supported": display.supported, "preparing": startupRecovery.inFlight != nil, "startupRecovery": startupRecovery.phase.rawValue]
         if !display.diagnostics.isEmpty { target["diagnostics"] = display.diagnostics }
         if let bounds = display.bounds {
             target["id"] = display.id; target["name"] = "Open Computer Use"; target["owner"] = "OCU persistent-display"
@@ -746,7 +792,7 @@ final class ToolWindowRouter {
         return ["ok": true, "enabled": enabled, "chromeUsesAgentDisplay": chromeUsesAgentDisplay, "displaySummary": displaySummary, "accessibility": AXIsProcessTrusted(), "target": target,
                 "lastOpen": lastOpen, "watchedProcesses": watches.count, "windows": windows,
                 "observationErrors": observationErrors.map { ["pid": Int($0.key), "code": $0.value] },
-                "lastError": lastError ?? display.error ?? ""]
+                "lastError": lastError ?? startupRecovery.lastError ?? display.error ?? ""]
     }
 
     private func ownAgentWindowIsParked(_ window: NSWindow) -> Bool {

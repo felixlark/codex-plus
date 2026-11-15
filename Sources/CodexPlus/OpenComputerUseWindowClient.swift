@@ -18,6 +18,49 @@ final class OpenComputerUseWindowClient {
         }
     }
 
+    enum StartupOutcome {
+        case ready(UInt32), unavailable, unsupported, unknown(String)
+        var diagnostic: String {
+            switch self {
+            case .ready: return "ready"
+            case .unavailable: return "OCU 启动入口暂不可用"
+            case .unsupported: return "OCU 需要更新以支持自动恢复"
+            case .unknown(let reason): return reason
+            }
+        }
+    }
+
+    func ensurePersistentDisplay(timeout: TimeInterval, completion: @escaping (StartupOutcome) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let path = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/open-computer-use-persistent/config.json").path
+            let environment = OCUStartupProtocol.environment(from: ProcessInfo.processInfo.environment, configurationPath: path)
+            let session: MCPClientSession
+            do {
+                session = try MCPClientSession(executable: URL(fileURLWithPath: Self.executable), arguments: ["mcp"], environment: environment, timeout: timeout)
+            } catch { DispatchQueue.main.async { completion(.unavailable) }; return }
+            var outcome: StartupOutcome = .unavailable
+            if session.request(id: 1, method: "initialize", params: ["protocolVersion": "2025-03-26", "capabilities": [:], "clientInfo": ["name": "Codex Plus startup", "version": "1"]])?["result"] != nil {
+                session.notify(method: "notifications/initialized")
+                if let listed = session.request(id: 2, method: "tools/list", params: [:])?["result"] as? [String: Any],
+                   let tools = listed["tools"] as? [[String: Any]] {
+                    if tools.contains(where: { $0["name"] as? String == "ensure_agent_display" }) {
+                        let reply = session.request(id: 3, method: "tools/call", params: ["name": "ensure_agent_display", "arguments": [String: Any]()])
+                        if let result = reply?["result"] as? [String: Any], let id = OCUStartupProtocol.readyDisplayID(result) {
+                            outcome = .ready(id)
+                        } else {
+                            let content = (reply?["result"] as? [String: Any])?["content"] as? [[String: Any]]
+                            let text = content?.first(where: { $0["type"] as? String == "text" })?["text"] as? String ?? "OCU 恢复结果未确认"
+                            outcome = .unknown(String((text.split(separator: "\n").first ?? "OCU 恢复结果未确认").prefix(500)))
+                        }
+                    } else { outcome = .unsupported }
+                }
+            }
+            if !session.finish() { outcome = .unknown("OCU 恢复请求超时，正在核对显示器") }
+            DispatchQueue.main.async { completion(outcome) }
+        }
+    }
+
     func call(arguments: [String: Any]? = nil, completion: @escaping (Outcome) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process(), input = Pipe(), output = Pipe()

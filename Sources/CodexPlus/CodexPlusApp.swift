@@ -353,6 +353,8 @@ struct SettingsView: View {
             Divider()
             Text("OCU 虚拟屏").font(.headline)
             Text(model.agentDisplaySummary).font(.callout).foregroundColor(.secondary)
+            Text("登录启动后自动恢复虚拟屏，无需先打开工具窗口。Chrome 默认进入；若 OCU 尚未就绪会自动重试。")
+                .font(.caption).foregroundColor(.secondary)
             Toggle("Agent 工具窗口使用虚拟屏", isOn: Binding(
                 get: { model.toolWindowsEnabled }, set: { model.setToolRouting($0) }
             ))
