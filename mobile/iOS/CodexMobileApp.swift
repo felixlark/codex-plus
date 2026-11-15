@@ -177,7 +177,7 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
             case "local-state-warning":
                 // Only protocol key names are diagnostic metadata; never record
                 // the associated draft, account data or state value.
-                if let key = value["key"] as? String, key.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil {
+                if let key = value["key"] as? String, key.range(of: #"^[a-zA-Z_][a-zA-Z0-9_.-]*$"#, options: .regularExpression) != nil {
                     NSLog("CodexMobile local state failed at key: %@", key)
                 } else { NSLog("CodexMobile local state failure has no static key") }
                 let alert = UIAlertController(title: "页面状态未能保存", message: "请保留当前页面，重新连接前先核对草稿。", preferredStyle: .alert)
