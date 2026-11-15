@@ -32,6 +32,6 @@
 
 每次打开或手动刷新，创建一个只读 MCP 连接，完成 initialize 与 tasks_read 后关闭。HMAC 和凭据只在原 LocalMcpClient/Vault 内处理；Swift 不读取密钥、不写业务状态。关闭看板只取消本次只读客户端，不停止 taskd、手机宿主或 Codex Run。
 
-以 repository/number 标识事项；重复身份拒绝显示，旧 input_revision 的尝试不当作当前进度。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。首版明确标注仅覆盖 taskd 登记范围，独立 Codex 任务尚未计入。界面只提供原案和成果链接。
+以 repository/number 标识事项；重复身份拒绝显示，输入版本变化后仍保留明确绑定的在途尝试和成果，标注“输入版本已更新”，避免成果评论更新 Issue 后隐藏原 Run。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。首版明确标注仅覆盖 taskd 登记范围，独立 Codex 任务尚未计入。界面只提供原案和成果链接。
 
-本轮源码已完成定向编译及三项状态语义检查；真实 taskd 读取和安装版交互仍待 #613 正式入口交接，不能据源码宣称已接通。
+本轮源码已完成定向编译及四项状态语义检查；真实 taskd 读取和安装版交互仍待 #613 正式入口交接，不能据源码宣称已接通。

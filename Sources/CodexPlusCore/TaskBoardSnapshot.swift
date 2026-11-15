@@ -12,7 +12,9 @@ public struct TaskBoardSnapshot: Decodable {
         public var id: String { "\(repository)#\(number)" }
         public var issueURL: URL { URL(string: "https://github.com/\(repository)/issues/\(number)")! }
         public var status: String { paused ? "paused" : coordination.status }
-        public var currentActions: [Action] { coordination.actions.filter { $0.input_revision == input_revision } }
+        public var visibleActions: [Action] {
+            coordination.actions.filter { $0.input_revision == input_revision || $0.receipt != nil || ["prepared", "submitting", "queued", "running", "unknown", "waiting_decision", "waiting_dependency"].contains($0.state) }
+        }
     }
     public struct Coordination: Decodable {
         public let status: String

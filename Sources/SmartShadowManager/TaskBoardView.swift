@@ -28,9 +28,10 @@ struct TaskBoardView: View {
                                     Spacer()
                                     Text(TaskBoardSnapshot.label(task.status)).font(.callout)
                                 }
-                                ForEach(task.currentActions) { action in
+                                ForEach(task.visibleActions) { action in
                                     HStack {
                                         Text(TaskBoardSnapshot.label(action.state)).font(.caption)
+                                        if action.input_revision != task.input_revision { Text("输入版本已更新").font(.caption).foregroundColor(.secondary) }
                                         if action.thread_id == nil { Text("未绑定会话").font(.caption).foregroundColor(.secondary) }
                                         if let receipt = action.receipt, let url = URL(string: receipt), url.scheme == "https" {
                                             Link("成果", destination: url).font(.caption)

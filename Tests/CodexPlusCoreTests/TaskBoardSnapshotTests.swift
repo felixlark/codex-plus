@@ -9,11 +9,22 @@ final class TaskBoardSnapshotTests: XCTestCase {
             ["action_id":"new", "input_revision":"current", "thread_id":"thread", "run_id":"run", "state":"finished", "receipt":NSNull()]
          ]]]
     }
-    func testRunFinishedDoesNotCompleteCaseAndOldRevisionIsNotCurrent() throws {
+    func testRunFinishedDoesNotCompleteCaseAndOldUnrelatedAttemptIsNotCurrent() throws {
         let value = try TaskBoardSnapshot.decode(["tasks":[row(1)]])
         XCTAssertEqual(value.runningCount, 1)
         XCTAssertEqual(value.completedCount, 0)
-        XCTAssertEqual(value.tasks[0].currentActions.map(\.id), ["new"])
+        XCTAssertEqual(value.tasks[0].visibleActions.map(\.id), ["new"])
+    }
+    func testInputUpdateKeepsRunningAttemptAndDeliveredReceipt() throws {
+        var value = row(1)
+        var coordination = value["coordination"] as! [String: Any]
+        var actions = coordination["actions"] as! [[String: Any]]
+        actions[0]["state"] = "running"
+        coordination["actions"] = actions; value["coordination"] = coordination
+        XCTAssertEqual(try TaskBoardSnapshot.decode(["tasks":[value]]).tasks[0].visibleActions.count, 2)
+        actions[0]["state"] = "delivered"; actions[0]["receipt"] = "https://github.com/owner/repo/issues/1#issuecomment-1"
+        coordination["actions"] = actions; value["coordination"] = coordination
+        XCTAssertEqual(try TaskBoardSnapshot.decode(["tasks":[value]]).tasks[0].visibleActions.count, 2)
     }
     func testPauseOverridesRunningAndTasksAreCountedOnce() throws {
         let value = try TaskBoardSnapshot.decode(["tasks":[row(1, paused:true), row(2, status:"completed")]])
