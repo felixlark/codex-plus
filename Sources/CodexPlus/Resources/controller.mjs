@@ -33,19 +33,23 @@ let cdp;
 let mobile, mobileSupported=false;
 const sessions=new Map();
 const inFlight=new Set();
-let stopping=false;
+let stopping=false,quiesced=false;
+const lifecycleOperations=new Set();
+let monitorWork=Promise.resolve();
+function trackLifecycle(work){lifecycleOperations.add(work);void work.finally(()=>lifecycleOperations.delete(work)).catch(()=>{});return work;}
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
 let featureSupported=false,suggestionSupported=false,sidebarSupported=false;
 let displays=[];let humanNativeSupported=false;
 const humanCreations=new Map();
 let humanFrames=[];
 async function createHumanWindow(nonce){
-  if(typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||humanCreations.has(nonce))return;
+  if(stopping||quiesced||typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||humanCreations.has(nonce))return;
   humanCreations.set(nonce,{phase:'creating'});
   try{
     const source=[...sessions].find(([,s])=>s.main);
     if(!source)throw Error('No native main renderer');
     const probe=await command(source[0],'Runtime.evaluate',{expression:'new URL(location.href).searchParams.get("initialRoute")',returnByValue:true});
+    if(stopping||quiesced){humanCreations.delete(nonce);return;}
     const previous=probe.result.value;
     // Root + query is rejected by the host's route validator. The accepted
     // plugins route carries the token until the owned new target is navigated home.
@@ -57,8 +61,9 @@ async function createHumanWindow(nonce){
 }
 function humanMarker(value){try{const u=new URL(value);return u.searchParams.get('codexPlusHumanWindow')??new URL(u.searchParams.get('initialRoute')??'/','https://codex.invalid').searchParams.get('codexPlusHumanWindow');}catch{return null;}}
 async function settleHumanCreations(){
+  if(stopping||quiesced)return;
   if(![...humanCreations.values()].some(r=>r.phase==='requested'))return;
-  const {targetInfos}=await cdp.call('Target.getTargets');
+  const {targetInfos}=await cdp.call('Target.getTargets');if(stopping||quiesced)return;
   for(const [nonce,request] of humanCreations){
     if(request.phase!=='requested')continue;
     const matching=targetInfos.filter(t=>t.type==='page'&&mainURL(t.url)&&humanMarker(t.url)===nonce);
@@ -74,6 +79,7 @@ async function settleHumanCreations(){
     // drafts and navigation are never used as a reload surface.
     const url=new URL('app://-/index.html');url.searchParams.set('initialRoute','/');url.searchParams.set('codexPlusHumanWindow',nonce);
     humanCreations.set(nonce,{phase:'created',target:target.targetId});session[1].human=true;
+    if(stopping||quiesced)return;
     await command(session[0],'Page.navigate',{url:url.href});
   }
 }
@@ -81,7 +87,7 @@ async function repairNativeWindowDefaults(){
   if(!humanFrames.length||!humanNativeSupported)return;
   const destination=humanFrames.find(f=>f.number===1)??humanFrames[0];
   const source=[...sessions].find(([,s])=>s.main);
-  if(!source)return;
+  if(!source||quiesced||stopping)return;
   const bounds={x:destination.x,y:destination.y,width:destination.width,height:destination.height};
   const evaluate=async(operation)=>{
     const result=await command(source[0],'Runtime.evaluate',{expression:`(${nativeWindowDefaults.toString()})(${JSON.stringify(operation)},${JSON.stringify(bounds)})`,awaitPromise:true,returnByValue:true});
@@ -118,7 +124,7 @@ async function probeSuggestions(target){
 }
 async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  if(stopping||quiesced||event.name!==backgroundGuardBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
   let request;try{request=JSON.parse(event.payload);}catch{return;}
   if(request.protocol!==5||typeof request.requestId!=='string'||request.requestId.length>100)return;
   const p=suggestions.pending;
@@ -186,7 +192,7 @@ function suggestionSettings(line){try{const message=JSON.parse(line);if(message.
 const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
 replies.on('close',()=>void shutdown());
-replies.on('line',line=>{suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void createHumanWindow(reply.nonce);return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('line',line=>{try{const m=JSON.parse(line);if(m.type==='lifecycle'){void lifecycleCommand(m);return;}}catch{}if(quiesced||stopping)return;suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void trackLifecycle(createHumanWindow(reply.nonce));return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -215,7 +221,7 @@ async function syncSidebar(id,event){
 }
 async function sidebarAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==sidebarBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
+  if(stopping||quiesced||event.name!==sidebarBinding||!session?.main||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame)return;
   let value;try{value=JSON.parse(event.payload);}catch{return;}
   if(value.version!==1||typeof value.pageId!=='string'||!Number.isSafeInteger(value.sequence)||value.sequence<1||typeof value.change?.key!=='string'||!sanitizeSidebarValues({[value.change.key]:value.change.value}))return;
   await queueSidebar(message.sessionId,{...value,context:event.executionContextId});
@@ -223,7 +229,7 @@ async function sidebarAction(message){
 function forgetRequests(session,context){for(const [id,r]of requests)if(r.session===session&&(context===undefined||r.context===context))requests.delete(id);}
 async function nativeAction(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
-  if(stopping||event.name!==featureBinding||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame||!session.main)return;
+  if(stopping||quiesced||event.name!==featureBinding||!context?.auxData?.isDefault||context.auxData.frameId!==session.frame||!session.main)return;
   let action;try{action=JSON.parse(event.payload);}catch{return;}
   if(!validateNativeAction(action))return;
   if([...requests.values()].some(r=>r.session===message.sessionId&&r.context===event.executionContextId&&r.pageID===action.requestId))return;
@@ -369,10 +375,11 @@ async function main(){
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID||!parentIsAlive(parentPID)){clearInterval(monitor);void shutdown();return;}
     try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
-    if(inspecting||stopping)return;inspecting=true;
+    if(inspecting||stopping||quiesced)return;inspecting=true;
+    let monitorDone;monitorWork=new Promise(resolve=>{monitorDone=resolve;});
     try{
       if(mobile){await mobile.tick();const current=mobile.status();if(JSON.stringify(current)!==JSON.stringify(state.mobile)){state.mobile=current;await publish();}}
-      await settleHumanCreations();
+      await trackLifecycle(settleHumanCreations());
       await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
         const pages=[];
@@ -397,18 +404,34 @@ async function main(){
 
         const readiness=reviewedBackgroundPages(pages);
         await suggestions.tick(readiness.ready.map(page=>({...page,snapshot:{...page.snapshot,candidates:(page.snapshot.candidates??[]).filter(c=>!acceptanceThread||c.target.threadId===acceptanceThread)}})),{probe:probeSuggestions,submit:async(id,arg)=>{
-          if(stopping||!cdp.open)throw Error('Controller disconnected');
+          if(stopping||quiesced||!cdp.open)throw Error('Controller disconnected');
           const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.submit(${JSON.stringify(arg)})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Suggestion action failed');return r.result.value;
         }});
         const snapshot={...suggestions.status(),supported:true,storageReady:attemptStoreReady,mode:'background-native-reviewed',review:{pending:pages.reduce((n,p)=>n+(p.snapshot.review?.pending??0),0),reviewing:pages.reduce((n,p)=>n+(p.snapshot.review?.reviewing??0),0),captured:pages.reduce((n,p)=>n+(p.snapshot.review?.captured??0),0),reasons:[...new Set(pages.map(p=>p.snapshot.review?.reason).filter(Boolean))]},pageReady:readiness.pageReady,legacyPages:readiness.legacyPages};
         if(!snapshot.pageReady)snapshot.reason='page-reload-required';
         if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
       }
-    }catch{}finally{inspecting=false;}
+    }catch{}finally{inspecting=false;monitorDone();}
   },1000);
 }
 function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
 function fail(error){state.errors.push(error.message);void publish();}
+async function lifecycleCommand(message){
+ if(typeof message.requestId!=='string')return;
+ try{
+  if(message.action==='prepare'){
+   quiesced=true;
+   await monitorWork;
+   if(lifecycleOperations.size)await Promise.allSettled([...lifecycleOperations]);
+   if([...humanCreations.values()].some(r=>r.phase==='creating'||r.phase==='requested'))throw Error('Window creation pending');
+   const mobileScope=await mobile?.prepareStop();
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:mobileScope??null})+'\n');
+  }else if(message.action==='resume'){
+   if(stopping)throw Error('Stopping');mobile?.resume();quiesced=false;
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true})+'\n');
+  }
+ }catch{process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:false})+'\n');}
+}
 async function shutdown(){
   if(stopping)return;stopping=true;suggestions.configure(false);
   // Cleanup is best effort after leases and admissions are revoked. Reuse the

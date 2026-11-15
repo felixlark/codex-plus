@@ -221,3 +221,21 @@ test('mobile route claims migrate only on the authenticated current connection a
   await route('current', '/remote/C'); assert.ok(manager.ownsThread('C'));
   await manager.release('phone'); assert.equal(manager.ownsThread('C'), false);
 });
+
+test('stop while startup readiness is pending never creates a new host', async () => {
+  let release, entered, creates = 0;
+  const ready = new Promise(r => { entered = r; });
+  const gate = new Promise(r => { release = r; });
+  const sessions = new Map([['human', {main:true, frame:'f', contexts:new Map([[1,{id:1,auxData:{isDefault:true,frameId:'f'}}]])}]]);
+  const mobile = new MobileAccess({anchor:'a'}, {cdp:{call:async()=>({targetInfos:[]})},sessions,stateFile:'/unused',publish:async()=>{},command:async(_,__,p)=>{if(p.expression.includes('mobileStartupReadiness')){entered();await gate;return {result:{value:'ready'}};}creates++;return {};}});
+  const work=mobile.tick();await ready;await mobile.close();release();await work;
+  assert.equal(creates,0);assert.equal(mobile.creationAttempted,false);
+});
+
+test('prepare freezes new startup while retaining the existing connection', async () => {
+  const mobile = new MobileAccess({anchor:'a',instance:'i'}, {cdp:{call:async()=>({targetInfos:[]})},sessions:new Map(),stateFile:'/unused',publish:async()=>{},command:async()=>{throw Error('must not create');}});
+  mobile.clients.set('connected',{phase:'active'});
+  const scope=await mobile.prepareStop();await mobile.tick();
+  assert.equal(scope.connections,1);assert.equal(mobile.stopped,false);assert.equal(mobile.quiesced,true);
+  mobile.resume();assert.equal(mobile.quiesced,false);
+});

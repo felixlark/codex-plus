@@ -10,6 +10,16 @@ final class ManagementProtocolTests: XCTestCase {
         .init(workspaceAutoExpand: true, autoSendSuggestions: false,
               workspaceAutoExpandDisplaySelection: .init(), agentToolWindowsEnabled: true, chromeUsesAgentDisplay: true)
     }
+    func testLifecycleStopRequiresBothInstanceAndPreparedScope() throws {
+        var value = request("lifecycle.stop")
+        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
+        value["expected_runtime"] = runtime.uuidString
+        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
+        value["expected_scope_revision"] = String(repeating:"a", count:64)
+        XCTAssertEqual(try ManagementProtocol.Request.parse(value).operation, .stop)
+        value["expected_scope_revision"] = "old"
+        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
+    }
     func testReadDoesNotRequireRuntimeButRejectsWriteFieldsAndBooleanVersion() throws {
         XCTAssertEqual(try ManagementProtocol.Request.parse(request("settings.read")).operation, .settingsRead)
         var value = request("settings.read"); value["changes"] = [:]

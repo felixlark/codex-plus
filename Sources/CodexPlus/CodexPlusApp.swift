@@ -20,6 +20,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if LifecycleCommand.run(arguments) { return }
         if arguments.first?.hasPrefix("--tool-") == true {
             do {
                 let request = try ToolCommand.parse(arguments)!
@@ -63,14 +64,15 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.disableAutomaticTermination("Codex Plus observes Codex workspace events")
         settings.onEnabledChange = { [weak self] in
+            guard self?.management.allowsEffects == true else { return }
             self?.observer.stop()
             self?.observer.start()
         }
         settings.onSuggestionChange = { [weak self] in
-            guard let self else { return }
+            guard let self, self.management.allowsEffects else { return }
             self.launcher.setAutoSendSuggestions(self.settings.autoSendSuggestions)
         }
-        settings.onDisplaySelectionChange = { [weak self] in self?.observer.displaySelectionDidChange() }
+        settings.onDisplaySelectionChange = { [weak self] in if self?.management.allowsEffects == true { self?.observer.displaySelectionDidChange() } }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
         toolWindows.openOwnSettings = { [weak self] in self?.presentAgentSettings() }
@@ -78,8 +80,8 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return (false, false, "等待连接") }
             return (self.toolWindows.enabled, self.toolWindows.chromeUsesAgentDisplay, self.toolWindows.displaySummary)
         }
-        settings.onToolRoutingChange = { [weak self] in self?.toolWindows.setEnabled($0) }
-        settings.onChromeRoutingChange = { [weak self] in self?.toolWindows.setChromeUsesAgentDisplay($0) }
+        settings.onToolRoutingChange = { [weak self] in if self?.management.allowsEffects == true { self?.toolWindows.setEnabled($0) } }
+        settings.onChromeRoutingChange = { [weak self] in if self?.management.allowsEffects == true { self?.toolWindows.setChromeUsesAgentDisplay($0) } }
         toolWindows.start()
         management.readSettings = { [weak self] in
             guard let self, let selection = CodexWorkspaceDisplayPreference.load() else { throw ManagementProtocol.failure("settings_unavailable") }
@@ -97,9 +99,22 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     "chromeUsesAgentDisplay": self.toolWindows.chromeUsesAgentDisplay,
                     "displaySummary": self.toolWindows.displaySummary, "lastError": tools["lastError"] ?? NSNull()]]
         }
+        management.prepareStop = { [weak self] in
+            guard let self else { throw ManagementProtocol.failure("unavailable") }
+            self.observer.stop()
+            return try await self.launcher.prepareLifecycle()
+        }
+        management.resumeLifecycle = { [weak self] in
+            guard let self else { throw ManagementProtocol.failure("unavailable") }
+            try await self.launcher.resumeLifecycle()
+            self.observer.start()
+        }
+        management.stopLifecycle = { NSApp.terminate(nil) }
         do { try toolServer.start { [weak self] request in
-            guard let self else { return ["ok": false] }
-            return request["command"] as? String == ManagementProtocol.command ? self.management.handle(request) : self.toolWindows.command(request)
+            guard let self else { return .init(["ok": false]) }
+            if request["command"] as? String == ManagementProtocol.command { return await self.management.handle(request) }
+            guard self.management.allowsEffects || request["command"] as? String == "tool-status" else { return .init(["ok":false,"error":"lifecycle_quiesced"]) }
+            return .init(self.toolWindows.command(request))
         } }
         catch { settings.error = "工具窗口接口启动失败。\(error.localizedDescription)" }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
@@ -160,11 +175,13 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard management.allowsEffects else { return true }
         launcher.open(source: "reopen")
         return true
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        observer.stop()
         guard toolWindows.stop() else {
             settings.error = "Agent 窗口正在归还或尚未安全恢复，请通过工具状态核对。"
             return .terminateCancel
@@ -185,6 +202,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleToolWindows(_ item: NSMenuItem) {
+        guard management.allowsEffects else { return }
         toolWindows.setEnabled(!toolWindows.enabled)
         item.state = toolWindows.enabled ? .on : .off
     }
@@ -203,6 +221,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func presentAgentSettings() {
+        guard management.allowsEffects else { return }
         settings.refresh()
         if agentSettingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
