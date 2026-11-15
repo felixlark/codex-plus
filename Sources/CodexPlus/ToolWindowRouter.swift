@@ -38,6 +38,7 @@ final class ToolWindowRouter {
     private var ownershipTimer: Timer?
 
     private var stopping = false
+    private var terminationScheduled = false
     private var lastError: String?
     private var watches: [pid_t: Watch] = [:]
     private var managed: [Managed] = []
@@ -278,7 +279,19 @@ final class ToolWindowRouter {
     }
 
     private func finishStopIfReady() {
-        if stopping && managed.isEmpty && agentSettingsRegistration == nil && ownAgentWindow == nil { NSApp.terminate(nil) }
+        guard stopping, managed.isEmpty, agentSettingsRegistration == nil, ownAgentWindow == nil,
+              !terminationScheduled else { return }
+        terminationScheduled = true
+        // AppKit may run a nested event loop while awaiting terminateLater.
+        // Leave the main dispatch callback first so the controller's main-queue
+        // termination completion can run inside that loop.
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            guard let self else { return }
+            self.terminationScheduled = false
+            guard self.stopping, self.managed.isEmpty, self.agentSettingsRegistration == nil,
+                  self.ownAgentWindow == nil else { return }
+            NSApp.terminate(nil)
+        }
     }
 
     func setChromeUsesAgentDisplay(_ flag: Bool) {
