@@ -2,7 +2,7 @@
 // are supplied on iOS; this boundary never exposes arbitrary Mac window control.
 export function selectMobileServices(original, RpcTarget) {
   const fields = [
-    'appServerManagers', 'executionHosts', 'executionPaths', 'remoteConnections',
+    'appServerManagers', 'windowAppServerEvents', 'executionHosts', 'executionPaths', 'remoteConnections',
     'threadConfiguration', 'permissionPolicy', 'localThreadCatalog', 'threadProjectAssignments',
     'threadTurnSummaries', 'threadArchive', 'queuedFollowUps', 'queuedSendLocks',
     'projectlessThreads', 'workspaceRoots', 'workspaceSearch', 'workspaceFiles',

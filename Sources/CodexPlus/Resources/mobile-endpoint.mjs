@@ -140,7 +140,9 @@ export function installMobileEndpoint(config, encode, decode) {
         if (method === 'sendMessageFromView' && globalThis.__codexPlusMobileLocal) {
           const local = globalThis.__codexPlusMobileLocal.handleMessage(args[0]);
           if (local.handled) return Promise.resolve(local.value);
-          const allowed = new Set(['mcp-request', 'mcp-response', 'mcp-notification', 'mcp-request-abandon', 'thread-prewarm-start', 'fetch', 'cancel-fetch']);
+          // The original renderer explicitly requests this read-only connection /
+          // initialization snapshot when its host advertises window events.
+          const allowed = new Set(['mcp-request', 'mcp-response', 'mcp-notification', 'mcp-request-abandon', 'thread-prewarm-start', 'request-app-server-state', 'fetch', 'cancel-fetch']);
           if (!allowed.has(args[0]?.type)) return Promise.reject(Error(`Unsupported phone host message: ${args[0]?.type}`));
         }
         return invoke(method, args);

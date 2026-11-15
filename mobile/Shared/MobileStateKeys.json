@@ -29,7 +29,8 @@
     "mini-style-cache",
     "primary-aeon-selection-v1",
     "last-observed-cloud-pet-selection-v1",
-    "space-pinned-page-previews-v1"
+    "space-pinned-page-previews-v1",
+    "sidebar-custom-sections-v3"
   ],
   "atomPrefixes": [
     "thread-client-id-v1:local%3A"
