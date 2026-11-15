@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+export CODEX_PLUS_SOURCE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export CODEX_PLUS_MOBILE_CACHE="$HOME/Library/Caches/codex-plus/mobile"
+RELEASE_CACHE="$CODEX_PLUS_MOBILE_CACHE/testflight"
+test -f "$CODEX_PLUS_MOBILE_CACHE/connection.json"
+node "$CODEX_PLUS_SOURCE_ROOT/scripts/build-mobile-preload.mjs"
+mkdir -p "$RELEASE_CACHE/project"
+xcodegen generate --spec "$CODEX_PLUS_SOURCE_ROOT/mobile/project-testflight.yml" \
+  --project "$RELEASE_CACHE/project" --project-root "$RELEASE_CACHE/project"
+xcodebuild -project "$RELEASE_CACHE/project/SmartShadowMobile.xcodeproj" \
+  -scheme CodexMobile -configuration Release -destination 'generic/platform=iOS' \
+  -derivedDataPath "$RELEASE_CACHE/derived-data" \
+  -archivePath "$RELEASE_CACHE/SmartShadowMobile.xcarchive" archive
+printf 'archive_path=%s\n' "$RELEASE_CACHE/SmartShadowMobile.xcarchive"

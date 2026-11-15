@@ -49,7 +49,7 @@ bash scripts/build-mobile-simulator
 node scripts/configure-mobile.mjs --thread <existing-thread-uuid>
 ```
 
-窗口创建可能短暂置前；本次已获许可，创建后由 OCU 按准确窗口身份停放到 Agent 隐藏屏并最小化。
+窗口创建可能短暂置前；本次已获许可，创建后由 OCU 按准确窗口身份放到最右侧物理屏。
 网关启动后写入本机 `connection.json`，再构建、安装模拟器 App；每次网关端口变化都需重新打包此连接配置。
 断线时保留未知结果并到原会话核对；使用壳内“重新连接”会撤销旧连接代际并恢复手机原路由，不重放业务操作。普通切后台／回前台不会刷新已断开的页面。
 结束一次原型运行后可关闭下一次自动创建，当前已建立的会话在本次 Plus 进程退出前继续有效：
@@ -60,3 +60,15 @@ node scripts/configure-mobile.mjs --disable
 
 已完成首批验收覆盖原会话读取、单次发送、文本流式、Mac 同会话对账和断线不重发。后续完整功能增量仍需以对应安装版逐项验收，首批证据不代表新候选全覆盖。
 原前端的其他宿主功能与物理 iPhone 跨节点访问尚未验收；更换原 Codex 版本时须重新核对准确版本和资源摘要。
+
+## Smart Shadow TestFlight
+
+正式发布配置为 `project-testflight.yml`，沿用原 `me.longbiaochen.smart-shadow`、App Store Connect应用6784136332、原图标及分发身份。它继承模拟器源码，使用独立entitlement；模拟器53的bundle和私有状态保持。原Smart Shadow数据不由此导入。
+
+```sh
+/Users/longbiao/Projects/smart-shadow/bin/smart-shadow-build run --label ios-testflight -- scripts/archive-mobile-testflight
+```
+
+归档与导出保存在 `~/Library/Caches/codex-plus/mobile/testflight/`。上传须绑定同一源码和构建号，上传结果未知时先按原构建号在App Store Connect查证，不换号重传。现有Internal Testers组自动接收新构建，不新增测试对象。
+
+本轮用户只授权完成TF发布，不操作真机。包内连接信息只有Mac私网地址、证书公钥指纹、原宿主版本及初始路由；不含访问令牌。当前Mac准入仍为原模拟器对应节点，下载或安装不证明物理iPhone已获接入，后续需按明确设备核准现有Tailscale身份。发布、可安装与真机功能分别留证。
