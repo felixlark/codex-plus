@@ -32,9 +32,9 @@ import Security
                 self.serviceConnection = nil
             }
             let state = try await self.call(.status)
-            self.status = state.result
+            self.status = state
             let result = try await self.call(.settingsRead)
-            try self.acceptSettings(result.result)
+            try self.acceptSettings(result)
             self.message = "已连接 interactiond 运行主体"
         }
     }
@@ -51,18 +51,18 @@ import Security
             do {
                 let result = try await self.call(.settingsWrite, extra: ["expected_runtime": runtime.instance_id.uuidString,
                     "expected_settings_revision": revision, "changes": changes])
-                try self.acceptSettings(result.result); self.message = "设置已由 interactiond 保存并读回"
+                try self.acceptSettings(result); self.message = "设置已由 interactiond 保存并读回"
             } catch let rejection as Rejected {
                 if rejection.code == .conflict, (try? self.acceptSettings(rejection.result)) != nil {
                     self.message = "设置已变化，本次修改未写入；已读取当前值"
                 } else {
-                    if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual.result) }
+                    if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual) }
                     self.message = rejection.code == .conflict ? "设置已变化，本次修改未写入" : "当前运行接口不支持本次设置，未写入"
                 }
             } catch {
                 let reason = error.localizedDescription
                 // Reconcile current values only; never repeat a settings write.
-                if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual.result) }
+                if let actual = try? await self.call(.settingsRead) { try? self.acceptSettings(actual) }
                 self.message = "写入回执未确认，已尝试只读核对当前值：\(reason)"
             }
         }
@@ -100,11 +100,10 @@ import Security
         let result: [String: Any]
         var errorDescription: String? { code == .unsupported ? "当前运行接口不支持此操作" : "设置已变化，请刷新" }
     }
-    private struct Reply { let result: [String: Any]; let runtime: ManagementProtocol.RuntimeIdentity }
-    private func call(_ operation: ManagementProtocol.Operation, id: UUID = UUID(), extra: [String: Any] = [:]) async throws -> Reply {
+    private func call(_ operation: ManagementProtocol.Operation, extra: [String: Any] = [:]) async throws -> [String: Any] {
         try Task.checkCancellation()
         var request: [String: Any] = ["command": ManagementProtocol.command, "protocol": ManagementProtocol.version,
-            "request_id": id.uuidString, "operation": operation.rawValue]
+            "request_id": UUID().uuidString, "operation": operation.rawValue]
         for (key, value) in extra { request[key] = value }
         _ = try ManagementProtocol.Request.parse(request)
         let client = ManagementConnection(); connection = client
@@ -120,7 +119,7 @@ import Security
             throw Rejected(code: code, result: response["result"] as? [String: Any] ?? [:])
         }
         guard response["ok"] as? Bool == true else { throw ManagementProtocol.failure(response["error"] as? String ?? "management_request_failed_result_unknown") }
-        return Reply(result: response["result"] as? [String: Any] ?? [:], runtime: identity)
+        return response["result"] as? [String: Any] ?? [:]
     }
     private static func verify(_ identity: ManagementProtocol.RuntimeIdentity) throws {
         guard identity.pid > 0, identity.bundle_id == ManagementProtocol.runtimeBundleID, identity.path == ManagementProtocol.runtimePath,
