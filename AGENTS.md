@@ -42,8 +42,7 @@ installation for rollback.
 The result owner completes installed interaction acceptance and closes the delivery
 issue with evidence; wait for personal acceptance only when explicitly required.
 
-The current simplification phase permits only the approved source removals and
-necessary checks. Do not merge, install, deploy, or resume product development.
+The user approved resuming the simplified product on 2026-11-15. Deliver the thin service controls, small task board and original mobile frontend; do not restore the removed full workbench. #613 owns installation and service switching; shared source has one writer.
 Keep the existing installation, phone connection, drafts, and unresolved operations.
 The untracked `docs/designs/compact-task-board.md` is a preserved discussion draft,
 not a current requirement or an implementation instruction. The duplicate Agent

@@ -10,7 +10,7 @@ import Security
     @Published private(set) var capabilities: [String] = []
     @Published private(set) var status: [String: Any] = [:]
     @Published private(set) var busy = false
-    @Published private(set) var message = "正在读取 interactiond…"
+    @Published private(set) var message = "正在读取服务状态…"
     @Published private(set) var modules: [String: ModuleObservation] = [:]
     @Published private(set) var moduleErrors: [String: String] = [:]
     private var serviceConnection: ServiceControlClient?
@@ -19,11 +19,11 @@ import Security
     private var connection: ManagementConnection?
 
     func cancel() { current?.cancel(); connection?.cancel(); serviceConnection?.cancel(); current = nil; connection = nil }
-    func start() { guard !started else { return }; started = true; attach() }
+    func start() { guard !started else { return }; started = true; refresh() }
     func refresh() {
         guard !busy else { return }
         perform {
-            for role in ["contextd", "taskd"] {
+            for role in ["contextd", "taskd", "interactiond"] {
                 try Task.checkCancellation()
                 let service = ServiceControlClient(); self.serviceConnection = service
                 do { self.modules[role] = try await service.inspect(role); self.moduleErrors[role] = nil }
@@ -31,11 +31,32 @@ import Security
                 catch { self.moduleErrors[role] = error.localizedDescription }
                 self.serviceConnection = nil
             }
-            let state = try await self.call(.status)
-            self.status = state
-            let result = try await self.call(.settingsRead)
-            try self.acceptSettings(result)
-            self.message = "已连接 interactiond 运行主体"
+            do {
+                self.status = try await self.call(.status)
+                try self.acceptSettings(try await self.call(.settingsRead))
+                self.message = "已读取服务与 interactiond 设置"
+            } catch {
+                self.settings = nil; self.revision = nil; self.runtime = nil; self.capabilities = []
+                self.message = "服务状态已读取；interactiond 设置暂不可用"
+            }
+        }
+    }
+    func control(_ action: String, role: String) {
+        guard !busy else { return }
+        perform {
+            let service = ServiceControlClient(); self.serviceConnection = service
+            do {
+                self.modules[role] = try await service.control(action, role: role)
+                self.moduleErrors[role] = nil
+                self.message = "\(role)：\(self.modules[role]?.job ?? "unknown")"
+            } catch {
+                self.moduleErrors[role] = error.localizedDescription
+                self.message = "操作结果以刷新读回为准"
+                // Unknown mutations are never repeated. Read only the current state.
+                let read = ServiceControlClient(); self.serviceConnection = read
+                if let actual = try? await read.inspect(role) { self.modules[role] = actual }
+            }
+            self.serviceConnection = nil
         }
     }
     private func acceptSettings(_ result: [String: Any]) throws {

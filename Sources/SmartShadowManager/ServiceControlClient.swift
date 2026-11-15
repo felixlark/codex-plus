@@ -6,54 +6,62 @@ struct ModuleObservation {
     let selection: String
     let source: String?
     let report: String
+    let installed: Bool
 }
 
-/// Read-only consumer of the installed ss-service. It never constructs a
-/// publication plan, changes a release, controls launchd or retries a mutation.
+/// One installed lifecycle CLI. Cancelling a view never interrupts a mutation.
 final class ServiceControlClient: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
+    private var readOnly = true
     private var cancelled = false
     func cancel() {
         lock.lock(); defer { lock.unlock() }; cancelled = true
-        if let process, process.isRunning { process.terminate() }
+        if readOnly, let process, process.isRunning { process.terminate() }
     }
-    func inspect(_ role: String) async throws -> ModuleObservation {
-        guard ["contextd", "taskd"].contains(role) else { throw failure("invalid_role") }
+    func inspect(_ role: String) async throws -> ModuleObservation { try await request("inspect", role: role) }
+    func control(_ action: String, role: String) async throws -> ModuleObservation {
+        guard ["start", "stop"].contains(action) else { throw failure("invalid_action") }
+        return try await request(action, role: role)
+    }
+    private func request(_ action: String, role: String) async throws -> ModuleObservation {
+        guard ["contextd", "taskd", "interactiond"].contains(role) else { throw failure("invalid_role") }
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    do { continuation.resume(returning: try self.perform(role)) }
+                    do { continuation.resume(returning: try self.perform(action, role: role)) }
                     catch { continuation.resume(throwing: error) }
                 }
             }
         }, onCancel: { self.cancel() })
     }
-    private func perform(_ role: String) throws -> ModuleObservation {
+    private func perform(_ action: String, role: String) throws -> ModuleObservation {
         let executable = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/dev-ops/bin/ss-service")
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw failure("正式控制器未安装") }
         let child = Process(), output = Pipe()
         child.executableURL = executable
-        child.arguments = ["inspect", "--component", role, "--holder", "smartshadow-manager", "--reason", "读取组件状态"]
+        child.arguments = [action, "--component", role, "--holder", "smartshadow-manager", "--reason", action == "inspect" ? "读取组件状态" : "管理组件"]
         child.standardInput = FileHandle.nullDevice; child.standardOutput = output; child.standardError = FileHandle.nullDevice
         lock.lock()
         if cancelled { lock.unlock(); throw CancellationError() }
+        readOnly = action == "inspect"
         do { try child.run(); process = child; lock.unlock() }
         catch { lock.unlock(); throw error }
         let raw = output.fileHandleForReading.readDataToEndOfFile(); child.waitUntilExit()
         lock.lock(); process = nil; let wasCancelled = cancelled; lock.unlock()
         try? output.fileHandleForReading.close()
-        if wasCancelled { throw CancellationError() }
-        guard child.terminationStatus == 0, let value = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
-              value["schema"] as? String == "ss-service.component-inspect/v1", value["component"] as? String == role,
-              value["service_actions"] as? Int == 0 else { throw failure("正式控制器尚不支持该角色的状态读取") }
-        let job = value["job"] as? [String: Any] ?? [:], config = value["configuration"] as? [String: Any] ?? [:]
-        let layout = value["layout"] as? [String: Any] ?? [:], package = value["package"] as? [String: Any] ?? [:]
-        let report = value["runtime_report"] as? [String: Any] ?? [:]
-        let selected = layout["configuration_selected"] as? Bool
-        return ModuleObservation(job: job["state"] as? String ?? "unknown",
-            configuration: config["state"] as? String ?? "unknown", selection: selected.map { $0 ? "已选中配置" : "配置未选中" } ?? "选择未知",
-            source: package["source_commit"] as? String, report: report["state"] as? String ?? "unknown")
+        if wasCancelled && action == "inspect" { throw CancellationError() }
+        guard let value = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              value["schema"] as? String == "smart-shadow.service-inspect/v1", value["component"] as? String == role else {
+            throw failure(action == "inspect" ? "正式控制器尚不支持薄生命周期接口" : "操作结果未知，请刷新核对")
+        }
+        if child.terminationStatus != 0 { throw failure(value["error"] as? String ?? "操作未完成，请刷新核对") }
+        let installed = value["installed"] as? Bool ?? false
+        return ModuleObservation(job: value["state"] as? String ?? "unknown",
+            configuration: value["configuration"] as? String ?? "unknown",
+            selection: installed ? "正式安装" : "未安装",
+            source: value["source_commit"] as? String,
+            report: value["runtime_state"] as? String ?? "unknown", installed: installed)
     }
     private func failure(_ message: String) -> NSError { NSError(domain: "SmartShadow.Service", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }

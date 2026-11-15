@@ -20,6 +20,10 @@
 
 管理产品为独立 `SmartShadowManager` target，只依赖 Core 数据和客户端；通过已安装 `ss-service` 读取组件状态，不引入业务看板或另一套发布器。新薄生命周期仍未交付。`build-manager`/`install-manager` 与 Plus/手机构建安装边界保持。
 
-## 精简阶段边界
+## 精简后恢复边界
 
-本批仅改源码并做定向检查，不合并或安装。现役 Plus74、iOS53、原窗口、草稿及历史未知结果保持。未来获准切换前按[精简交接](workbench-simplification.md)核对旧完整工作台，不能用删除后的源码接管或结算旧请求。
+用户2026-11-15已批准恢复开发、相称检查、合并、既定安装和真实验收。管理App最小启停/状态由#613交付，服务安装切换保持唯一操作者。现役 Plus74、iOS53、原窗口、草稿及历史未知结果保持。未来获准切换前按[精简交接](workbench-simplification.md)核对旧完整工作台，不能用删除后的源码接管或结算旧请求。
+
+## 薄生命周期管理
+
+管理App启动只读三服务状态，不自动启动interactiond。各模块的启动/停止按钮调用同一正式 `ss-service`，读取 `smart-shadow.service-inspect/v1`；未安装模块明确显示且按钮禁用。interactiond设置连接失败不影响taskd/contextd。取消窗口只取消只读子请求，不中断已发出的生命周期操作；未知结果只读核对，不自动重发。原设置身份/revision核验保持。
