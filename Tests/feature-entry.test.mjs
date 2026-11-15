@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {validateNativeAction,installFeatureEntry,removeFeatureEntries,reviewedFeatureResource} from '../Sources/CodexPlus/Resources/feature-entry.mjs';
 import {createSnakeGame,openSnakeDialog} from '../Sources/CodexPlus/Resources/snake.mjs';
-import {parser,adaptSidebar,adaptReloadRoute,openAsar,reviewedHostResource,reviewedRouteResource} from '../scripts/inspect-sidebar-model.mjs';
+import {parser,walk,adaptSidebar,adaptReloadRoute,openAsar,reviewedHostResource,reviewedRouteResource} from '../scripts/inspect-sidebar-model.mjs';
 
 test('native bridge accepts only the exact settings action shape',()=>{
   const action={version:1,action:'open-settings',requestId:'a-b-123'};
@@ -18,7 +18,20 @@ test('reviewed installed host preserves the sidebar and route structural contrac
   try{
     const sidebar=await archive.read(archive.entries.find(e=>e.path===reviewedHostResource.path));
     const route=await archive.read(archive.entries.find(e=>e.path===reviewedRouteResource.path));
-    assert.equal((await adaptSidebar(sidebar,{host:true,resourcePath:reviewedHostResource.path})).supported,true);
+    const adapted=await adaptSidebar(sidebar,{host:true,resourcePath:reviewedHostResource.path});
+    assert.equal(adapted.supported,true);
+    // Execute the injected native selection read with the real model's import
+    // alias shadowed, as it is in the installed host. Parsing alone misses this.
+    const {parse}=await parser();let capture,selection;
+    walk(parse(adapted.source,{ecmaVersion:'latest',sourceType:'module'}),node=>{
+      if(node.type==='VariableDeclaration'&&node.declarations.some(d=>d.id.name==='__codexPlusSelectedThreadKey'))capture=node;
+      if(node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&node.callee.property.name==='sort'&&node.callee.object.property?.name==='__codexPlusProjectOrder')selection=node.arguments[4];
+    });
+    assert.ok(capture);assert.ok(selection);
+    const alias=adapted.match.selectionModule.name,reads=[];
+    const read=new Function('nativeSelection','readNative',`const ${alias}=nativeSelection;${adapted.source.slice(capture.start,capture.end)}return(()=>{let ${alias};const ${selection.callee.name}=readNative;return ${adapted.source.slice(selection.start,selection.end)}})()`);
+    assert.equal(read({oN:'native-current-thread'},selector=>{reads.push(selector);return 'local:selected';}),'local:selected');
+    assert.deepEqual(reads,['native-current-thread']);
     assert.equal((await adaptReloadRoute(route)).supported,true);
     assert.equal((await adaptSidebar(sidebar+'\n',{host:true,resourcePath:reviewedHostResource.path})).supported,false);
   }finally{await archive.close();}
