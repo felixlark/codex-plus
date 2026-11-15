@@ -5,6 +5,23 @@ export function installMobileEndpoint(config, encode, decode) {
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
   const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map(), gitRequests = new Map();
   const retiredPorts = new Set();
+  const rpcTrace = new Map();
+  function trace(id, direction, value) {
+    if (phone || !Array.isArray(value)) return;
+    let state = rpcTrace.get(id);
+    if (!state) { state = {sequence: 0, methods: new Map(), pending: new Map(), replies: 0}; rpcTrace.set(id, state); }
+    if (direction === 'request' && value[0] === 'push') {
+      const call = value[1], path = Array.isArray(call) && call[0] === 'pipeline' ? call[2] : null;
+      const method = Array.isArray(path) && path.length && path.every(part => typeof part === 'string' && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(part)) ? path.join('.') : 'opaque';
+      state.methods.set(++state.sequence, method);
+    } else if (direction === 'request' && value[0] === 'pull') {
+      state.pending.set(value[1], state.methods.get(value[1]) ?? 'opaque');
+    } else if (direction === 'request' && value[0] === 'release') {
+      state.pending.delete(value[1]); state.methods.delete(value[1]);
+    } else if (direction === 'reply' && ['resolve', 'reject'].includes(value[0])) {
+      state.pending.delete(value[1]); state.methods.delete(value[1]); state.replies++;
+    }
+  }
   let sequence = 0, appPort, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
@@ -29,6 +46,7 @@ export function installMobileEndpoint(config, encode, decode) {
     if (ports.has(id)) throw Error('Duplicate mobile port');
     ports.set(id, port);
     port.onmessage = event => {
+      trace(id, 'reply', event.data);
       sendValue({kind: 'port-frame', id}, event.data);
       if (event.data === null && appPort === id) fatal();
     };
@@ -93,7 +111,8 @@ export function installMobileEndpoint(config, encode, decode) {
       case 'port-frame': {
         if (retiredPorts.has(message.id)) break;
         const port = ports.get(message.id); if (!port) throw Error('Unknown mobile port');
-        port.postMessage(decode(message.value)); break;
+        const value = decode(message.value); trace(message.id, 'request', value);
+        port.postMessage(value); break;
       }
       case 'git-port': {
         if (!phone || typeof message.id !== 'string' || gitRequests.get(message.metadata?.requestId)?.phase !== 'pending') throw Error('Invalid Git port');
@@ -106,6 +125,7 @@ export function installMobileEndpoint(config, encode, decode) {
         if (value?.type === 'codex_desktop:git-worker-port') {
           const request = gitRequests.get(value.requestId); if (!request || value.closed !== true) break;
           gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+          rpcTrace.delete(request.id);
           if (request.id) retiredPorts.add(request.id);
           dispatch(value, [], true);
         } else dispatch(value);
@@ -128,6 +148,7 @@ export function installMobileEndpoint(config, encode, decode) {
         send({kind: 'git-port', id, metadata: value}); attachPort(event.ports[0], id);
       } else if (value.closed === true && event.ports.length === 0) {
         gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+        rpcTrace.delete(request.id);
         if (request.id) retiredPorts.add(request.id);
         sendValue({kind: 'event'}, value);
       } else for (const port of event.ports) port.close();
@@ -204,13 +225,14 @@ export function installMobileEndpoint(config, encode, decode) {
   function close() {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
-    calls.clear(); ids.clear(); gitRequests.clear(); retiredPorts.clear();
+    calls.clear(); ids.clear(); gitRequests.clear(); retiredPorts.clear(); rpcTrace.clear();
     for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();
     window.removeEventListener('message', onMessage);
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
-  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, reportRoute: route => { if (phone) send({kind: 'view-route', route}); }, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size})};
+  globalThis.__codexPlusMobileEndpoint = {connection: config.connection, reportRoute: route => { if (phone) send({kind: 'view-route', route}); }, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size,
+    rpc: [...rpcTrace].map(([id, state]) => ({kind: id === appPort ? 'app' : 'git', replies: state.replies, pending: [...state.pending.values()]}))})};
   window.addEventListener('pagehide', fatal, {once: true});
 }

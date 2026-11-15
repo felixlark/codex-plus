@@ -146,7 +146,7 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
                     if let file = frame["file"] as? String, file.range(of: #"^[0-9]+\.[a-f0-9]+\.js$"#, options: .regularExpression) != nil,
                        let line = frame["line"] as? Int, let column = frame["column"] as? Int, line >= 0, column >= 0 { fields.append("\(file):\(line):\(column)") }
                 }
-                print("CodexMobile diagnostic: " + fields.joined(separator: " "))
+                NSLog("CodexMobile diagnostic: %@", fields.joined(separator: " "))
             }
             return
         }
@@ -178,7 +178,7 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
                 // Only protocol key names are diagnostic metadata; never record
                 // the associated draft, account data or state value.
                 if let key = value["key"] as? String, key.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil {
-                    print("CodexMobile unsupported local state key: \(key)")
+                    NSLog("CodexMobile local state failed at key: %@", key)
                 }
                 let alert = UIAlertController(title: "页面状态未能保存", message: "请保留当前页面，重新连接前先核对草稿。", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "好", style: .default))

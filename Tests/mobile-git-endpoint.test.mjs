@@ -32,6 +32,15 @@ test('original Git metadata, real port messages and zero-port closure survive th
     remote.onmessage = event => { reply = event.data; }; remote.start(); remote.postMessage({method: 'metadata'});
     await wait(() => reply);
     assert.equal(request.method, 'metadata'); assert.equal(reply.reply, '中文🙂271828');
+    const tracedID = envelopes.find(message => message.kind === 'git-port').id;
+    for (const frame of [['push', ['pipeline', 0, ['getMetadata'], ['PRIVATE_ARGUMENT']]], ['pull', 1]]) {
+      host.__codexPlusMobileEndpoint.receive(JSON.stringify({connection: 'current', kind: 'port-frame', id: tracedID, value: await encodeMobileValue(frame)}));
+    }
+    await wait(() => host.__codexPlusMobileEndpoint.inspect().rpc.some(row => row.pending.includes('getMetadata')));
+    assert.equal(JSON.stringify(host.__codexPlusMobileEndpoint.inspect()).includes('PRIVATE_ARGUMENT'), false);
+    native.port2.postMessage(['resolve', 1, {private: 'PRIVATE_RESPONSE'}]);
+    await wait(() => host.__codexPlusMobileEndpoint.inspect().rpc.every(row => row.pending.length === 0));
+    assert.equal(JSON.stringify(host.__codexPlusMobileEndpoint.inspect()).includes('PRIVATE_RESPONSE'), false);
     hostWindow.dispatchEvent(new EventMessage('message', {source: hostWindow, origin: 'null', data: {type: 'codex_desktop:git-worker-port', requestId: 'original-id', closed: true}, ports: []}));
     await wait(() => delivered.length === 2);
     assert.equal(delivered[1].source, phoneWindow); assert.equal(delivered[1].data.closed, true); assert.equal(delivered[1].ports.length, 0);

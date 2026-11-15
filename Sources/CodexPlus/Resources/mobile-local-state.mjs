@@ -36,11 +36,14 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
       const error = Error('Unsupported phone atom key'); error.phoneStateKey = key; throw error;
     }
     if (message.recordUpdate) await configured;
-    const next = await commit(next => {
-      if (message.recordUpdate) next.atoms[key] = updateRecord(next.atoms[key] ?? next.atoms[message.recordUpdate.legacyStorageKey], message.recordUpdate);
-      else if (message.deleted) delete next.atoms[key];
-      else next.atoms[key] = message.value;
-    });
+    let next;
+    try {
+      next = await commit(next => {
+        if (message.recordUpdate) next.atoms[key] = updateRecord(next.atoms[key] ?? next.atoms[message.recordUpdate.legacyStorageKey], message.recordUpdate);
+        else if (message.deleted) delete next.atoms[key];
+        else next.atoms[key] = message.value;
+      });
+    } catch (error) { error.phoneStateKey = key; throw error; }
     dispatch({type: 'persisted-atom-updated', key, value: message.deleted ? null : next.atoms[key], deleted: !!message.deleted});
   }
   function handleMessage(message) {
