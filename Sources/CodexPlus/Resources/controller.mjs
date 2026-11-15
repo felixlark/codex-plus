@@ -358,12 +358,12 @@ async function main(){
     let body,finished=false;
     const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await command(sessionId,'Fetch.continueRequest',{requestId:event.requestId});finished=true;};
     try{
-      if(stopping){await original();return;}
+      if(stopping||quiesced){await original();return;}
       const {frameTree}=await command(sessionId,'Page.getFrameTree');
       const resource=resources.find(resource=>resource.url===event.request.url);
       if(!mainURL(frameTree.frame.url)||frameTree.frame.id!==event.frameId||!resource||event.resourceType!=='Script'||event.responseStatusCode!==200){await original();return;}
       body=await command(sessionId,'Fetch.getResponseBody',{requestId:event.requestId});
-      if(stopping){await original();return;}
+      if(stopping||quiesced){await original();return;}
       const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
       if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
       await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';if(resource.kind==='project-order')state.projectOrder.phase='active';
@@ -374,7 +374,7 @@ async function main(){
   await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
   // Verify the kernel-owned socket after the early hook, not through shared discovery files.
   assertOwner(state.pid,state.endpoint);await publish();
-  const suggestionHeartbeat=setInterval(()=>{if(!stopping)void updateSuggestionPolicy();},1000);
+  const suggestionHeartbeat=setInterval(()=>{if(!stopping&&!quiesced)void trackLifecycle(updateSuggestionPolicy());},1000);
   let inspecting=false;
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID||!parentIsAlive(parentPID)){clearInterval(monitor);void shutdown();return;}
@@ -423,9 +423,14 @@ function fail(error){state.errors.push(error.message);void publish();}
 async function lifecycleCommand(message){
  if(typeof message.requestId!=='string')return;
  try{
-  if(message.action==='prepare'){
+  if(message.action==='verify'){
+   if(!quiesced)throw Error('Not prepared');
+   const status=mobile?.status()??null;
+   if(status?.targetId){const {targetInfos}=await cdp.call('Target.getTargets');if(!targetInfos.some(t=>t.targetId===status.targetId))throw Error('Anchor gone');}
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:status})+'\n');
+  }else if(message.action==='prepare'){
    const preparingDuringStartup=!startupReady;
-   quiesced=true;
+   quiesced=true;if(mobile)mobile.quiesced=true;
    await startupWork;
    if(preparingDuringStartup)throw Error('Startup was still in progress');
    await monitorWork;

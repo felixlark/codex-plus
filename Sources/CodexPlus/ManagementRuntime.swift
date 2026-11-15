@@ -12,7 +12,7 @@ final class ManagementRuntime {
     var prepareStop: (() async throws -> [String: Any])?
     var resumeLifecycle: (() async throws -> Void)?
     var stopLifecycle: (() -> Void)?
-    var verifyPreparedScope: (([String: Any]) -> Bool)?
+    var verifyPreparedScope: (([String: Any]) async -> Bool)?
     private var lifecyclePhase = "running"
     private var preparedScope: [String: Any]?
     var allowsEffects: Bool { lifecyclePhase == "running" }
@@ -78,8 +78,9 @@ final class ManagementRuntime {
                 catch { lifecyclePhase = "prepare_unknown"; return reply(error: "prepare_unknown") }
             case .stop:
                 guard lifecyclePhase == "prepared", let scope = preparedScope,
-                      scope["scope_revision"] as? String == request.expectedScope,
-                      verifyPreparedScope?(scope) == true else { return reply(error: "scope_changed") }
+                      scope["scope_revision"] as? String == request.expectedScope else { return reply(error: "scope_changed") }
+                lifecyclePhase = "verifying_stop"
+                guard await verifyPreparedScope?(scope) == true else { lifecyclePhase = "prepare_unknown"; return reply(error:"scope_changed") }
                 lifecyclePhase = "stop_requested"
                 return reply(["state": "stop_requested", "accepted_scope": scope], afterWrite: { [weak self] in
                     self?.lifecyclePhase = "stopping"

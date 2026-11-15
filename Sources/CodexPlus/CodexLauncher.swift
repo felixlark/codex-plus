@@ -51,7 +51,7 @@ final class CodexLauncher: ObservableObject {
 
     func start() {
         humanWindows.createWindow = { [weak self] nonce in
-            guard let input = self?.controllerInput,
+            guard self?.quiesced == false, self?.stopping == false, let input = self?.controllerInput,
                   let data = try? JSONSerialization.data(withJSONObject: ["type": "create-human-window", "nonce": nonce]) else { return false }
             do { try input.write(contentsOf: data + Data([10])); return true } catch { return false }
         }
@@ -112,14 +112,22 @@ final class CodexLauncher: ObservableObject {
         _ = try await controllerLifecycle("resume")
         quiesced = false
     }
-    func verifyLifecycleScope(_ prepared: [String: Any]) -> Bool {
+    func verifyLifecycleScope(_ prepared: [String: Any]) async -> Bool {
         guard quiesced, let scope = prepared["owned_scope"] as? [String: Any] else { return false }
         for key in ["native", "controller", "gateway", "host"] {
             if scope[key] is NSNull { continue }
             guard let saved = scope[key] as? [String: Any], let pid = ManagementProtocol.integer(saved["pid"]),
                   let actual = ProcessIdentity.read(pid_t(pid)), NSDictionary(dictionary:saved).isEqual(to:actual) else { return false }
         }
-        return true
+        do {
+            let current = try await controllerLifecycle("verify")
+            let saved = scope["mobile"] as? [String: Any]
+            let mobile = current["mobile"] as? [String: Any]
+            for key in ["anchor", "instance", "targetId", "gatewayPID"] {
+                if String(describing:saved?[key]) != String(describing:mobile?[key]) { return false }
+            }
+            return true
+        } catch { return false }
     }
     private func controllerLifecycle(_ action: String) async throws -> [String: Any] {
         guard lifecycleWait == nil else { throw ManagementProtocol.failure("lifecycle_in_progress") }
@@ -206,7 +214,7 @@ final class CodexLauncher: ObservableObject {
     }
 
     private func refresh() {
-        if let host = ownedHost() { humanWindows.update(host) }
+        if !quiesced, !stopping, let host = ownedHost() { humanWindows.update(host) }
         publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
