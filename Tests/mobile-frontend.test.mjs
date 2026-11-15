@@ -12,4 +12,5 @@ test('mobile attachment adaptation refuses an unreviewed composer and preserves 
   const bytes = Buffer.from('unreviewed vendor build');
   await assert.rejects(adaptMobileFrontend(attachmentPickerAsset.path, bytes), /Unreviewed/);
   assert.equal(await adaptMobileFrontend('assets/another.js', bytes), bytes);
+  for (const asset of ['907538.0572f09d40.js', '149364.fd50fe6b4a.js', '757723.3067c948bc.js']) await assert.rejects(adaptMobileFrontend('assets/async/' + asset, bytes), /Unreviewed/);
 });
