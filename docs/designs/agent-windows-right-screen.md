@@ -7,7 +7,7 @@
 - Plus 不再创建、确保、发现或恢复 OCU 虚拟屏，也不调用其停放／归还协议。删除零消费者的 startup recovery 和对应专用测试；普通 OCU 客户端只核准确窗口与新 right_display 能力，执行一次右屏请求。通用窗口身份桥仍被 HumanWindows 消费，保留。
 - 每次请求从当前在线、非镜像的物理显示器选择横坐标最大的屏幕；同横坐标用最右边界及稳定 ID 排序。使用该屏的可用区域，保留原尺寸直至超过可用区域才缩小，居中后实际读回完整 frame。
 - 只认准确 PID、启动时间、CG window_id 与 AX 窗口。显式 tool-place 和本次 tool-open 的文件身份／建窗差量可以授权归属；既有人工窗口不迁。Chrome 不再对所有后续新窗自动认领，Agent 浏览器沿准确窗口入口迁右屏。
-- 手机专用窗口在原nonce文档阶段先把anchor/instance/target交原生主体；仅匹配唯一AXWebArea URL与准确CG窗口后请求right_display。实际右屏布局回读后，以同组身份回执，controller才将该target切到隔离空白页并开网关；过期回执或unknown不继续导航、不重建窗口、不自动再搬。人工窗口仍受通用tool-place保护。
+- 手机专用窗口在原nonce文档阶段先把anchor/instance/target交原生主体；仅匹配唯一AXWebArea URL与准确CG窗口后请求right_display。实际右屏布局回读后，以同组身份回执，controller才将该target切到隔离空白页并开网关；过期回执或unknown不继续导航、不重建窗口、不自动再搬。unknown保留原CG窗口ID，只读核对同一真实窗口；明确修复或用户调整后实际完整落到右屏时，可以原身份确认既有结果，不能换ID续接。人工窗口仍受通用tool-place保护。
 - 原五设置字段暂保留管理协议兼容，chromeUsesAgentDisplay 表示明确 Agent Chrome 窗口的右屏路由，不表示虚拟屏或全进程认领。管理 App 文案由其原负责人对齐。
 - 官方 OCU right_display 负责一次布局请求；Plus 在请求前核PID/启动时间/准确窗口，完成后独立读回当前右屏及完整frame。不把 AX 返回错误当未执行重试。已派出的文件布局请求即消费，未确认保留准确请求与状态，不自动重放。用户后续移动后释放本地路由记录，不拉回。
 - 停止 Plus 只停止其观察与释放自有路由记录，Agent 窗口保持右屏，不再归还到旧虚拟屏／原屏。旧 tool-restore 兼容入口只释放该准确窗口路由，明确返回 released，不报告几何恢复。

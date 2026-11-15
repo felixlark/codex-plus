@@ -154,11 +154,15 @@ test('mobile window waits for exact current right-screen acknowledgement before 
   const unknown = blankHarness(); unknown.manager.requestWindowPlacement = () => {};
   await unknown.manager.tick();
   const reply = {anchor: unknown.manager.config.anchor, instance: unknown.manager.config.instance, targetId: unknown.manager.anchorTarget};
-  unknown.manager.windowPlacementResult({...reply, phase: 'unknown'});
-  unknown.manager.windowPlacementResult({...reply, phase: 'ready', windowID: 42});
+  unknown.manager.windowPlacementResult({...reply, phase: 'unknown', windowID: 42});
+  unknown.manager.windowPlacementResult({...reply, phase: 'ready', windowID: 43});
   await unknown.manager.tick();
   assert.equal(unknown.manager.phase, 'window-placement-unknown');
   assert.equal(unknown.commands.some(c => c.method === 'Page.navigate'), false);
+  unknown.manager.windowPlacementResult({...reply, phase: 'ready', windowID: 42});
+  await unknown.manager.tick();
+  assert.equal(unknown.manager.windowPlaced, true);
+  assert.equal(unknown.commands.filter(c => c.method === 'Page.navigate').length, 1);
 });
 
 test('the captured blank host repairs only its original preload world before opening the gateway', async () => {

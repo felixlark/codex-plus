@@ -163,10 +163,12 @@ final class CodexLauncher: ObservableObject {
         if let host = ownedHost(), let request = mobileWindowRequest,
            let placement = onPlaceMobileWindow?(host, request) {
             if let id = placement["windowID"] { mobileWindowRequest?["windowID"] = id }
-            if ["ready", "unknown"].contains(placement["phase"] as? String ?? "") {
+            let phase = placement["phase"] as? String
+            if phase == "ready" || phase == "unknown" && request["reportedUnknown"] as? Bool != true {
                 var reply = request; reply["type"] = "mobile-window-result"
                 reply["phase"] = placement["phase"]; reply["windowID"] = placement["windowID"]
-                mobileWindowRequest = nil
+                if phase == "ready" { mobileWindowRequest = nil }
+                else { mobileWindowRequest?["reportedUnknown"] = true }
                 if let data = try? JSONSerialization.data(withJSONObject: reply) { try? controllerInput?.write(contentsOf: data + Data([10])) }
             }
         }

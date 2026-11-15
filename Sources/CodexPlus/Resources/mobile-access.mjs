@@ -101,10 +101,15 @@ export class MobileAccess {
   }
   status() { return {phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
   windowPlacementResult(message) {
-    if (!this.windowPlacementRequested || this.stopped || this.windowPlaced || this.windowPlacementUnknown || message.anchor !== this.config.anchor || message.instance !== this.config.instance || message.targetId !== this.anchorTarget) return;
+    if (!this.windowPlacementRequested || this.stopped || this.windowPlaced || message.anchor !== this.config.anchor || message.instance !== this.config.instance || message.targetId !== this.anchorTarget) return;
+    if (this.windowPlacementUnknown && message.windowID !== this.windowID) return;
     if (message.phase === 'ready' && Number.isSafeInteger(message.windowID) && message.windowID > 0) {
       this.windowID = message.windowID; this.windowPlaced = true;
-    } else if (message.phase === 'unknown') this.windowPlacementUnknown = true;
+      this.windowPlacementUnknown = false;
+    } else if (message.phase === 'unknown') {
+      this.windowPlacementUnknown = true;
+      if (Number.isSafeInteger(message.windowID) && message.windowID > 0) this.windowID = message.windowID;
+    }
   }
   isAnchorURL(url) { return isAnchorURL(url, this.config); }
   async tick() {
