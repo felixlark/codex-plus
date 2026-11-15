@@ -27,8 +27,8 @@ export class TaskWorkspaceClient {
         this.children.delete(child);
         if (error) { reject(Error('workspace_transport_unavailable')); return; }
         const boundary = stdout.lastIndexOf('\n'), code = Number(stdout.slice(boundary + 1));
-        let value; try { value = JSON.parse(stdout.slice(0, boundary)); } catch { reject(Error('workspace_auth_or_response_unavailable')); return; }
         if (code !== 200) { reject(Error(`workspace_http_${Number.isInteger(code) ? code : 'unknown'}`)); return; }
+        let value; try { value = JSON.parse(stdout.slice(0, boundary)); } catch { reject(Error('workspace_auth_or_response_unavailable')); return; }
         resolve(value);
       });
       this.children.add(child);

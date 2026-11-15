@@ -112,3 +112,8 @@ test('formal API human identity is checked and transport failures never become e
   client.readJSON = async () => ({status: 'ok', authentication: 'service', subject: 'test-subject'});
   await assert.rejects(client.read({operation: 'issues', repository: 'a/b'}), /human_session_required/);
 });
+
+test('a real non-JSON gateway failure is reported as HTTP failure, not a login error or empty list', async () => {
+  const client = new TaskWorkspaceClient((file, args, options, callback) => { setImmediate(() => callback(null, 'error code: 502\n502')); return {kill() {}}; });
+  await assert.rejects(client.readJSON('/api/v2/session'), /workspace_http_502/);
+});
