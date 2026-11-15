@@ -1,5 +1,10 @@
 import Foundation
 
+struct McpCommand: Decodable {
+    let executable: String
+    let arguments: [String]
+}
+
 struct ModuleObservation {
     let job: String
     let configuration: String
@@ -7,6 +12,7 @@ struct ModuleObservation {
     let source: String?
     let report: String
     let installed: Bool
+    let mcp: McpCommand?
 }
 
 /// One installed lifecycle CLI. Cancelling a view never interrupts a mutation.
@@ -57,11 +63,15 @@ final class ServiceControlClient: @unchecked Sendable {
         }
         if child.terminationStatus != 0 { throw failure(value["error"] as? String ?? "操作未完成，请刷新核对") }
         let installed = value["installed"] as? Bool ?? false
+        let mcp: McpCommand?
+        if let object = value["mcp"] as? [String: Any] {
+            mcp = try JSONDecoder().decode(McpCommand.self, from: JSONSerialization.data(withJSONObject: object))
+        } else { mcp = nil }
         return ModuleObservation(job: value["state"] as? String ?? "unknown",
             configuration: value["configuration"] as? String ?? "unknown",
             selection: installed ? "正式安装" : "未安装",
             source: value["source_commit"] as? String,
-            report: value["runtime_state"] as? String ?? "unknown", installed: installed)
+            report: value["runtime_state"] as? String ?? "unknown", installed: installed, mcp: mcp)
     }
     private func failure(_ message: String) -> NSError { NSError(domain: "SmartShadow.Service", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }

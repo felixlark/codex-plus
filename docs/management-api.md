@@ -10,7 +10,7 @@
 - `settings.read`：返回原五个设置及其规范化 SHA-256 revision。
 - `settings.write`：校验当前实例、原 revision、严格类型和字段范围，沿既有偏好与回调写入并读回。冲突或实例变化不写入。
 
-已删除完整工作台操作、查询字段、空状态回执及专用恢复。小看板尚未实现，管理界面明确显示该状态；不能从未知操作拒绝推断历史开窗结果。小看板的数据接口和打开方式待需求确定后再实现，不预留上一版协议或网络适配器。
+已删除完整工作台操作、查询字段、空状态回执及专用恢复。不能从未知操作拒绝推断历史开窗结果。小看板是独立 SwiftUI 窗口，经正式 taskd inspect 返回的 `mcp.executable/arguments` 启动原 LocalMcpClient，以 `tasks_read` 读取配置登记范围；不预留上一版工作台协议或 HTTP 适配器。
 
 管理客户端校验 socket/父目录所有者与权限、peer UID，以及返回 PID 对应的真实签名、bundle 和路径。取消只 shutdown 本连接，由原 worker 关闭 fd；没有自动重发写入或重启运行体的回退。未知设置写入只读核对实际值。
 
@@ -18,7 +18,7 @@
 
 用户菜单和页面设置入口打开已核签名的全局 SmartShadow 管理 App。Agent 设置页仍被 ToolWindowRouter 的显式入口消费，底层 SettingsModel 仍为管理协议提供偏好读写和回调。本轮保留，不把重复界面当作长期要求；唯一入口的迁接尚待决定。
 
-管理产品为独立 `SmartShadowManager` target，只依赖 Core 数据和客户端；通过已安装 `ss-service` 读取组件状态，不引入业务看板或另一套发布器。新薄生命周期仍未交付。`build-manager`/`install-manager` 与 Plus/手机构建安装边界保持。
+管理产品为独立 `SmartShadowManager` target，只依赖 Core 数据和客户端；通过已安装 `ss-service` 读取组件状态，小看板仅为只读视图，不引入业务存储或另一套发布器。薄生命周期采用情况由 #613 另证。`build-manager`/`install-manager` 与 Plus/手机构建安装边界保持。
 
 ## 精简后恢复边界
 
@@ -27,3 +27,11 @@
 ## 薄生命周期管理
 
 管理App启动只读三服务状态，不自动启动interactiond。各模块的启动/停止按钮调用同一正式 `ss-service`，读取 `smart-shadow.service-inspect/v1`；未安装模块明确显示且按钮禁用。interactiond设置连接失败不影响taskd/contextd。取消窗口只取消只读子请求，不中断已发出的生命周期操作；未知结果只读核对，不自动重发。原设置身份/revision核验保持。
+
+## 小看板
+
+每次打开或手动刷新，创建一个只读 MCP 连接，完成 initialize 与 tasks_read 后关闭。HMAC 和凭据只在原 LocalMcpClient/Vault 内处理；Swift 不读取密钥、不写业务状态。关闭看板只取消本次只读客户端，不停止 taskd、手机宿主或 Codex Run。
+
+以 repository/number 标识事项；重复身份拒绝显示，输入版本变化后仍保留明确绑定的在途尝试和成果，标注“输入版本已更新”，避免成果评论更新 Issue 后隐藏原 Run。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。首版明确标注仅覆盖 taskd 登记范围，独立 Codex 任务尚未计入。界面只提供原案和成果链接。
+
+本轮源码已完成定向编译及四项状态语义检查；真实 taskd 读取和安装版交互仍待 #613 正式入口交接，不能据源码宣称已接通。
