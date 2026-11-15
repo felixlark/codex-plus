@@ -1,3 +1,17 @@
+## Smart Shadow TestFlight 374（2026-11-16）
+
+用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `me.longbiaochen.smart-shadow`、ASC app6784136332、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
+
+6项受影响移动资源/帧检查、两项现有CI、plist/shell/diff检查通过。Release仅关闭Web Inspector并增加正式签名/图标/方向/隐私配置，不改变原聊天前端和Mac运行体。最终archive/export均成功，包内身份、entitlement及iPad方向声明实读；全部19204文件摘要留本机。IPA SHA256为`1abaa8760dc0ddfa91ea81f494da440c8916f1aa28e8adc16fffa45c3da149a6`。
+
+00:37:27 CST Apple altool返回`UPLOAD SUCCEEDED with no errors`，delivery `e358b7b7-913e-424a-87e4-c28323f0eb75`，一次上传303574667字节。ASC随后返回PROCESSING，原Internal Testers组hasAccessToAllBuilds=true；处理完成和可测试结果待补，不把上传成功写成可安装。凭据留Apple支持存储，日志不含密钥/token。
+
+当前包内只含Mac私网地址、公钥指纹、原宿主版本与初始路由。Mac现役准入仍只接受原模拟器所用节点；本次TF发布不扩大设备准入，不证明物理手机已连通。用户后续指定设备时另验Tailscale身份与真实访问，不能把现有模拟器证据外推。
+
+## 原生运行体持续观察（2026-11-16）
+
+#613在原实例上连续采样至16:40:15Z：native40410/controller40422/gateway41150分别运行31.00/31.00/30.66分钟，出生身份未变，各8次physical footprint。首末MiB分别为21.38→20.05、911.56→108.15、66.08→13.08；控制进程中间有周期波动，没有持续单调上涨。正式lifecycle-status仍为同instance、mobile connected=1及原target，未为采样重启或强制GC。这项证明本组30分钟观察，不外推其他服务或长期性能。私有证据归`Library/Logs/codex-plus/mobile-complete-20261115/native78-resource-acceptance.json`及#613原采样文件。
+
 ## 原生生命周期 78（2026-11-16）
 
 Plus 77 首次真实停机发现两项缺陷：小写request-id与大写UUID回执比对不一致；GCD主队列发起AppKit terminate后，controller退出回调无法进入同队列。修复候选6ced626，后续与main合并f6cd943保持相同源码树；78由#613固定导出、签名、安装。小写request-id在正式78成功返回规范化的同一UUID，不再误报空响应。
