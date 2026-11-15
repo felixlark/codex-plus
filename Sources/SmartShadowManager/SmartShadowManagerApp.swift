@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UniformTypeIdentifiers
 import CodexPlusCore
 
 @MainActor final class ManagerDelegate: NSObject, NSApplicationDelegate {
@@ -72,11 +73,15 @@ struct ManagerView: View {
                                         .disabled(model.busy || model.modules[role]?.installed != true)
                                     Button("停止") { model.control("stop", role: role) }
                                         .disabled(model.busy || model.modules[role]?.installed != true)
+                                    Button("载入配置…") { chooseConfiguration(role) }
+                                        .disabled(model.busy || model.modules[role]?.job != "stopped" || model.modules[role]?.configurationSHA256 == nil)
                                 }
                                 if let observation = model.modules[role] {
                                     Text("进程：\(observation.job) · 配置：\(observation.configuration)")
                                     Text("\(observation.selection) · 运行报告：\(observation.report)")
                                     if let source = observation.source { Text("源码版本：\(source.prefix(12))").font(.caption) }
+                                    if let path = observation.configurationPath { Text(path).font(.caption).textSelection(.enabled) }
+                                    if let digest = observation.configurationSHA256 { Text("配置摘要：\(digest)").font(.caption).textSelection(.enabled) }
                                 }
                                 if let error = model.moduleErrors[role] { Text(error).foregroundColor(.secondary) }
                                 else if model.modules[role] == nil { Text("尚未读取").foregroundColor(.secondary) }
@@ -119,6 +124,18 @@ struct ManagerView: View {
         .onAppear {
             registerReopen { openWindow(id: "manager") }
             model.start()
+        }
+    }
+    private func chooseConfiguration(_ role: String) {
+        let panel = NSOpenPanel()
+        panel.title = "载入 \(role) 配置"
+        panel.message = "选择现有私有 JSON 配置。组件保持停止；校验通过后保存并更新配置引用。"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            model.configure(role, path: url.path)
         }
     }
     private var accessibilityStatus: String {

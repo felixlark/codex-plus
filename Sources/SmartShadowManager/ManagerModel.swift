@@ -59,6 +59,24 @@ import Security
             self.serviceConnection = nil
         }
     }
+    func configure(_ role: String, path: String) {
+        guard !busy, let observed = modules[role], observed.job == "stopped",
+              let expected = observed.configurationSHA256, ManagementProtocol.isDigest(expected) else { return }
+        perform {
+            let service = ServiceControlClient(); self.serviceConnection = service
+            do {
+                self.modules[role] = try await service.configure(role, path: path, expectedSHA256: expected)
+                self.moduleErrors[role] = nil
+                self.message = "\(role)：配置已保存并读回"
+            } catch {
+                self.moduleErrors[role] = error.localizedDescription
+                self.message = "配置写入未确认，请核对当前摘要"
+                let read = ServiceControlClient(); self.serviceConnection = read
+                if let actual = try? await read.inspect(role) { self.modules[role] = actual }
+            }
+            self.serviceConnection = nil
+        }
+    }
     private func acceptSettings(_ result: [String: Any]) throws {
         guard let object = result["settings"] as? [String: Any], let revision = result["settings_revision"] as? String,
               ManagementProtocol.isDigest(revision) else { throw ManagementProtocol.failure("settings_response_unavailable") }
