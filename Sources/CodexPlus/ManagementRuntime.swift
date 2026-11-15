@@ -43,7 +43,6 @@ final class ManagementRuntime {
                 var result = readStatus?() ?? [:]
                 result["permissions"] = ["accessibility": ["trusted": AXIsProcessTrusted(), "bundle_id": identity.bundle_id,
                                                            "path": identity.path, "pid": identity.pid]]
-                result["workspace_request"] = NSNull()
                 return reply(result)
             case .settingsRead:
                 guard let readSettings else { return reply(error: "unsupported") }
@@ -62,9 +61,6 @@ final class ManagementRuntime {
                 try writeSettings(next)
                 let actual = try readSettings()
                 return reply(["settings": try actual.object, "settings_revision": try actual.revision])
-            case .workspaceOpen:
-                // Reserved wire operation; the compact board is not implemented.
-                return reply(error: "unsupported")
             }
         } catch { return reply(error: "settings_unavailable") }
     }

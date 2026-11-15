@@ -20,24 +20,14 @@ final class ManagementProtocolTests: XCTestCase {
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
     }
     func testMutationsRequireExactRuntimeAndSettingsRevision() throws {
-        var value = request("workspace.open")
+        var value = request("settings.write")
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
         value["expected_runtime"] = runtime.uuidString
-        XCTAssertEqual(try ManagementProtocol.Request.parse(value).expectedRuntime, runtime)
-        value = request("settings.write"); value["expected_runtime"] = runtime.uuidString
         value["changes"] = ["workspaceAutoExpand": false]
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
         value["expected_settings_revision"] = try settings().revision
         XCTAssertEqual(try ManagementProtocol.Request.parse(value).changes?["workspaceAutoExpand"] as? Bool, false)
         value["arbitrary_command"] = "never execute"
-        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
-    }
-    func testStatusRequestQueriesOnlyAnExactRuntimeAndOriginalRequestID() throws {
-        var value = request("status"); value["query_request_id"] = UUID().uuidString
-        XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
-        value["expected_runtime"] = runtime.uuidString
-        XCTAssertNotNil(try ManagementProtocol.Request.parse(value).queryID)
-        value["query_request_id"] = "invalid"
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
     }
     func testStrictSettingsTypesAndWhitelistRejectNumericBooleanAndExtraFields() {

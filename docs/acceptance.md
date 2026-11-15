@@ -2,7 +2,7 @@
 
 ## 2026-11-15 精简阶段边界
 
-本批源码已退出完整Codex工作台创建/注入/恢复和管理操作入口，保留只读任务适配器及手机原路径；小看板仍未实现。精简PR不合并、不构建签名包、不安装，现役Plus74/iOS53及原窗口/草稿/unknown冻结保持。此前工作台与手机证据仍归原候选，不能当作精简版运行验收。处置和未来切换前置见[源码精简](workbench-simplification.md)。以下记录为各历史候选的验收事实。
+本批源码已退出完整Codex工作台创建/注入/恢复和管理操作入口，删除无消费者的工作台协议和任务适配器，保留手机原路径；小看板仍未实现。精简PR不合并、不构建签名包、不安装，现役Plus74/iOS53及原窗口/草稿/unknown冻结保持。此前工作台与手机证据仍归原候选，不能当作精简版运行验收。处置和未来切换前置见[源码精简](workbench-simplification.md)。以下记录为各历史候选的验收事实。
 
 ## 2026-11-15 原Codex移动工作流与右屏路由
 
@@ -14,7 +14,7 @@
 - 更早Mac67/iOS50的真实90秒Run中退出/重开独立Manager，原controller/手机/原Run持续，沿其有效候选证据复用；不是对新工作台关闭或所有模块生命周期的全覆盖。
 - 完整122项Node/87项Swift曾通过；本批影响面定向11项移动接缝、8项Core及编译通过，当前PR远端两项CI通过。Mac70曾因OCU先position后resize而停在window-placement-unknown；该失败保留，提供方修复后Mac71真实链路通过，未重复未知消息。
 
-本人Access会话已沿官方cloudflared支持入口实际通过，凭据留工具存储；本人coordination GET发现既有无case分支409，由taskd原负责人修复，不补造case/Run。工作台workspace.open、真实任务看板与后续本人任务决定仍在原#578交付范围，尚未由本批实现，不关闭原案。首条可用与完整验收分开，旧虚拟屏验收仅属历史。
+本人Access会话已沿官方cloudflared支持入口实际通过，凭据留工具存储；本人coordination GET发现既有无case分支409，由taskd原负责人修复，不补造case/Run。该段为原候选的历史范围记录；完整工作台方向已退出，当前只保留小看板与手机宿主需求，具体重做尚未开始。首条可用与完整验收分开，旧虚拟屏验收仅属历史。
 
 本机证据：`~/Library/Logs/codex-plus/mobile-complete-20261115/`中的acceptance.json、各send台账/录像、ios53-M-reconnect-ledger.json、native71-installed-files.json、native71-connected-final.json和native71-management-status.json。私密原会话与凭据不入Git。
 

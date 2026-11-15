@@ -5,7 +5,9 @@
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
 Codex Web App enhancements, workspace observation, settings, the status CLI, and exact placement of Agent-owned windows on the rightmost physical screen. OCU virtual displays and their automatic recovery are retired.
 
-All enhancement entry points, settings, and runtime ownership belong to Codex Plus.
+The native runtime and existing Codex enhancements remain owned here. The independent
+SmartShadow management App provides settings and component status; the small task
+board is not implemented. Preserve the original mobile frontend and its Mac host.
 The page's Codex Plus button is the first item in the lower-left navigation footer;
 the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
 
@@ -33,12 +35,20 @@ affected data, lifecycle, recovery, and acceptance in the feature design. The
 workspace auto-expand feature expands a known closed workspace. Permission grants
 use the user's explicit authorization and official System Settings controls.
 
-One Plus runtime owns Agent-window isolation. Never route tools to a physical monitor,
-move either human Codex window, or claim every window of a utility process. File and
-explicit-window claims use exact system window identity. User Settings and Agent
-Settings are separate windows. Preserve the previous installation for rollback.
+One Plus runtime owns Agent-window routing to the rightmost physical display. Never
+move either human Codex window or claim every window of a utility process. File and
+explicit-window claims use exact system window identity. Preserve the previous
+installation for rollback.
 The result owner completes installed interaction acceptance and closes the delivery
 issue with evidence; wait for personal acceptance only when explicitly required.
+
+The current simplification phase permits only the approved source removals and
+necessary checks. Do not merge, install, deploy, or resume product development.
+Keep the existing installation, phone connection, drafts, and unresolved operations.
+The untracked `docs/designs/compact-task-board.md` is a preserved discussion draft,
+not a current requirement or an implementation instruction. The duplicate Agent
+Settings view still has a ToolWindowRouter consumer; its entry-point decision is
+deferred, so preserve it and the underlying settings callbacks in this phase.
 
 ## 自动交付
 
