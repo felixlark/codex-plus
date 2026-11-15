@@ -264,15 +264,17 @@ export async function adaptSidebar(source, { host = false, resourcePath } = {}) 
     if (initializers.length !== 1 || !contains(owner.body, child =>
       property(child, 'projectGroups') && property(child, 'navigationThreadKeys'))) return;
     const selectionModules = host ? parents.filter(parent => /Function/.test(parent.type) && parent.body?.type === 'BlockStatement')
-      .flatMap(parent => parent.body.body.filter(statement => statement.type === 'VariableDeclaration').flatMap(statement => statement.declarations))
-      .filter(declaration => declaration.id.type === 'Identifier' && declaration.init?.type === 'CallExpression' && declaration.init.arguments[0]?.value === 'RFDv') : [];
+      .flatMap(parent => parent.body.body.filter(statement => statement.type === 'VariableDeclaration').flatMap(statement =>
+        statement.declarations.filter(declaration => declaration.id.type === 'Identifier' && declaration.init?.type === 'CallExpression' && declaration.init.arguments[0]?.value === 'RFDv')
+          .map(declaration => ({name:declaration.id.name,at:statement.end})))) : [];
     candidates.push({ start: call.start, end: call.end, groups: node.left.name, clock: [...clocks][0], owner,
-      selectionModule: selectionModules.length === 1 ? selectionModules[0].id.name : null });
+      selectionModule: selectionModules.length === 1 ? selectionModules[0] : null });
   });
   if (candidates.length !== 1) return { supported: false, reason: 'model-match-count', matches: candidates.length };
   if (layouts.length !== 1) return { supported: false, reason: 'layout-match-count', matches: layouts.length };
   const { owner: modelOwner, ...match } = candidates[0];
-  if (host && !match.selectionModule) return { supported: false, reason: 'native-selection-contract' };
+  const selectionBinding = '__codexPlusSelectedThreadKey';
+  if (host && (!match.selectionModule || source.includes(selectionBinding))) return { supported: false, reason: 'native-selection-contract' };
   const { owner: layoutOwner, ...layout } = layouts[0];
   if (!host && !directFixtureChain(ast, modelOwner, layoutOwner, layout.input, match.groups)) return { supported: false, reason: 'model-layout-data-chain' };
   const clocks = [];
@@ -292,10 +294,12 @@ export async function adaptSidebar(source, { host = false, resourcePath } = {}) 
   // oN is the reviewed native route's thread-key selector. Reading it in this
   // reactive model makes navigation release a deferred read even without a
   // status/timestamp change; the fixture has no native selection module.
-  const selection = host ? `${clock.get}(${match.selectionModule}.oN)` : 'null';
+  // Capture outside the model: its local variables can shadow import aliases.
+  const selection = host ? `${clock.get}(${selectionBinding})` : 'null';
   const replacement = `globalThis.__codexPlusProjectOrder.sort(${source.slice(match.start, match.end)},${match.clock},key=>${clock.get}(${clock.module}.RD,key),key=>${clock.get}(${clock.module}.qM,key),${selection})`;
   let adapted = source;
   const edits = [
+    ...host ? [{start:match.selectionModule.at,end:match.selectionModule.at,replacement:`const ${selectionBinding}=${match.selectionModule.name}.oN;`}] : [],
     { start: match.start, end: match.end, replacement },
     { start: layout.at, end: layout.at, replacement: `,projectOrder:${layout.input}.projectEntries.map(entry=>entry.key)` },
   ];
