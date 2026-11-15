@@ -4,6 +4,12 @@ export function installMobileEndpoint(config, encode, decode) {
   if (globalThis.__codexPlusMobileEndpoint) throw Error('Mobile endpoint already installed');
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
   const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map(), gitRequests = new Map();
+  const requestIDs = new Map();
+  const requestKey = (host, id) => JSON.stringify([host ?? null, typeof id, id]);
+  function forgetRequest(id) {
+    const record = ids.get(id); if (!record) return;
+    ids.delete(id); requestIDs.delete(requestKey(record.host, record.original));
+  }
   const retiredPorts = new Set();
   const rpcTrace = new Map();
   function trace(id, direction, value) {
@@ -70,11 +76,18 @@ export function installMobileEndpoint(config, encode, decode) {
           if (args.length !== 1 || typeof args[0] !== 'string' || !args[0] || gitRequests.has(args[0])) throw Error('Invalid original Git connection');
           gitRequests.set(args[0], {phase: 'pending'});
         }
-        if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request') {
+        if (message.method === 'sendMessageFromView' && ['mcp-request', 'thread-prewarm-start'].includes(args[0]?.type)) {
           const request = args[0].request;
           if (!request || !['string', 'number'].includes(typeof request.id)) throw Error('Invalid original request');
-          const id = `${config.connection}:${++sequence}`; ids.set(id, request.id);
+          const key = requestKey(args[0].hostId, request.id);
+          if (requestIDs.has(key)) throw Error('Original request is still pending');
+          const id = `${config.connection}:${++sequence}`;
+          ids.set(id, {original: request.id, host: args[0].hostId, method: request.method}); requestIDs.set(key, id);
           args = [{...args[0], request: {...request, id}}];
+        } else if (message.method === 'sendMessageFromView' && args[0]?.type === 'mcp-request-abandon') {
+          const id = requestIDs.get(requestKey(args[0].hostId, args[0].requestId));
+          if (!id) { sendValue({kind: 'result', id: message.id, ok: true}, undefined); break; }
+          args = [{...args[0], requestId: id}]; ids.get(id).abandoned = true;
         }
         try {
           const result = await original[message.method](...args);
@@ -157,8 +170,14 @@ export function installMobileEndpoint(config, encode, decode) {
     if (event.source !== null) return;
     if (value.type === 'mcp-response') {
       const id = String(value.message?.id);
-      if (!ids.has(id)) return; // Discard fallback broadcasts from other views.
-      value = {...value, message: {...value.message, id: ids.get(id)}}; ids.delete(id);
+      const record = ids.get(id);
+      if (!record || record.host != null && value.hostId != null && record.host !== value.hostId) return; // Ignore other views' fallback broadcasts.
+      value = {...value, message: {...value.message, id: record.original}}; forgetRequest(id);
+    } else if (value.type === 'mcp-request-delivery') {
+      const id = String(value.update?.delivery?.requestId), record = ids.get(id);
+      if (!record || record.host != null && value.hostId != null && record.host !== value.hostId) return;
+      value = {...value, update: {...value.update, delivery: {...value.update.delivery, requestId: record.original}}};
+      if (value.update.type === 'failed') forgetRequest(id);
     }
     sendValue({kind: 'event'}, value);
   };
@@ -225,7 +244,7 @@ export function installMobileEndpoint(config, encode, decode) {
   function close() {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
-    calls.clear(); ids.clear(); gitRequests.clear(); retiredPorts.clear(); rpcTrace.clear();
+    calls.clear(); ids.clear(); requestIDs.clear(); gitRequests.clear(); retiredPorts.clear(); rpcTrace.clear();
     for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();
@@ -233,6 +252,7 @@ export function installMobileEndpoint(config, encode, decode) {
     window.dispatchEvent(new CustomEvent('codex-plus-mobile-disconnected'));
   }
   globalThis.__codexPlusMobileEndpoint = {connection: config.connection, reportRoute: route => { if (phone) send({kind: 'view-route', route}); }, receive: text => { inbound = inbound.then(() => receive(JSON.parse(text))).catch(fatal); }, close, inspect: () => ({connection: config.connection, closed, ports: ports.size, pendingCalls: calls.size,
+    pendingMcp: [...ids.values()].map(record => typeof record.method === 'string' && /^[a-zA-Z][a-zA-Z0-9_/-]*$/.test(record.method) ? record.method : 'opaque'),
     rpc: [...rpcTrace].map(([id, state]) => ({kind: id === appPort ? 'app' : 'git', replies: state.replies, pending: [...state.pending.values()]}))})};
   window.addEventListener('pagehide', fatal, {once: true});
 }

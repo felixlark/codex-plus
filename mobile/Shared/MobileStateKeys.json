@@ -5,6 +5,7 @@
     "chatgpt-conversation-prompt-drafts-v2",
     "chatgpt-conversation-prompt-drafts-v1",
     "draft-thread-identities-v1",
+    "client-thread-bindings-v1",
     "composer-retained-documents-v1",
     "composer-pull-request-attachment-drafts-v1",
     "composer-response-annotation-drafts-v1",
