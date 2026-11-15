@@ -591,7 +591,7 @@ final class ToolWindowRouter {
                 if let failure {
                     if let documents, let existing, let watch = self.watches[existing.processIdentifier], watch.documents != nil {
                         watch.documents?.subtract(documents)
-                        if watch.documents?.isEmpty == true { self.removeWatch(existing.processIdentifier) }
+                        if !ToolWindowPolicy.retainsObservation(defaultChrome: watch.defaultChrome, documents: watch.documents) { self.removeWatch(existing.processIdentifier) }
                     }
                     if self.lastOpen["id"] as? String == id { self.lastOpen = ["id": id, "state": "failed", "error": failure.localizedDescription] }; return
                 }
