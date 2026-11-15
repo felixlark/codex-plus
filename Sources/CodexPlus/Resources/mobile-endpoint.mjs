@@ -4,6 +4,7 @@ export function installMobileEndpoint(config, encode, decode) {
   if (globalThis.__codexPlusMobileEndpoint) throw Error('Mobile endpoint already installed');
   const phone = config.side === 'phone', original = phone ? null : window.electronBridge;
   const calls = new Map(), ports = new Map(), workers = new Map(), ids = new Map(), gitRequests = new Map();
+  const retiredPorts = new Set();
   let sequence = 0, appPort, closed = false, outbound = Promise.resolve(), inbound = Promise.resolve();
   const binding = phone ? '__codexPlusMobileNativeSend' : '__codexPlusMobileOutbound';
   function send(message) {
@@ -90,6 +91,7 @@ export function installMobileEndpoint(config, encode, decode) {
       case 'worker-unsubscribe': workers.get(message.worker)?.(); workers.delete(message.worker); break;
       case 'worker': if (phone) for (const callback of workers.get(message.worker) ?? []) callback(decode(message.value)); break;
       case 'port-frame': {
+        if (retiredPorts.has(message.id)) break;
         const port = ports.get(message.id); if (!port) throw Error('Unknown mobile port');
         port.postMessage(decode(message.value)); break;
       }
@@ -104,6 +106,7 @@ export function installMobileEndpoint(config, encode, decode) {
         if (value?.type === 'codex_desktop:git-worker-port') {
           const request = gitRequests.get(value.requestId); if (!request || value.closed !== true) break;
           gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+          if (request.id) retiredPorts.add(request.id);
           dispatch(value, [], true);
         } else dispatch(value);
       } break;
@@ -125,6 +128,7 @@ export function installMobileEndpoint(config, encode, decode) {
         send({kind: 'git-port', id, metadata: value}); attachPort(event.ports[0], id);
       } else if (value.closed === true && event.ports.length === 0) {
         gitRequests.delete(value.requestId); ports.get(request.id)?.close(); ports.delete(request.id);
+        if (request.id) retiredPorts.add(request.id);
         sendValue({kind: 'event'}, value);
       } else for (const port of event.ports) port.close();
       return;
@@ -200,7 +204,7 @@ export function installMobileEndpoint(config, encode, decode) {
   function close() {
     if (closed) return; closed = true;
     for (const {reject} of calls.values()) reject(Error('Connection lost; submitted actions have unknown results until reconciled'));
-    calls.clear(); ids.clear(); gitRequests.clear();
+    calls.clear(); ids.clear(); gitRequests.clear(); retiredPorts.clear();
     for (const port of ports.values()) { try { port.postMessage(null); } catch {} port.close(); } ports.clear();
     if (!phone) for (const unsubscribe of workers.values()) unsubscribe();
     workers.clear(); themes.clear(); themeUnsubscribe?.(); restorePostMessage?.();
