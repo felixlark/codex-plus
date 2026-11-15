@@ -1,3 +1,9 @@
+## 小看板正式入口（2026-11-15）
+
+PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartShadow 4.1.0/4101。正式安装入口通过 OCU 打开独立“任务看板”窗口，先正确显示 taskd 的 node_identity_changed；服务修复后手动刷新从真实 taskd971 的原 LocalMcpClient读取登记范围，显示总计1、执行中0、待处理0、已完成0，`felixlark/smart-shadow#611` 已暂停。未把 running/ready 的服务误计为完成任务。
+
+关闭看板返回原管理窗口12292，重开保留真实快照与更新时间。关闭后 Plus35819/host3333/controller36117、手机宿主9769保持，手机connected=1。未操作服务启停。原案链接可见；实际点击跳转及首Run后的动态状态/成果仍待验，Codex独立任务覆盖未交付。私有证据为 `Library/Logs/codex-plus/mobile-complete-20261115/board4101-live-*`。OCU MCP连接故障经同一官方已安装工具的doctor/call入口完成，未改用另一套GUI。
+
 ## 恢复开发后的手机复验（2026-11-15）
 
 现役 Plus74 / iOS53、原签名 Codex26.1111.21308 的配对保持。原 N 会话、未发 O 草稿仍在；新空会话 P 的首次点击只收起键盘，正文保留且未观察到新线程，结果按未确认保留，未重发。
