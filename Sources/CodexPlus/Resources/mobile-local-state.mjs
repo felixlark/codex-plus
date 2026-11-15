@@ -21,7 +21,10 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   function dispatch(data) { window.dispatchEvent(new MessageEvent('message', {data, source: null})); }
   function warning(error) {
     const key = error?.phoneStateKey;
-    void native('local-state-warning', typeof key === 'string' ? {key} : {}).catch(() => {});
+    // Dynamic keys can include a chat identity. Report only their static
+    // protocol prefix, never the suffix or the associated persisted value.
+    const prefix = typeof key === 'string' ? key.split(':')[0] : 'unknown-key';
+    void native('local-state-warning', {key: prefix}).catch(() => {});
   }
   async function commit(change) {
     const next = JSON.parse(JSON.stringify(state));
