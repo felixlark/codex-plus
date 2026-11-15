@@ -1,57 +1,67 @@
 import Foundation
 import CryptoKit
+import Security
 
-// The original persisted-atom protocol uses this phone-only backing store.
-// It is never seeded from the Mac's draft or window-preference state.
+// The phone owns a fresh opaque UI KV, never the Mac's window/draft store.
+// Original atoms can include resume tokens, so the entire atomic snapshot stays
+// in this app's private, non-synchronizing Keychain item, not a plaintext file.
 struct MobileUIState {
     let identity: String
+    private var account: String { SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined() }
+    private var query: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "me.longbiaochen.codex-plus.mobile.ui-state.v1",
+         kSecAttrAccount as String: account,
+         kSecAttrSynchronizable as String: false]
+    }
     private func validated(_ input: Any) throws -> [String: Any] {
         guard let state = input as? [String: Any], Set(state.keys) == Set(["atoms", "application"]),
-              let atoms = state["atoms"] as? [String: Any], let application = state["application"] as? [String: Any],
-              let file = Bundle.main.url(forResource: "MobileStateKeys", withExtension: "json"),
-              let keys = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: [String]],
-              atoms.keys.allSatisfy({ key in
-                  (keys["atoms"] ?? []).contains(key) || (keys["atomPrefixes"] ?? []).contains(where: { prefix in
-                      key.hasPrefix(prefix) && String(key.dropFirst(prefix.count)).range(of: #"^[a-zA-Z0-9_-]+$"#, options: .regularExpression) != nil
-                  }) || (keys["projectExpansionAtomPrefixes"] ?? []).contains(where: { prefix in
-                      guard key.hasPrefix(prefix) else { return false }
-                      let project = String(key.dropFirst(prefix.count))
-                      guard project.hasPrefix("executor-folder:") else { return !project.isEmpty }
-                      guard let bytes = String(project.dropFirst("executor-folder:".count)).data(using: .utf8),
-                            let scope = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
-                      return scope.count == 2
-                  }) || (keys["identityPathAtomPrefixes"] ?? []).contains(where: { prefix in
-                      guard key.hasPrefix(prefix) else { return false }
-                      let ids = key.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
-                      return ids.count == 2 && ids.allSatisfy { !$0.isEmpty && String($0).removingPercentEncoding?.isEmpty == false }
-                  }) || (keys["identityColonAtomPrefixes"] ?? []).contains(where: { prefix in
-                      guard key.hasPrefix(prefix) else { return false }
-                      let ids = key.dropFirst(prefix.count).split(separator: ":", omittingEmptySubsequences: false)
-                      return ids.count == 2 && ids.allSatisfy({ !$0.isEmpty })
-                  }) || [("identityAtomPrefixes", 2), ("identityTripleAtomPrefixes", 3)].contains(where: { group, count in
-                      (keys[group] ?? []).contains(where: { prefix in
-                          guard key.hasPrefix(prefix), let bytes = String(key.dropFirst(prefix.count)).data(using: .utf8),
-                                let ids = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
-                          return ids.count == count && ids.allSatisfy({ !$0.isEmpty })
-                      })
-                  })
-              }), Set(application.keys).isSubset(of: Set(keys["application"] ?? [])),
+              state["atoms"] is [String: Any], state["application"] is [String: Any],
               JSONSerialization.isValidJSONObject(state) else { throw NSError(domain: "MobileUIState", code: 1) }
         return state
     }
-    private func file() throws -> URL {
-        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("CodexMobileUI", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let name = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
-        return root.appendingPathComponent(name + ".json")
+    private func stored() throws -> Data? {
+        var request = query
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw NSError(domain: "MobileUIKeychain", code: Int(status == errSecSuccess ? errSecDecode : status))
+        }
+        return data
+    }
+    private func store(_ data: Data) throws {
+        let start = ProcessInfo.processInfo.systemUptime
+        let attributes: [String: Any] = [kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(query.merging(attributes) { _, value in value } as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw NSError(domain: "MobileUIKeychain", code: Int(status)) }
+        NSLog("CodexMobile state committed: bytes=%d elapsedMs=%.2f", data.count,
+              (ProcessInfo.processInfo.systemUptime - start) * 1000)
     }
     func read() throws -> [String: Any] {
-        let url = try file()
-        guard FileManager.default.fileExists(atPath: url.path) else { return ["atoms": [:], "application": [:]] }
-        return try validated(JSONSerialization.jsonObject(with: Data(contentsOf: url)))
+        if let data = try stored() { return try validated(JSONSerialization.jsonObject(with: data)) }
+        // Only an absent Keychain item permits one-way migration of this app's
+        // same-identity legacy UI file. Locked/error/corrupt state never falls
+        // back to a stale file or fabricates an empty successful result.
+        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: false).appendingPathComponent("CodexMobileUI", isDirectory: true)
+        let legacy = root.appendingPathComponent(account + ".json")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return ["atoms": [:], "application": [:]] }
+        let state = try validated(JSONSerialization.jsonObject(with: Data(contentsOf: legacy)))
+        let data = try JSONSerialization.data(withJSONObject: state)
+        try store(data)
+        guard try stored() == data else { throw NSError(domain: "MobileUIKeychain", code: Int(errSecDecode)) }
+        // Keep the previous allowlisted, non-secret file as a rollback artifact;
+        // no subsequent operation writes it or falls back to it on errors.
+        return state
     }
     func write(_ value: Any) throws {
-        let state = try validated(value)
-        try JSONSerialization.data(withJSONObject: state).write(to: file(), options: .atomic)
+        try store(JSONSerialization.data(withJSONObject: validated(value)))
     }
 }

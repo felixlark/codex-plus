@@ -99,7 +99,11 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
                         guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NSError(domain: "Mobile", code: 4) }
                         if envelope["kind"] as? String == "bootstrap" { try self.loadOriginal(envelope, epoch) }
                         else if self.ready { self.deliver(text, epoch) } else { self.pending.append(text) }
-                    } catch { self.disconnect("原界面连接初始化失败，未重试操作。", epoch); return }
+                    } catch {
+                        let failure = error as NSError
+                        NSLog("CodexMobile bootstrap failed: %@ %d", failure.domain, failure.code)
+                        self.disconnect("原界面连接初始化失败，未重试操作。", epoch); return
+                    }
                 }
                 self.receive(connection, epoch)
             }
@@ -115,12 +119,10 @@ final class MobileController: UIViewController, WKScriptMessageHandler, WKNaviga
         self.connectionID = connectionID
         var localBootstrap = bootstrap
         localBootstrap["localState"] = try MobileUIState(identity: routeKey).read()
-        let encoded = try JSONSerialization.data(withJSONObject: localBootstrap)
-        let literal = String(data: encoded, encoding: .utf8)!
         let source = try String(contentsOf: Bundle.main.url(forResource: "mobile-preload", withExtension: "js")!, encoding: .utf8)
         let controller = WKUserContentController()
         for name in ["native", "diagnostic", "lifecycle"] { controller.add(self, name: name) }
-        controller.addUserScript(WKUserScript(source: "globalThis.__codexPlusMobileBootstrap=\(literal);\n" + source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(WKUserScript(source: try MobileBootstrapScript.make(localBootstrap, preload: source), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let config = WKWebViewConfiguration(); config.userContentController = controller
         config.setURLSchemeHandler(LocalAssets(), forURLScheme: "app")
         let web = WKWebView(frame: .zero, configuration: config); self.web = web; webGeneration = epoch

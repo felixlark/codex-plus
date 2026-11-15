@@ -4,7 +4,6 @@ import fs from 'node:fs/promises';
 import {selectMobileServices} from '../Sources/CodexPlus/Resources/mobile-services.mjs';
 import {installMobileLocalState} from '../Sources/CodexPlus/Resources/mobile-local-state.mjs';
 import {openAsar} from '../scripts/inspect-sidebar-model.mjs';
-const keys = JSON.parse(await fs.readFile(new URL('../mobile/Shared/MobileStateKeys.json', import.meta.url)));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 async function rpcLibrary(t) {
   try { await fs.access('/Applications/ChatGPT.app/Contents/Resources/app.asar'); }
@@ -27,7 +26,7 @@ function setup({rejectSave = () => false} = {}) {
   window.addEventListener('message', event => events.push(event.data));
   globalThis.window = window; globalThis.document = {title: 'Phone'};
   globalThis.__codexPlusMobileBootstrap = {connection: 'phone-epoch'};
-  installMobileLocalState({atoms: {}, application: {}}, keys, selectMobileServices);
+  installMobileLocalState({atoms: {}, application: {}}, selectMobileServices);
   return {messages, events, api: globalThis.__codexPlusMobileLocal, cleanup() { globalThis.__codexPlusMobileLocal.close(); globalThis.window = oldWindow; globalThis.document = oldDocument; delete globalThis.__codexPlusMobileLocal; }};
 }
 
@@ -87,85 +86,71 @@ test('a rejected atomic write is neither published nor carried into the next com
   } finally { f.cleanup(); }
 });
 
-test('reviewed per-thread activity and account-scoped profile keys persist while malformed identities are rejected', async () => {
+test('complete phone KV persists prior failed UI keys and opaque Unicode names without prototype mutation', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup();
+  const module = {appServices: {projectCatalog: {readLocalProjects: () => [], readRemoteProjects: () => []}}, setAppServices(value) { this.appServices = value; }};
+  try {
+    await f.api.install(module, rpc, (base, update) => ({...(base ?? {}), ...update.entries}));
+    const names = ['has-dismissed-priority-filter-coachmark-v1', 'legacy-cloud-settings-environments-v1', 'chatgpt-search-results-v2', 'aeon-last-activity-v1:thread', 'aeon-appearance-v2:thread', 'sidebar-project-expanded-v1-codex:executor-folder:["e","p"]', 'chatgpt-work-models-v1/a/b', 'chatgpt-conversation-resume-tokens-v1', 'future-ui-key 中文🙂', '__proto__', 'constructor', ''];
+    for (const key of names) f.api.handleMessage({type: 'persisted-atom-update', key, value: {own: true}});
+    f.api.handleMessage({type: 'persisted-atom-sync-request'});
+    await flush(); await flush(); await flush();
+    const synced = f.events.at(-1).state;
+    for (const key of names) { assert.equal(Object.hasOwn(synced, key), true); assert.deepEqual(synced[key], {own: true}); }
+    assert.equal(Object.getPrototypeOf(synced), Object.prototype); assert.equal({}.own, undefined);
+    assert.equal(f.messages.some(m => m.operation === 'local-state-warning'), false);
+    await module.appServices.applicationState.write('__proto__', {safe: true});
+    assert.deepEqual((await module.appServices.applicationState.read('__proto__')).value, {safe: true});
+    await module.appServices.applicationState.write('future-application-setting', 'own');
+    assert.equal((await module.appServices.applicationState.read('future-application-setting')).value, 'own');
+  } finally { f.cleanup(); }
+});
+
+test('original unread and non-primary tab state messages are ignored without saving or ACK', async () => {
   const f = setup();
   try {
-    const entries = [
-      ['aeon-last-activity-v1:thread-id', 123456],
-      ['aeon-appearance-v2:thread-id', {avatar: 'sunglasses', color: 'blue'}],
-      ['cloud-aeon-profiles-v1:["account","user"]', {profile: {id: 'own-profile'}, status: 'available'}],
-    ];
-    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
-    await flush(); await flush(); await flush();
-    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
-    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
-    for (const key of ['cloud-aeon-profiles-v1:[]', 'cloud-aeon-profiles-v1:["a",1]', 'cloud-aeon-profiles-v1:["a",""]', 'cloud-aeon-profiles-v1:{"token":"PRIVATE"}']) {
-      f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
-    }
+    for (const key of ['unread-thread-ids-by-host-v1', 'thread-browser-tabs-v1:thread', 'thread-tab-routes-v1:thread', 'page-sidebar-expansion-v1']) assert.equal(f.api.handleMessage({type: 'persisted-atom-update', key, value: {own: true}}).handled, true);
     await flush(); await flush();
-    const warnings = f.messages.filter(m => m.operation === 'local-state-warning');
-    assert.equal(warnings.length, 4);
-    assert.ok(warnings.every(m => m.key === 'cloud-aeon-profiles-v1'));
-    assert.equal(JSON.stringify(warnings).includes('PRIVATE'), false);
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, 3);
+    assert.deepEqual(f.messages, []); assert.deepEqual(f.events, []);
   } finally { f.cleanup(); }
 });
 
-test('model cache uses exactly two encoded identity segments and personal history stays phone-local', async () => {
-  const f = setup();
+test('original cloud replacement guard rejects stale results with current-value feedback before record reduction', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(); let reductions = 0;
+  const module = {appServices: {projectCatalog: {readLocalProjects: () => [], readRemoteProjects: () => []}}, setAppServices(value) { this.appServices = value; }};
   try {
-    const entries = [
-      ['chatgpt-work-models-v1/user%2Fid/account', {fetchedAt: 123, response: {models: [{slug: 'real-model'}]}}],
-      ['prompt-history', {global: [{plain: '中文🙂', document: {type: 'doc'}}]}],
-      ['thread-user-activity-times-v1', {'["local","thread"]': 123}],
-      ['thread-descriptions-v1', {thread: 'own chat summary'}],
-    ];
-    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
-    await flush(); await flush(); await flush();
-    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
-    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
-    for (const key of ['chatgpt-work-models-v1/', 'chatgpt-work-models-v1/a', 'chatgpt-work-models-v1/a/', 'chatgpt-work-models-v1/a/b/c', 'chatgpt-work-models-v1/%GG/b', 'chatgpt-work-models-v1/%ED%A0%80/b', 'chatgpt-work-models-v1/\uD800/b', 'prompt-history-extra']) {
-      f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
-    }
-    await flush(); await flush(); await flush();
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, entries.length);
-    const warnings = f.messages.filter(m => m.operation === 'local-state-warning');
-    assert.equal(warnings.length, 8);
-    assert.ok(warnings.slice(0,7).every(m => m.key === 'chatgpt-work-models-v1'));
-    assert.equal(JSON.stringify(warnings).includes('PRIVATE'), false);
+    await f.api.install(module, rpc, (base, update) => { reductions++; return {...base, ...update.entries}; });
+    const key = 'cloud-aeon-sidebar-cache-v1', initial = {accountId: 'a', userId: 'u', hostId: 'h', revision: 'r1', refreshStartedAtMs: 10};
+    const set = async value => { f.api.handleMessage({type: 'persisted-atom-update', key, value}); await flush(); await flush(); };
+    await set(initial);
+    const count = () => f.messages.filter(m => m.operation === 'local-state-save').length;
+    await set({...initial, refreshStartedAtMs: 9}); assert.equal(count(), 1); assert.deepEqual(f.events.at(-1).value, initial);
+    await set({...initial, revision: 'r2', refreshStartedAtMs: 11}); assert.equal(count(), 1);
+    await set({...initial, refreshStartedAtMs: 11}); assert.equal(count(), 2);
+    await set({...initial, revision: 'r2', removalBaseRevision: 'r1', refreshStartedAtMs: 10}); assert.equal(count(), 2);
+    await set({...initial, revision: 'r2', removalBaseRevision: 'r1', refreshStartedAtMs: 11}); assert.equal(count(), 3);
+    f.api.handleMessage({type: 'persisted-atom-update', key, recordUpdate: {entries: {refreshStartedAtMs: 12}}}); await flush(); await flush();
+    assert.equal(reductions, 1); assert.equal(count(), 4);
+    await set({...initial, userId: 'other'}); assert.equal(count(), 5);
+    await set({legacyShape: true}); assert.equal(count(), 6);
+    f.api.handleMessage({type: 'persisted-atom-update', key, deleted: true}); await flush(); await flush();
+    assert.equal(count(), 7); assert.equal(f.events.at(-1).deleted, true);
   } finally { f.cleanup(); }
 });
 
-test('only reviewed repository and Space metadata seed formats persist', async () => {
-  const f = setup();
+test('record updates without a legacy key never borrow an atom named undefined or null', async t => {
+  const rpc = await rpcLibrary(t); if (!rpc) return;
+  const f = setup(), seen = [];
+  const module = {appServices: {projectCatalog: {readLocalProjects: () => [], readRemoteProjects: () => []}}, setAppServices(value) { this.appServices = value; }};
   try {
-    const entries = [
-      ['query-seed:cloud-v2-environment-repository-v1:["account","user","repo:one"]', {repository_full_name: 'own/repo'}],
-      ['query-seed:space-list-v2:user:account', {items: [{id: 'space'}]}],
-      ['query-seed:space-pages-v1:user:account', {items: [{id: 'page'}]}],
-    ];
-    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
+    await f.api.install(module, rpc, (base, update) => { seen.push(base); return {...base, ...update.entries}; });
+    for (const key of ['undefined', 'null']) f.api.handleMessage({type: 'persisted-atom-update', key, value: {wrong: true}});
+    f.api.handleMessage({type: 'persisted-atom-update', key: 'own-record', recordUpdate: {entries: {one: true}}});
+    f.api.handleMessage({type: 'persisted-atom-update', key: 'other-record', recordUpdate: {legacyStorageKey: null, entries: {two: true}}});
     await flush(); await flush(); await flush();
-    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
-    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
-    for (const key of ['query-seed:cloud-v2-environment-repository-v1:["a","u"]', 'query-seed:cloud-v2-environment-repository-v1:["a","u",1]', 'query-seed:cloud-v2-environment-repository-v1:["a","u",""]', 'query-seed:space-list-v2:u', 'query-seed:space-pages-v1:u:a:extra', 'query-seed:space-pages-v1:u:', 'query-seed:browser-environments-v1:["a","u"]', 'query-seed:unknown:u:a']) f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
-    await flush(); await flush(); await flush();
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, entries.length);
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-warning').length, 8);
-  } finally { f.cleanup(); }
-});
-
-test('Codex project expansion keeps the original executor-folder identity reduction', async () => {
-  const f = setup();
-  try {
-    const valid = ['sidebar-project-expanded-v1-codex:project:original', 'sidebar-project-expanded-v1-codex:executor-folder:["environment","/own/project"]', 'sidebar-project-expanded-v1-codex:executor-folder:["",""]'];
-    for (const key of valid) f.api.handleMessage({type: 'persisted-atom-update', key, value: true});
-    await flush(); await flush(); await flush();
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, valid.length);
-    for (const key of ['sidebar-project-expanded-v1-codex:', 'sidebar-project-expanded-v1-codex:executor-folder:[]', 'sidebar-project-expanded-v1-codex:executor-folder:["e",1]', 'sidebar-project-expanded-v1-codex:executor-folder:["e","p","a","u"]', 'sidebar-project-expanded-v1-chatgpt:project']) f.api.handleMessage({type: 'persisted-atom-update', key, value: true});
-    await flush(); await flush(); await flush();
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, valid.length);
-    assert.equal(f.messages.filter(m => m.operation === 'local-state-warning').length, 5);
+    assert.deepEqual(seen, [undefined, undefined]);
   } finally { f.cleanup(); }
 });
 

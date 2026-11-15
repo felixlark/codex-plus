@@ -10,11 +10,10 @@ import {selectMobileServices} from '../Sources/CodexPlus/Resources/mobile-servic
 import {mobileDiagnostic} from '../Sources/CodexPlus/Resources/mobile-diagnostics.mjs';
 const cache = path.join(os.homedir(), 'Library/Caches/codex-plus/mobile');
 await fs.mkdir(cache, {recursive: true});
-const stateKeys = JSON.parse(await fs.readFile(new URL('../mobile/Shared/MobileStateKeys.json', import.meta.url), 'utf8'));
 const source = `(()=>{
 const encode=${encodeMobileValue.toString()}, decode=${decodeMobileValue.toString()};
 const b=globalThis.__codexPlusMobileBootstrap;
-(${installMobileLocalState.toString()})(b.localState,${JSON.stringify(stateKeys)},${selectMobileServices.toString()});
+(${installMobileLocalState.toString()})(b.localState,${selectMobileServices.toString()});
 globalThis.__codexPlusMobileNativeSend=text=>window.webkit.messageHandlers.native.postMessage(text);
 (${installMobileEndpoint.toString()})({side:'phone',connection:b.connection,hostVersion:b.hostVersion,snapshot:decode(b.snapshot)},encode,decode);
 globalThis.__codexPlusMobileLifecycle = {routeChanged(location) {

@@ -1,41 +1,39 @@
 // Phone UI state has one local owner. Mac drafts, selection and window state
 // never seed this store and are never overwritten by these messages.
-export function installMobileLocalState(bootstrap, keys, selectServices) {
+export function installMobileLocalState(bootstrap, selectServices) {
   let state = bootstrap ?? {atoms: {}, application: {}}, sequence = 0, updateRecord;
   let recordReady;
   const configured = new Promise(resolve => { recordReady = resolve; });
   const pending = new Map();
-  const atomKeys = new Set(keys.atoms), applicationKeys = new Set(keys.application);
-  function allowedAtom(key) {
+  const own = (object, key) => Object.hasOwn(object, key) ? object[key] : undefined;
+  function validKey(key) {
     if (typeof key !== 'string') return false;
-    if (atomKeys.has(key) || (keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) return true;
-    if ((keys.projectExpansionAtomPrefixes ?? []).some(prefix => {
-      if (!key.startsWith(prefix)) return false;
-      const project = key.slice(prefix.length);
-      try {
-        if (!project.startsWith('executor-folder:')) { encodeURIComponent(project); return project.length > 0; }
-        const scope = JSON.parse(project.slice('executor-folder:'.length));
-        return Array.isArray(scope) && scope.length === 2 && scope.every(value => typeof value === 'string' && encodeURIComponent(value) !== undefined);
-      }
-      catch { return false; }
-    })) return true;
-    if ((keys.identityPathAtomPrefixes ?? []).some(prefix => {
-      if (!key.startsWith(prefix)) return false;
-      const ids = key.slice(prefix.length).split('/');
-      try { return ids.length === 2 && ids.every(id => { const decoded = decodeURIComponent(id); encodeURIComponent(decoded); return id.length > 0 && decoded.length > 0; }); }
-      catch { return false; }
-    })) return true;
-    if ((keys.identityColonAtomPrefixes ?? []).some(prefix => {
-      if (!key.startsWith(prefix)) return false;
-      const ids = key.slice(prefix.length).split(':');
-      try { return ids.length === 2 && ids.every(id => id.length > 0 && encodeURIComponent(id).length > 0); }
-      catch { return false; }
-    })) return true;
-    return [[keys.identityAtomPrefixes ?? [], 2], [keys.identityTripleAtomPrefixes ?? [], 3]].some(([prefixes, count]) => prefixes.some(prefix => {
-      if (!key.startsWith(prefix)) return false;
-      try { const ids = JSON.parse(key.slice(prefix.length)); return Array.isArray(ids) && ids.length === count && ids.every(id => typeof id === 'string' && id.length > 0 && encodeURIComponent(id).length > 0); }
-      catch { return false; }
-    }));
+    try { encodeURIComponent(key); return true; } catch { return false; }
+  }
+  function put(object, key, value) {
+    Object.defineProperty(object, key, {value, writable: true, enumerable: true, configurable: true});
+  }
+  // Same exceptions as the pinned original host: this phone is not the Mac's
+  // primary tab-persistence owner. Actual unread state uses threadReadState.
+  function ignoredAtom(key) {
+    return key === 'unread-thread-ids-by-host-v1' || key === 'page-sidebar-expansion-v1'
+      || key.startsWith('thread-browser-tabs-v1:') || key.startsWith('thread-tab-routes-v1:');
+  }
+  function cacheRevision(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return typeof value.accountId === 'string' && (typeof value.userId === 'string' || value.userId === null)
+      && typeof value.hostId === 'string' && (typeof value.revision === 'string' || value.revision === null)
+      && (value.refreshStartedAtMs === undefined || typeof value.refreshStartedAtMs === 'number' && Number.isFinite(value.refreshStartedAtMs))
+      && (value.removalBaseRevision === undefined || value.removalBaseRevision === null || typeof value.removalBaseRevision === 'string');
+  }
+  function acceptsReplacement(key, old, incoming) {
+    // Original 71817/erC guard precedes its record reducer. Undefined raw value
+    // from recordUpdate intentionally bypasses whole-cache revision comparison.
+    if (key !== 'cloud-aeon-sidebar-cache-v1' || incoming == null || !cacheRevision(old) || !cacheRevision(incoming)) return true;
+    if (old.accountId !== incoming.accountId || old.userId !== incoming.userId || old.hostId !== incoming.hostId) return true;
+    return incoming.removalBaseRevision !== undefined
+      ? incoming.removalBaseRevision === old.revision && incoming.refreshStartedAtMs === old.refreshStartedAtMs
+      : incoming.revision === old.revision && (incoming.refreshStartedAtMs ?? 0) > (old.refreshStartedAtMs ?? 0);
   }
   let updates = Promise.resolve();
   function enqueue(operation) {
@@ -50,13 +48,10 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     });
   }
   function dispatch(data) { window.dispatchEvent(new MessageEvent('message', {data, source: null})); }
-  function warning(error) {
-    const key = error?.phoneStateKey;
-    // Dynamic keys can include a chat identity. Report only their static
-    // protocol prefix, never the suffix or the associated persisted value.
-    const identityPath = typeof key === 'string' && (keys.identityPathAtomPrefixes ?? []).find(prefix => key.startsWith(prefix));
-    const prefix = identityPath ? identityPath.slice(0, -1) : typeof key === 'string' ? key.split(':')[0] : 'unknown-key';
-    void native('local-state-warning', {key: prefix}).catch(() => {});
+  function warning() {
+    // Opaque original keys can themselves contain identities. Native logs only
+    // OSStatus, byte count/timing and this static label, never keys or values.
+    void native('local-state-warning', {key: 'phone-kv'}).catch(() => {});
   }
   async function commit(change) {
     const next = JSON.parse(JSON.stringify(state));
@@ -67,26 +62,31 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   }
   async function update(message) {
     const key = message.key;
-    if (!allowedAtom(key)) {
-      const error = Error('Unsupported phone atom key'); error.phoneStateKey = key; throw error;
+    if (!validKey(key)) {
+      const error = Error('Invalid phone atom key'); error.phoneStateKey = key; throw error;
     }
     if (message.recordUpdate) await configured;
+    const current = own(state.atoms, key);
+    if (!acceptsReplacement(key, current, message.value)) {
+      dispatch({type: 'persisted-atom-updated', key, value: current, deleted: false}); return;
+    }
     let next;
     try {
       next = await commit(next => {
-        if (message.recordUpdate) next.atoms[key] = updateRecord(next.atoms[key] ?? next.atoms[message.recordUpdate.legacyStorageKey], message.recordUpdate);
+        if (message.recordUpdate) put(next.atoms, key, updateRecord(own(next.atoms, key) ?? (message.recordUpdate.legacyStorageKey == null ? undefined : own(next.atoms, message.recordUpdate.legacyStorageKey)), message.recordUpdate));
         else if (message.deleted) delete next.atoms[key];
-        else next.atoms[key] = message.value;
+        else put(next.atoms, key, message.value);
       });
     } catch (error) { error.phoneStateKey = key; throw error; }
     dispatch({type: 'persisted-atom-updated', key, value: message.deleted ? null : next.atoms[key], deleted: !!message.deleted});
   }
   function handleMessage(message) {
     if (message?.type === 'persisted-atom-sync-request') {
-      queueMicrotask(() => dispatch({type: 'persisted-atom-sync', state: JSON.parse(JSON.stringify(state.atoms)), canWritePrimaryWindowTabPersistence: false}));
+      enqueue(() => dispatch({type: 'persisted-atom-sync', state: JSON.parse(JSON.stringify(state.atoms)), canWritePrimaryWindowTabPersistence: false}));
       return {handled: true};
     }
     if (message?.type === 'persisted-atom-update') {
+      if (typeof message.key === 'string' && ignoredAtom(message.key)) return {handled: true};
       enqueue(() => update(message)); return {handled: true};
     }
     if (message?.type === 'persisted-atom-reset') {
@@ -105,11 +105,11 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     updateRecord = applyRecordUpdate; recordReady();
     const original = module.appServices;
     class ApplicationState extends rpc.TF {
-      read(key) { return {value: applicationKeys.has(key) && Object.hasOwn(state.application, key) ? state.application[key] : undefined}; }
+      async read(key) { await updates.catch(() => {}); return {value: validKey(key) ? own(state.application, key) : undefined}; }
       async write(key, value) {
-        if (!applicationKeys.has(key)) throw Error(`Unsupported phone application state: ${key}`);
+        if (!validKey(key)) throw Error('Invalid phone application state key');
         await enqueue(async () => {
-          try { return await commit(next => { next.application[key] = value; }); }
+          try { return await commit(next => { put(next.application, key, value); }); }
           catch (error) { error.phoneStateKey = key; throw error; }
         });
         dispatch({type: 'global-state-updated', keys: [key]}); return {success: true};
@@ -132,7 +132,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
     class ProjectCatalog extends rpc.TF {
       readLocalProjects() { return original.projectCatalog.readLocalProjects(); }
       readRemoteProjects() { return original.projectCatalog.readRemoteProjects(); }
-      readSelection() { return application.read('selected-project').value; }
+      async readSelection() { return (await application.read('selected-project')).value; }
     }
     class WindowTitle extends rpc.TF { setTitle(title) { document.title = title ?? 'Codex'; } }
     class WindowNavigation extends rpc.TF {
