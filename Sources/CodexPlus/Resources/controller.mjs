@@ -307,7 +307,7 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
-  workbench=new Workbench({cdp,command,sessions,hostPID:state.pid,previous:previousState,persist:async()=>{state.workbench=workbench.status();await publish();},requestPlacement:request=>process.stdout.write(JSON.stringify({type:'workbench-window-request',version:1,...request})+'\n')});state.workbench=workbench.status();
+  workbench=new Workbench({cdp,command,sessions,hostPID:state.pid,supported:mobileSupported&&humanNativeSupported,previous:previousState,persist:async()=>{state.workbench=workbench.status();await publish();},requestPlacement:request=>process.stdout.write(JSON.stringify({type:'workbench-window-request',version:1,...request})+'\n')});state.workbench=workbench.status();
   try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){

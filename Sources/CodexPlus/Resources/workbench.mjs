@@ -15,8 +15,8 @@ const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-
 export function validWorkbenchRequest(value) { return value?.version === 1 && uuid(value.request_id) && uuid(value.origin_runtime); }
 
 export class Workbench {
-  constructor({cdp, command, sessions, hostPID, previous, requestPlacement, persist, client = new TaskWorkspaceClient()}) {
-    Object.assign(this, {cdp, command, sessions, hostPID, requestPlacement, persist, client});
+  constructor({cdp, command, sessions, hostPID, previous, requestPlacement, persist, supported = true, client = new TaskWorkspaceClient()}) {
+    Object.assign(this, {cdp, command, sessions, hostPID, requestPlacement, persist, supported, client});
     this.requests = new Map(); this.instance = randomUUID(); this.allowedRuns = new Set(); this.busy = false; this.stopped = false;
     if (previous?.workbench?.protocol === 1) {
       for (const request of previous.workbench.requests ?? []) if (validWorkbenchRequest({...request, version: 1})) this.requests.set(request.request_id, {...request, phase: ['closed', 'failed'].includes(request.phase) ? request.phase : 'unknown'});
@@ -29,12 +29,12 @@ export class Workbench {
     }
   }
   status() {
-    return {protocol: 1, window: this.window ?? null, requests: [...this.requests.values()].map(r => ({...r,
+    return {protocol: 1, supported: this.supported, window: this.window ?? null, requests: [...this.requests.values()].map(r => ({...r,
       ...r.nonce === this.window?.nonce ? {target: this.window.targetId ?? null, window: this.window.windowID ?? null, phase: this.window.phase} : {},
     }))};
   }
   open(message) {
-    if (this.stopped || !validWorkbenchRequest(message) || this.requests.has(message.request_id)) return;
+    if (this.stopped || !this.supported || !validWorkbenchRequest(message) || this.requests.has(message.request_id)) return;
     if (!this.window || ['closed', 'failed'].includes(this.window.phase)) {
       if (this.window) for (const request of this.requests.values()) if (request.nonce === this.window.nonce) request.phase = this.window.phase;
       this.window = {nonce: randomUUID(), instance: this.instance, phase: 'requested', targetId: null, windowID: null};
@@ -60,7 +60,7 @@ export class Workbench {
     else if (message.phase === 'unknown') w.phase = 'unknown';
   }
   async tick() {
-    if (this.busy || this.stopped || !this.window || ['closed', 'failed'].includes(this.window.phase)) return;
+    if (this.busy || this.stopped || !this.supported || !this.window || ['closed', 'failed'].includes(this.window.phase)) return;
     this.busy = true;
     try {
       const w = this.window;

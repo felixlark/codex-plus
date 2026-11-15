@@ -33,6 +33,14 @@ test('owned workbench marker never participates in human windows or numbers', ()
   assert.equal(workbenchMarker('https://example.org/index.html?codexPlusWorkbench=' + nonce), null);
 });
 
+test('unreviewed original host resources cannot dispatch a workbench creation', async () => {
+  const f = fixture(); f.workbench.supported = false;
+  f.workbench.open(open()); await f.workbench.tick();
+  assert.equal(f.workbench.status().supported, false);
+  assert.equal(f.workbench.status().requests.length, 0);
+  assert.equal(f.events.length, 0);
+});
+
 test('native creation and layout effects follow durable nonce and CG capture, never ACK alone', async () => {
   const f = fixture(), request = open(); f.workbench.open(request); f.workbench.open(request);
   await f.workbench.tick();

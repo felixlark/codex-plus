@@ -118,6 +118,7 @@ final class CodexLauncher: ObservableObject {
               (snapshot["controllerPID"] as? NSNumber)?.int32Value == controller.processIdentifier,
               snapshot["phase"] as? String == "active", ownedHost() != nil,
               (snapshot["workbench"] as? [String: Any])?["protocol"] as? Int == 1,
+              (snapshot["workbench"] as? [String: Any])?["supported"] as? Bool == true,
               let input = controllerInput, let runtimeInstance else { return false }
         let request: [String: Any] = ["request_id": requestID.uuidString, "origin_runtime": runtimeInstance.uuidString, "phase": "requested"]
         workbenchRequests[requestID] = request; latestWorkbenchRequest = requestID
