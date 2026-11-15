@@ -13,6 +13,10 @@ struct MobileUIState {
               atoms.keys.allSatisfy({ key in
                   (keys["atoms"] ?? []).contains(key) || (keys["atomPrefixes"] ?? []).contains(where: { prefix in
                       key.hasPrefix(prefix) && String(key.dropFirst(prefix.count)).range(of: #"^[a-zA-Z0-9_-]+$"#, options: .regularExpression) != nil
+                  }) || (keys["identityAtomPrefixes"] ?? []).contains(where: { prefix in
+                      guard key.hasPrefix(prefix), let bytes = String(key.dropFirst(prefix.count)).data(using: .utf8),
+                            let ids = try? JSONSerialization.jsonObject(with: bytes) as? [String] else { return false }
+                      return ids.count == 2 && ids.allSatisfy({ !$0.isEmpty })
                   })
               }), Set(application.keys).isSubset(of: Set(keys["application"] ?? [])),
               JSONSerialization.isValidJSONObject(state) else { throw NSError(domain: "MobileUIState", code: 1) }

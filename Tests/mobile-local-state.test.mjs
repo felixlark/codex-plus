@@ -87,6 +87,30 @@ test('a rejected atomic write is neither published nor carried into the next com
   } finally { f.cleanup(); }
 });
 
+test('reviewed per-thread activity and account-scoped profile keys persist while malformed identities are rejected', async () => {
+  const f = setup();
+  try {
+    const entries = [
+      ['aeon-last-activity-v1:thread-id', 123456],
+      ['aeon-appearance-v2:thread-id', {avatar: 'sunglasses', color: 'blue'}],
+      ['cloud-aeon-profiles-v1:["account","user"]', {profile: {id: 'own-profile'}, status: 'available'}],
+    ];
+    for (const [key, value] of entries) f.api.handleMessage({type: 'persisted-atom-update', key, value});
+    await flush(); await flush(); await flush();
+    const saved = f.messages.filter(m => m.operation === 'local-state-save').at(-1).state;
+    for (const [key, value] of entries) assert.deepEqual(saved.atoms[key], value);
+    for (const key of ['cloud-aeon-profiles-v1:[]', 'cloud-aeon-profiles-v1:["a",1]', 'cloud-aeon-profiles-v1:["a",""]', 'cloud-aeon-profiles-v1:{"token":"PRIVATE"}']) {
+      f.api.handleMessage({type: 'persisted-atom-update', key, value: 'PRIVATE_VALUE'});
+    }
+    await flush(); await flush();
+    const warnings = f.messages.filter(m => m.operation === 'local-state-warning');
+    assert.equal(warnings.length, 4);
+    assert.ok(warnings.every(m => m.key === 'cloud-aeon-profiles-v1'));
+    assert.equal(JSON.stringify(warnings).includes('PRIVATE'), false);
+    assert.equal(f.messages.filter(m => m.operation === 'local-state-save').length, 3);
+  } finally { f.cleanup(); }
+});
+
 test('business account stubs survive the phone-only service session and preserve callback leases', async t => {
   const rpc = await rpcLibrary(t); if (!rpc) return;
   const f = setup(), wire = new MessageChannel();

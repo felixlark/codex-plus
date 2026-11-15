@@ -6,6 +6,15 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   const configured = new Promise(resolve => { recordReady = resolve; });
   const pending = new Map();
   const atomKeys = new Set(keys.atoms), applicationKeys = new Set(keys.application);
+  function allowedAtom(key) {
+    if (typeof key !== 'string') return false;
+    if (atomKeys.has(key) || (keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) return true;
+    return (keys.identityAtomPrefixes ?? []).some(prefix => {
+      if (!key.startsWith(prefix)) return false;
+      try { const ids = JSON.parse(key.slice(prefix.length)); return Array.isArray(ids) && ids.length === 2 && ids.every(id => typeof id === 'string' && id.length > 0); }
+      catch { return false; }
+    });
+  }
   let updates = Promise.resolve();
   function enqueue(operation) {
     const result = updates.catch(() => {}).then(operation);
@@ -35,7 +44,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   }
   async function update(message) {
     const key = message.key;
-    if (!atomKeys.has(key) && !(keys.atomPrefixes ?? []).some(prefix => key.startsWith(prefix) && /^[a-zA-Z0-9_-]+$/.test(key.slice(prefix.length)))) {
+    if (!allowedAtom(key)) {
       const error = Error('Unsupported phone atom key'); error.phoneStateKey = key; throw error;
     }
     if (message.recordUpdate) await configured;

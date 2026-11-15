@@ -41,7 +41,12 @@
     "pull-request-attachment-records-v3"
   ],
   "atomPrefixes": [
-    "thread-client-id-v1:local%3A"
+    "thread-client-id-v1:local%3A",
+    "aeon-last-activity-v1:",
+    "aeon-appearance-v2:"
+  ],
+  "identityAtomPrefixes": [
+    "cloud-aeon-profiles-v1:"
   ],
   "application": [
     "selected-project",
