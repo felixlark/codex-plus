@@ -127,6 +127,7 @@ export class MobileAccess {
         if (!session[1].frame) { this.phase = 'anchor-loading'; return; }
         this.stage = 'frame-tree';
         const {frameTree} = await this.command(session[0], 'Page.getFrameTree');
+        if (this.stopped) return;
         if (this.preparationAttempted && frameTree.frame.loaderId === this.preparingFromLoader) { this.phase = 'anchor-loading'; return; }
         if (!this.preparationAttempted) {
           // The native sender stays registered; main-frame navigation tears down
@@ -142,13 +143,17 @@ export class MobileAccess {
           if (navigation.errorText) throw Error('Mobile anchor navigation failed');
           return;
         }
-        if (!this.documentFulfilled) { this.phase = 'anchor-loading'; return; }
         const context = [...session[1].contexts.values()].find(c => c.auxData?.isDefault && c.auxData.frameId === frameTree.frame.id);
         if (!context) { this.phase = 'anchor-loading'; return; }
         this.stage = 'probe';
         const result = await this.evaluate(`(${prepareMobileAnchor.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)},${JSON.stringify(this.documentURL)})`, false, context.id);
+        if (this.stopped) return;
         this.lastProbe = Object.fromEntries(['url', 'origin', 'blank', 'preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
         this.stage = 'isolation-check';
+        if (!this.documentFulfilled) {
+          if (!this.documentRequestId && result.url && result.complete) throw Error('Mobile anchor Document not intercepted');
+          this.phase = 'anchor-loading'; return;
+        }
         if (!result.complete) { this.phase = 'anchor-loading'; return; }
         if (!result.preload) throw Error('Mobile anchor preload unavailable');
         if (frameTree.frame.url !== this.documentURL || !result.url || !result.origin || !result.blank || !result.isolated || result.ui) throw Error('Mobile anchor isolation unavailable');
@@ -172,7 +177,7 @@ export class MobileAccess {
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
     } catch (error) {
       const message = String(error?.message ?? '');
-      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
+      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|Document not intercepted|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
       this.phase = 'unavailable'; await this.close();
     }
     finally { this.busy = false; }
@@ -188,7 +193,7 @@ export class MobileAccess {
     // text may carry private data and must never enter persistent status.
     this.documentCheck = {armed: !!this.documentArmed, first: !this.documentRequestId,
       frame: event.frameId === this.documentFrame, url: event.request?.url === this.documentURL,
-      responseStage: event.responseStatusCode === 200, requestId: typeof event.requestId === 'string'};
+      responseStage: event.responseStatusCode === 200 && event.responseErrorReason === undefined, requestId: typeof event.requestId === 'string'};
     try {
       const url = new URL(event.request?.url);
       this.documentCheck.urlKind = url.protocol === 'app:' ? 'app' : url.protocol === 'about:' ? 'about' : ['https:', 'http:'].includes(url.protocol) ? 'web' : 'other';
@@ -207,7 +212,7 @@ export class MobileAccess {
       return true;
     }
     if (!this.stopped && owned && this.documentArmed && !this.documentRequestId && event.frameId === this.documentFrame &&
-        event.request?.url === this.documentURL && event.responseStatusCode === 200 && typeof event.requestId === 'string') {
+        event.request?.url === this.documentURL && event.responseStatusCode === 200 && event.responseErrorReason === undefined && typeof event.requestId === 'string') {
       this.documentRequestId = event.requestId; this.documentArmed = false;
       try {
         await this.command(sessionId, 'Fetch.fulfillRequest', {requestId: event.requestId, responseCode: 200,

@@ -156,7 +156,7 @@ test('the owned document waits for Fetch acknowledgement, fulfillment and a new 
   assert.equal(patterns[0].resourceType, 'Script'); assert.equal(patterns[1].resourceType, 'Document'); assert.equal(patterns[1].requestStage, 'Response');
   assert.deepEqual(h.commands.filter(c => c.method === 'Page.navigate').map(c => c.params.url), [h.manager.documentURL]);
   await h.manager.tick(); assert.equal(h.state.probes.length, 0);
-  h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0); assert.equal(h.state.probes.length, 0);
+  h.commit(); await h.manager.tick(); assert.equal(h.state.starts, 0); assert.equal(h.state.probes.length, 1);
   assert.equal(await h.manager.handleDocument('anchor', h.document()), true);
   const fulfilled = h.commands.find(c => c.method === 'Fetch.fulfillRequest').params;
   assert.equal(fulfilled.responseCode, 200); assert.ok(Buffer.from(fulfilled.body, 'base64').toString().includes('codex-plus-mobile-instance'));
@@ -165,14 +165,14 @@ test('the owned document waits for Fetch acknowledgement, fulfillment and a new 
   await h.manager.tick(); assert.equal(h.state.starts, 0);
   h.state.ready = true; await h.manager.tick(); await h.manager.tick();
   assert.equal(h.state.starts, 1); assert.equal(h.manager.status().anchorReady, true);
-  assert.deepEqual(h.state.probes, [2, 2, 2]);
+  assert.deepEqual(h.state.probes, [2, 2, 2, 2]);
 });
 
 test('unexpected Documents and failed fulfillment never resume the original UI', async () => {
-  for (const variant of ['url', 'frame', 'response-stage', 'fulfill']) {
+  for (const variant of ['url', 'frame', 'response-stage', 'response-error', 'non-200', 'fulfill']) {
     const h = anchorHarness({fulfillError: variant === 'fulfill'}); await h.manager.tick();
     if (variant === 'frame') h.state.rootFrame = 'other';
-    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: undefined} : {});
+    const event = h.document(variant === 'url' ? {request: {url: 'app://-/index.html'}} : variant === 'frame' ? {frameId: 'other'} : variant === 'response-stage' ? {responseStatusCode: undefined} : variant === 'response-error' ? {responseErrorReason: 'Failed'} : variant === 'non-200' ? {responseStatusCode: 302} : {});
     assert.equal(await h.manager.handleDocument('anchor', event), true);
     await h.manager.tick();
     assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
@@ -180,6 +180,15 @@ test('unexpected Documents and failed fulfillment never resume the original UI',
     assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
     assert.equal(h.commands.filter(c => c.method === 'Fetch.continueRequest').length, 0);
   }
+});
+
+test('an uncaptured complete original document closes its own target without opening the gateway', async () => {
+  const h = anchorHarness(); await h.manager.tick(); h.commit(); h.state.ready = true;
+  h.state.probe = {url: true, complete: true, preload: true, origin: true, blank: false, isolated: false, ui: true};
+  await h.manager.tick();
+  assert.equal(h.manager.stopped, true); assert.equal(h.state.starts, 0);
+  assert.equal(h.manager.failure, 'Mobile anchor Document not intercepted');
+  assert.equal(h.commands.filter(c => c.method === 'Target.closeTarget').length, 1);
 });
 
 test('a fulfilled owned page cannot reload the vendor Document while a phone is connected', async () => {
