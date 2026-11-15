@@ -21,7 +21,7 @@ export function installMobileLocalState(bootstrap, keys, selectServices) {
   function dispatch(data) { window.dispatchEvent(new MessageEvent('message', {data, source: null})); }
   function warning(error) {
     const key = error?.phoneStateKey;
-    void native('local-state-warning', {key: typeof key === 'string' ? key : undefined}).catch(() => {});
+    void native('local-state-warning', typeof key === 'string' ? {key} : {}).catch(() => {});
   }
   async function commit(change) {
     const next = JSON.parse(JSON.stringify(state));

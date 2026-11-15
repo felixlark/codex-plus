@@ -36,7 +36,7 @@ export function installMobileEndpoint(config, encode, decode) {
     port.start();
   }
   function dispatch(data, transferred = []) {
-    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length ? window : null}));
+    window.dispatchEvent(new MessageEvent('message', {data, ports: transferred, source: transferred.length ? window : null, origin: location.origin}));
   }
   const methods = new Set(['sendMessageFromView', 'acknowledgeChunkedMessage', 'sendWorkerMessageFromView', 'connectGitWorker', 'getFastModeRolloutMetrics']);
   async function receive(message) {
