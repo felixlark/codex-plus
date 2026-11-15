@@ -10,7 +10,7 @@ Mac 的 Codex Plus 沿原 preload 和 MessagePort 连接现役 Electron 后台�
 ## 接入边界
 
 - 原厂网页资源只提取到个人 Library/Caches，按 ASAR 声明摘要逐文件校验，不入 Git。
-- iOS 在原页面启动前注入兼容 preload；同步 getter 来自已取得的原宿主快照。
+- iOS 在原页面启动前注入兼容 preload；同步 getter 来自已取得的原宿主快照。触摸输入控件保留至少16px字号以避免聚焦缩放，保留用户缩放和原输入事件；原错误边界仅追加静态代码位置诊断，不记录异常正文或页面内容。
 - 原 app-host RPC 的结构化帧由有类型的 carrier 搬运，保持端口、回调、二进制、关闭和顺序。
 - 独立原生宿主窗口作为手机锚点；不能在人工窗口第二次注册 AppView。
 - 创建前先读取原宿主 `startup.whenReady()` 的真实就绪状态；等待沿既有 controller tick，不把单向 IPC 返回当作窗口创建回执。

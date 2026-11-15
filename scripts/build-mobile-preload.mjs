@@ -26,6 +26,7 @@ globalThis.__codexPlusMobileLifecycle = {routeChanged(location) {
 (${installMobileDrafts.toString()})(b.connection);
 globalThis.__codexPlusMobileNativeSend('page-ready');
 const diagnostic=${mobileDiagnostic.toString()};
+globalThis.__codexPlusMobileReportCaught=error=>window.webkit.messageHandlers.diagnostic.postMessage(diagnostic('script-error',error));
 window.addEventListener('error',event=>window.webkit.messageHandlers.diagnostic.postMessage(diagnostic('script-error',event.error)));
 window.addEventListener('unhandledrejection',event=>window.webkit.messageHandlers.diagnostic.postMessage(diagnostic('unhandled-rejection',event.reason)));
 })();`;

@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {mobileHost} from '../Sources/CodexPlus/Resources/mobile-host.mjs';
 import {adaptReloadRoute, reviewedRouteResource, parser, walk} from './inspect-sidebar-model.mjs';
 
 // Enable the original browser File/Blob path only in the personal iOS bundle.
@@ -14,6 +15,15 @@ export function reportMobileRoute(location) {
 }
 
 export async function adaptMobileFrontend(relative, bytes) {
+  if (relative === 'index.html') {
+    if (createHash('sha256').update(bytes).digest('hex') !== mobileHost.indexSHA256) throw Error('Unreviewed mobile document resource');
+    const source = bytes.toString('utf8');
+    if (source.split('</head>').length !== 2) throw Error('Original document head changed');
+    // Keep touch editing readable without WebKit focus zoom. User pinch zoom
+    // and the original input, selection, composition and submit handlers remain.
+    const style = '<style data-codex-mobile-input-size>@media(pointer:coarse){html body input,html body textarea,html body [contenteditable="true"]{font-size:max(16px,1em)}}</style>';
+    return Buffer.from(source.replace('</head>', style + '</head>'));
+  }
   if (`webview/${relative}` === reviewedRouteResource.path) {
     const result = await adaptReloadRoute(bytes.toString('utf8'), reportMobileRoute);
     if (!result.supported) throw Error('Unreviewed mobile router resource');
@@ -53,8 +63,9 @@ export async function adaptMobileFrontend(relative, bytes) {
 async function adaptPhoneServices(source) {
   const {parse} = await parser();
   const ast = parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
-  const modules = [], petModules = [];
+  const modules = [], petModules = [], boundaries = [];
   walk(ast, node => {
+    if (node.type === 'MethodDefinition' && node.key.name === 'componentDidCatch' && node.value.params[0]?.type === 'Identifier') boundaries.push(node.value);
     if (node.type !== 'Property' || node.value.type !== 'FunctionExpression') return;
     if ((node.key.name ?? node.key.value) === 'wRZ2') modules.push(node);
     if ((node.key.name ?? node.key.value) === 'gKJK') petModules.push(node);
@@ -69,8 +80,10 @@ async function adaptPhoneServices(source) {
     }
   });
   if (imports.length !== 1 || installs.length !== 1 || source.includes('__codexPlusPhoneRPC')) throw Error('Original AppView services binding changed');
+  if (boundaries.length !== 1) throw Error('Original renderer error boundary changed');
   const requireName = module.value.params[2].name, load = imports[0], install = installs[0];
   const edits = [
+    {at: boundaries[0].body.start + 1, text: `globalThis.__codexPlusMobileReportCaught?.(${boundaries[0].params[0].name});`},
     {at: load.at, text: `const __codexPlusPhoneRPC=${load.alias},__codexPlusPhoneRecord=${requireName}("waIq").m;`},
     {at: install.at, text: `,await globalThis.__codexPlusMobileLocal.install(${install.module},__codexPlusPhoneRPC,__codexPlusPhoneRecord)`},
   ];
