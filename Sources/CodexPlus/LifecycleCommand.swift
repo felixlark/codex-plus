@@ -29,6 +29,9 @@ enum LifecycleCommand {
                 }
                 let response = try await ManagementConnection().request(request)
                 let identity = try JSONDecoder().decode(ManagementProtocol.RuntimeIdentity.self, from: JSONSerialization.data(withJSONObject:response["runtime"] as Any))
+                if operation != "status" {
+                    guard identity.instance_id.uuidString.lowercased() == (request["expected_runtime"] as? String)?.lowercased() else { throw ManagementProtocol.failure("runtime_changed") }
+                }
                 if operation != "lifecycle.stop" || response["ok"] as? Bool != true { try verify(identity) }
                 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:response, options:[.sortedKeys]) + Data([10]))
                 exit(response["ok"] as? Bool == true ? 0 : 1)

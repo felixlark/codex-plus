@@ -101,7 +101,7 @@ final class CodexLauncher: ObservableObject {
                                   "controller":controller.flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
                                   "host":ownedHost().flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
                                   "mobile":reply["mobile"] ?? NSNull()]
-        if let mobile = reply["mobile"] as? [String: Any], let pid = mobile["gatewayPID"] as? Int32 {
+        if let mobile = reply["mobile"] as? [String: Any], let number = ManagementProtocol.integer(mobile["gatewayPID"]), let pid = Int32(exactly:number) {
             guard let identity = ProcessIdentity.read(pid) else { throw ManagementProtocol.failure("gateway_identity_unknown") }
             scope["gateway"] = identity
         } else { scope["gateway"] = NSNull() }
@@ -111,6 +111,15 @@ final class CodexLauncher: ObservableObject {
     func resumeLifecycle() async throws {
         _ = try await controllerLifecycle("resume")
         quiesced = false
+    }
+    func verifyLifecycleScope(_ prepared: [String: Any]) -> Bool {
+        guard quiesced, let scope = prepared["owned_scope"] as? [String: Any] else { return false }
+        for key in ["native", "controller", "gateway", "host"] {
+            if scope[key] is NSNull { continue }
+            guard let saved = scope[key] as? [String: Any], let pid = ManagementProtocol.integer(saved["pid"]),
+                  let actual = ProcessIdentity.read(pid_t(pid)), NSDictionary(dictionary:saved).isEqual(to:actual) else { return false }
+        }
+        return true
     }
     private func controllerLifecycle(_ action: String) async throws -> [String: Any] {
         guard lifecycleWait == nil else { throw ManagementProtocol.failure("lifecycle_in_progress") }

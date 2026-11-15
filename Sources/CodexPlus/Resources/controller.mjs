@@ -36,6 +36,7 @@ const inFlight=new Set();
 let stopping=false,quiesced=false;
 const lifecycleOperations=new Set();
 let monitorWork=Promise.resolve();
+let startupWork;
 function trackLifecycle(work){lifecycleOperations.add(work);void work.finally(()=>lifecycleOperations.delete(work)).catch(()=>{});return work;}
 const connection=randomUUID(),parentPID=process.ppid,requests=new Map();
 let featureSupported=false,suggestionSupported=false,sidebarSupported=false;
@@ -295,13 +296,15 @@ async function main(){
     if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;sidebarSupported=false;state.sidebarLayout={supported:false,phase:'unsupported-host'};}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
-  if(stopping)return;
+  if(stopping||quiesced)return;
   if(values.attach){
     const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
+    if(stopping||quiesced)return;
     state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},humanTargets:saved.humanTargets??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
   }else{
     await publish();
     state.phase='launching';state.launchMethod='launch-services';await publish();
+    if(stopping||quiesced)return;
     const launched=await launchHost({app:values.app,profile:values.profile});
     state.pid=launched.pid;state.endpoint=launched.endpoint;
     await publish();
@@ -309,6 +312,7 @@ async function main(){
     // app process and all its listeners before any debug connection is made.
     cdp=await CDP.connect(launched.endpoint);
   }
+  if(stopping||quiesced)return;
   try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
   cdp.listeners.add(message=>{
     if(message.method==='Target.attachedToTarget'){
@@ -330,7 +334,7 @@ async function main(){
     const session={target:targetInfo.targetId,contexts:new Map(),main:false,human:!!humanMarker(targetInfo.url)};
     sessions.set(sessionId,session);state.attached++;
     try{
-      if(targetInfo.type==='page'&&!stopping){
+      if(targetInfo.type==='page'&&!stopping&&!quiesced){
         session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
           patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
           bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
@@ -420,8 +424,12 @@ async function lifecycleCommand(message){
  if(typeof message.requestId!=='string')return;
  try{
   if(message.action==='prepare'){
+   const preparingDuringStartup=!startupReady;
    quiesced=true;
+   await startupWork;
+   if(preparingDuringStartup)throw Error('Startup was still in progress');
    await monitorWork;
+   if(inFlight.size)await Promise.allSettled([...inFlight]);
    if(lifecycleOperations.size)await Promise.allSettled([...lifecycleOperations]);
    if([...humanCreations.values()].some(r=>r.phase==='creating'||r.phase==='requested'))throw Error('Window creation pending');
    const mobileScope=await mobile?.prepareStop();
@@ -460,4 +468,6 @@ async function shutdown(){
 }
 
 process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
-main().catch(async error=>{state.phase='failed';state.error=error.message;if(cdp)cdp.close();await publish();process.exit(1);});
+let startupReady=false;
+startupWork=main().then(()=>{startupReady=true;});
+startupWork.catch(async error=>{state.phase='failed';state.error=error.message;if(cdp)cdp.close();await publish();process.exit(1);});

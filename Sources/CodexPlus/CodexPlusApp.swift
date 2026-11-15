@@ -110,6 +110,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.observer.start()
         }
         management.stopLifecycle = { NSApp.terminate(nil) }
+        management.verifyPreparedScope = { [weak self] in self?.launcher.verifyLifecycleScope($0) == true }
         do { try toolServer.start { [weak self] request in
             guard let self else { return .init(["ok": false]) }
             if request["command"] as? String == ManagementProtocol.command { return await self.management.handle(request) }
