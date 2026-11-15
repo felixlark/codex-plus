@@ -1,5 +1,16 @@
 # Codex Plus 验收
 
+## 2026-11-15 已读任务延后下移
+
+实现613e0c5、初始化修复2d3f1b4；签名安装0.10.0/build50。独立主线候选只包含排序与其回归，不包含同机并行移动版或窗口托管增量。
+
+- 94项Node、59项Swift检查通过；覆盖选中任务读后保位、切换／首页释放、连续切换、多窗口隔离及新活动优先。真实宿主的模块别名会被模型局部变量遮蔽，新增检查直接执行捕获后的原生selector读取，已修复新页初始化错误。
+- 正式安装版Developer ID、Hardened Runtime、安全时间戳与严格验签通过；主二进制和变更JS资源逐文件等于冻结2d3f1b4构建输出。原宿主PID44215保持。
+- 真实自有窗口32251加载排序协议9；OCU点击旧任务，再由官方read-state接口触发未读→已读（后台窗口不依赖系统焦点的自动已读）。未读标记消失后，任务仍在y280，deferredReadKey等于当前选中key；OCU点击下一任务后，deferredReadKey清空，同一任务下移至y599。原生模型、可见位置和准确窗口AX查询互证。没有发送验收聊天。
+- 自有窗口经OCU关闭后，CDP target、AX窗口与CG窗口均已确认消失。右侧人工窗口31898在全部编辑器为空、无附件／对话框并受输入revision保护时重接入协议9，所选原路由保持；主人工窗口31718存在草稿、附件与对话框，保留协议8，待后续安全重载接入。
+
+本机证据 `~/Library/Logs/codex-plus/deferred-read-20261115/`：tests50.log、main-tests.log、build50.log、install50.log、identity50.json、signing50.txt、owned-ready50.json、before-click-unread50.json、actual-marked-read-held50.json、actual-after-switch50.json、right-reload-safety50.json、right-ready50.json、human-readiness50.json。
+
 跟踪事项为 [Issue #1](https://github.com/felixlark/codex-plus/issues/1)。
 
 
