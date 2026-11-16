@@ -92,12 +92,20 @@ export class MobileAccess {
     if (!self?.TailscaleIPs?.includes(config.bind) || String(self.ID) !== String(config.nodeId) || String(self.UserID) !== String(config.userId)) throw Error('Mobile Tailscale identity changed');
     return new MobileAccess(config, options);
   }
-  constructor(config, {cdp, command, sessions, stateFile, publish, requestWindowPlacement, instance = randomUUID()}) {
+  constructor(config, {cdp, command, sessions, stateFile, publish, requestWindowPlacement, instance = randomUUID(), gatewayIO = {verify:execFileSync,read:fs.readFile,spawn}}) {
     this.config = {...config, instance}; this.cdp = cdp; this.command = command; this.sessions = sessions; this.publish = publish;
     this.stateFile = stateFile; this.claimRevision = 0; this.clients = new Map(); this.phase = 'waiting-for-anchor'; this.anchorSession = null;
     this.quiesced = false; this.operations = new Set(); this.stopped = false; this.creationAttempted = false; this.preparationAttempted = false; this.preparingFromLoader = null; this.anchorPrepared = false; this.busy = false;
     this.anchorQueue = Promise.resolve();
     this.requestWindowPlacement = requestWindowPlacement;
+    this.gatewayIO=gatewayIO;
+  }
+  anchorContextCurrent(prepared=this.preparedAnchor) {
+    if(!prepared||this.anchorSession!==prepared.session||this.anchorTarget!==prepared.target)return false;
+    const current=this.sessions.get(prepared.session);
+    return current===prepared.record&&current.frame===prepared.frame&&
+      current.contexts.get(prepared.context.id)===prepared.context&&
+      current.contexts.get(prepared.preload.id)===prepared.preload;
   }
   status() { return {anchor:this.config.anchor, instance:this.config.instance, creationAttempted:this.creationAttempted, gatewayPID:this.gatewayEnded?null:this.gateway?.pid??null, phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, terminalCause:this.terminalCause??null, gatewayExit:this.gatewayExit??null, terminalClosed:this.terminalClosed===true, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
   terminate(phase,kind,error,details={}) {
@@ -142,6 +150,16 @@ export class MobileAccess {
       if (anchors.length && !this.isAnchorURL(anchors[0].url) && anchors[0].url !== 'about:blank') throw Error('Mobile anchor lost');
       if (anchors.length) {
         const session = [...this.sessions].find(([, s]) => s.target === anchors[0].targetId);
+        if(this.anchorPrepared){
+          this.stage='context-identity';
+          if(!session||session[0]!==this.anchorSession||anchors[0].url!=='about:blank'||!this.anchorContextCurrent())throw Error('Mobile anchor lost');
+          // Isolation belongs to this exact pair of captured worlds. A busy
+          // bridge is not a new document; do not rerun initialization probes on
+          // every monitor tick. Context/navigation events still revoke it.
+          this.stage='gateway';
+          if(!this.gateway)await this.startGateway();
+          return;
+        }
         if (!session) return;
         this.anchorSession = session[0];
         if (this.requestWindowPlacement && !this.windowPlaced) {
@@ -169,20 +187,25 @@ export class MobileAccess {
         if (!context) { this.phase = 'anchor-loading'; return; }
         this.stage = 'probe';
         const result = await this.evaluate(`(${prepareMobileAnchor.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)})`, false, context.id);
+        if(this.sessions.get(session[0])!==session[1]||session[1].frame!==frameTree.frame.id||session[1].contexts.get(context.id)!==context)throw Error('Mobile anchor lost');
         this.lastProbe = Object.fromEntries(['blank', 'preload', 'complete', 'isolated', 'ui'].map(key => [key, result?.[key] === true]));
         this.stage = 'isolation-check';
         if (!result.complete) { this.phase = 'anchor-loading'; return; }
         if (!result.preload) throw Error('Mobile anchor preload unavailable');
         if (frameTree.frame.url !== 'about:blank' || !result.blank || !result.isolated || result.ui) throw Error('Mobile anchor isolation unavailable');
         if (this.stopped) return;
+        const isolated = [...session[1].contexts.values()].filter(c => !c.auxData?.isDefault && c.auxData?.frameId === frameTree.frame.id && c.name === 'Electron Isolated Context');
+        if (isolated.length !== 1) throw Error('Mobile anchor preload unavailable');
+        const prepared={session:session[0],record:session[1],target:this.anchorTarget,frame:frameTree.frame.id,context,preload:isolated[0]};
+        if(!this.anchorContextCurrent(prepared))throw Error('Mobile anchor lost');
         if (!this.gitOriginContext) {
-          const isolated = [...session[1].contexts.values()].filter(c => !c.auxData?.isDefault && c.auxData?.frameId === frameTree.frame.id && c.name === 'Electron Isolated Context');
-          if (isolated.length !== 1) throw Error('Mobile anchor preload unavailable');
           const installed = await this.evaluate(`(${installMobileGitOriginRepair.toString()})(${JSON.stringify(this.config.anchor)},${JSON.stringify(this.config.instance)})`, false, isolated[0].id);
           if (!installed || this.stopped) throw Error('Mobile anchor isolation unavailable');
+          if(!this.anchorContextCurrent(prepared))throw Error('Mobile anchor lost');
           this.gitOriginContext = isolated[0].id;
         }
-        if (!session[1].contexts.has(this.gitOriginContext)) throw Error('Mobile anchor lost');
+        if(this.gitOriginContext!==prepared.preload.id||!this.anchorContextCurrent(prepared))throw Error('Mobile anchor lost');
+        this.preparedAnchor=prepared;
         this.anchorPrepared = true;
         this.stage = 'gateway';
         if (!this.gateway) await this.startGateway();
@@ -214,11 +237,12 @@ export class MobileAccess {
   }
   async startGateway() {
     const gatewayPath = fileURLToPath(new URL('./MobileGateway', import.meta.url));
-    execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus.mobile-gateway" and certificate leaf[subject.OU] = "HJG65XBC25"', gatewayPath], {stdio: 'pipe'});
+    this.gatewayIO.verify('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus.mobile-gateway" and certificate leaf[subject.OU] = "HJG65XBC25"', gatewayPath], {stdio: 'pipe'});
     // Identify the adapter and verified gateway actually loaded by this runtime.
-    this.version = 'sha256:' + createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).update(await fs.readFile(gatewayPath)).digest('hex');
+    this.version = 'sha256:' + createHash('sha256').update(await this.gatewayIO.read(new URL(import.meta.url))).update(await this.gatewayIO.read(gatewayPath)).digest('hex');
     if (this.stopped || this.quiesced) return;
-    this.gateway = spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
+    if(!this.anchorContextCurrent())throw Error('Mobile anchor lost');
+    this.gateway = this.gatewayIO.spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
     this.gateway.stderr.resume();
     this.gateway.once('exit', (code,signal) => this.gatewayExited(code,signal));
     this.gateway.once('error', () => { if(!this.gateway.pid)this.gatewayEnded=true;void this.terminate('gateway-failed','gateway-error').catch(()=>{}); });
