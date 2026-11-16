@@ -99,7 +99,19 @@ export class MobileAccess {
     this.anchorQueue = Promise.resolve();
     this.requestWindowPlacement = requestWindowPlacement;
   }
-  status() { return {anchor:this.config.anchor, instance:this.config.instance, creationAttempted:this.creationAttempted, gatewayPID:this.gateway?.pid??null, phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  status() { return {anchor:this.config.anchor, instance:this.config.instance, creationAttempted:this.creationAttempted, gatewayPID:this.gatewayEnded?null:this.gateway?.pid??null, phase: this.phase, protocol: 1, version: this.version ?? null, hostVersion: mobileHost.version, connections: this.clients.size, anchorReady: !this.stopped && this.anchorPrepared, port: this.port ?? null, targetId: this.anchorTarget ?? null, windowID: this.windowID ?? null, stage: this.stage ?? null, failure: this.failure ?? null, terminalCause:this.terminalCause??null, gatewayExit:this.gatewayExit??null, terminalClosed:this.terminalClosed===true, gitOriginReady: !!this.gitOriginContext, probe: this.lastProbe ?? null}; }
+  terminate(phase,kind,error,details={}) {
+    if (this.stopped) return this.close();
+    const message=String(error?.message??'');
+    this.failure=/^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message)?message:'Mobile operation failed';
+    this.phase=phase;
+    // Only locally selected metadata, never gateway/CDP payloads or error stacks.
+    this.terminalCause=Object.freeze({kind,phase,stage:this.stage??null,sessionId:this.anchorSession,targetId:this.anchorTarget??null,...details,...(/^CDP timeout: ([A-Za-z.]+)$/.test(message)?{cdpMethod:message.slice(13)}:{})});
+    // The callback snapshots state synchronously and enqueues its existing serial
+    // write before teardown can publish connectionClosed or a cleanup event.
+    void this.publish().catch(()=>{});
+    return this.close();
+  }
   windowPlacementResult(message) {
     if (!this.windowPlacementRequested || this.stopped || this.windowPlaced || message.anchor !== this.config.anchor || message.instance !== this.config.instance || message.targetId !== this.anchorTarget) return;
     if (this.windowPlacementUnknown && message.windowID !== this.windowID) return;
@@ -191,9 +203,7 @@ export class MobileAccess {
         if (creation.exceptionDetails) throw Error('Native anchor creation failed');
       } else if (this.anchorSession || this.gateway) throw Error('Mobile anchor lost');
     } catch (error) {
-      const message = String(error?.message ?? '');
-      this.failure = /^(Mobile anchor (preload unavailable|isolation unavailable|navigation failed|lost|unavailable|failed)|Native anchor (creation|startup) failed|Ambiguous mobile anchor|CDP timeout: [A-Za-z.]+)$/.test(message) ? message : 'Anchor initialization failed';
-      this.phase = 'unavailable'; await this.close();
+      await this.terminate('unavailable','initialization',error);
     }
     finally { this.busy = false; }
   }
@@ -210,11 +220,16 @@ export class MobileAccess {
     if (this.stopped || this.quiesced) return;
     this.gateway = spawn(gatewayPath, ['--bind', this.config.bind, '--port', String(this.config.port)], {stdio: ['pipe', 'pipe', 'pipe']});
     this.gateway.stderr.resume();
-    this.gateway.once('exit', () => { if (!this.stopped) { this.phase = 'gateway-exited'; void this.close(); } });
-    this.gateway.once('error', () => { this.phase = 'gateway-failed'; void this.close(); });
+    this.gateway.once('exit', (code,signal) => this.gatewayExited(code,signal));
+    this.gateway.once('error', () => { if(!this.gateway.pid)this.gatewayEnded=true;void this.terminate('gateway-failed','gateway-error').catch(()=>{}); });
     const lines = readline.createInterface({input: this.gateway.stdout});
-    lines.on('line', line => { void this.gatewayEvent(line).catch(() => { this.phase = 'connection-failed'; void this.close(); }); });
+    lines.on('line', line => { void this.gatewayEvent(line).catch(error => this.terminate('connection-failed','gateway-event',error)).catch(()=>{}); });
     this.phase = 'gateway-starting';
+  }
+  gatewayExited(code,signal) {
+    this.gatewayEnded=true;this.gatewayExit={code,signal};
+    if (!this.stopped) void this.terminate('gateway-exited','gateway-exit').catch(()=>{});
+    else void this.publish().catch(()=>{});
   }
   send(id, message) {
     if (this.stopped || !this.gateway?.stdin.writable) return;
@@ -298,10 +313,11 @@ export class MobileAccess {
     await this.anchorWork(() => this.evaluate(`(()=>{const e=globalThis.__codexPlusMobileEndpoint;if(e?.connection===${JSON.stringify(client.connection)}){e.close();delete globalThis.__codexPlusMobileEndpoint;}})()`)).catch(() => {});
     if (!this.stopped) this.phase = 'listening';
   }
-  contextLost(id, contextId) {
-    if (id === this.anchorSession && (this.gateway || this.gitOriginContext) &&
+  contextLost(id, contextId, event='context-lost') {
+    if (!this.stopped && id === this.anchorSession && (this.gateway || this.gitOriginContext) &&
         (contextId === undefined || contextId === this.gitOriginContext || this.sessions.get(id)?.contexts.get(contextId)?.auxData?.isDefault)) {
-      this.phase = 'anchor-lost'; void this.close();
+      const known=['Target.detachedFromTarget','Runtime.executionContextDestroyed','Runtime.executionContextsCleared'];
+      void this.terminate('anchor-lost','context-lost',Error('Mobile anchor lost'),{event:known.includes(event)?event:'context-lost',contextId:contextId??null}).catch(()=>{});
     }
   }
   async prepareStop() {
@@ -309,22 +325,42 @@ export class MobileAccess {
     if ([...this.clients.values()].some(c => c.phase !== 'active')) throw Error('Mobile handshake pending');
     if (this.operations.size) await Promise.allSettled([...this.operations]);
     await this.anchorQueue;
+    if (this.stopped) return this.verifyStop();
     if (this.creationAttempted && !this.anchorTarget) {
       const {targetInfos} = await this.cdp.call('Target.getTargets');
       const matches = targetInfos.filter(t => t.type === 'page' && this.isAnchorURL(t.url));
       if (matches.length !== 1) throw Error('Mobile anchor creation outcome unknown');
       this.anchorTarget = matches[0].targetId;
     }
-    if (this.stopped) throw Error('Mobile stopped while preparing');
+    if (this.stopped) return this.verifyStop();
+    return this.status();
+  }
+  async verifyStop() {
+    if (!this.quiesced) throw Error('Mobile not prepared');
+    if (this.stopped) {
+      this.terminalClosed=false;
+      await this.close();
+      if (this.operations.size || this.clients.size || (this.creationAttempted&&!this.anchorTarget)) throw Error('Mobile cleanup outcome unknown');
+      // EOF is a request, not exit proof. Never wait for an exit indefinitely or
+      // clear a still-live PID; the caller can reconcile the same attempt later.
+      if (this.gateway&&!this.gatewayEnded) throw Error('Mobile gateway still live');
+      const {targetInfos}=await this.cdp.call('Target.getTargets');
+      if (this.anchorTarget&&targetInfos.some(t=>t.targetId===this.anchorTarget)) throw Error('Mobile anchor still live');
+      this.terminalClosed=true;
+    } else if (this.anchorTarget) {
+      const {targetInfos}=await this.cdp.call('Target.getTargets');
+      if (!targetInfos.some(t=>t.targetId===this.anchorTarget)) throw Error('Anchor gone');
+    }
     return this.status();
   }
   resume() {
     if (this.stopped || [...this.clients.values()].some(c => c.phase !== 'active')) throw Error('Mobile resume unavailable');
     this.quiesced = false;
   }
-  async close() {
-    if (this.stopped) return; this.stopped = true;
-    try {
+  close() {
+    if (this.closePromise) return this.closePromise;
+    this.stopped = true;
+    this.closePromise=(async()=>{try {
       for (const id of this.clients.keys()) await this.release(id);
       this.gateway?.stdin.end();
     } finally {
@@ -332,6 +368,7 @@ export class MobileAccess {
         await this.evaluate('globalThis.__codexPlusMobileGitOriginRepair?.close()', false, this.gitOriginContext).catch(() => {});
       }
       if (this.anchorTarget) await this.cdp.call('Target.closeTarget', {targetId: this.anchorTarget}).catch(() => {});
-    }
+    }})();
+    return this.closePromise;
   }
 }

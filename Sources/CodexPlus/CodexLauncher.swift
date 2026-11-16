@@ -125,7 +125,7 @@ final class CodexLauncher: ObservableObject {
             let current = try await controllerLifecycle("verify")
             let saved = scope["mobile"] as? [String: Any]
             let mobile = current["mobile"] as? [String: Any]
-            for key in ["anchor", "instance", "targetId", "gatewayPID"] {
+            for key in ["anchor", "instance", "targetId", "gatewayPID", "terminalClosed"] {
                 if String(describing:saved?[key]) != String(describing:mobile?[key]) { return false }
             }
             return true
