@@ -1,5 +1,7 @@
 # Codex Plus 独立管理协议
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 本产品只有一个CodexPlus原生运行体；原生菜单/设置和CLI管理自己的增强，不启动、停止或重启SmartShadow。
 
 ## 自身服务器
@@ -8,7 +10,7 @@
 
 操作：status、settings.read、settings.write、codex.open、enhancements.reconnect、lifecycle.prepare-stop、lifecycle.resume、lifecycle.stop。设置写入核实例/revision和五项严格类型；停止核已prepare的scope revision，未知结果只对账。停止只释放自己的controller/session/socket，保留官方后台及手机目标。状态不包含网关/iOS版本。
 
-独立状态CLI使用同根status.sock；工具命令同根tool-control.sock，已停时不自动启动。安装路径与签名身份为 `/Applications/Codex Plus.app` / `me.longbiaochen.codex-plus`。普通设置入口为自身SwiftUI窗口。
+独立状态CLI使用同根status.sock；工具命令同根tool-control.sock，已停时不自动启动。安装路径与签名身份为 `/Applications/Codex Plus.app` / `LOCAL_PLUS_BUNDLE_ID`。普通设置入口为自身SwiftUI窗口。
 
 ## SmartShadow只读客户端
 

@@ -6,7 +6,7 @@
 
 排序协议为 8。升级后既有协议 6／7 页面显示需要重新接入；沿设置页现有“重新接入页面增强”入口检查未提交内容，再更新页面，且同时验证排序、布局和后台建议三项协议，不把仅安装新版当成排序已经生效。退出 Plus 后已执行投影保留到页面重载，正常重载且无 Plus 接入时恢复原生行为。原活动 ledger 与窗口布局记录继续复用。
 
-日期：2026-11-10。Owner：Longbiao；方案与实现责任：Codex Plus 当前任务。
+日期：2026-11-10。Owner：用户；方案与实现责任：Codex Plus 当前任务。
 状态：阶段 A 已完成真实宿主验收，结论为未通过。双窗口可见前台排序、原生导航、草稿数据保留和正常重启回退已验证；后台完成置顶及 reload 自动恢复选中聊天未通过。自动排序未进入安装版，阶段 B 未启动。见[评审报告](../reviews/project-activity-order-egm.md)。
 
 ## 目标与行为
@@ -41,7 +41,7 @@ Web renderer 提供可研究的接缝。当前已确认结构与候选接缝，C
 | [b-nnett/codex-plusplus，13d0c24](https://github.com/b-nnett/codex-plusplus/tree/13d0c2421cc4258565710910ca8dfe60344c027e) | `SidebarAdapter.swift`、`Resources/sidebar-adapter.js`、`shell-adapter.js`、`renderer-runtime.js`、`extensions/better-sidebar`：AST 结构发现、版本化能力接口、清理生命周期；当前主线采用签名 bundle patch 与 Electron 内进程执行 | 结构发现需独立佐证；适配失败给出原因；实例初始化幂等并登记清理。其签名替换和全套扩展系统维护成本单列比较 |
 | [qoli/codex-disable-escape-tweak，241f066](https://github.com/qoli/codex-disable-escape-tweak/blob/241f066ab315c98ff1df15a884f50d72328c8630/index.js) | 小型 tweak 的 start/stop 对称注册和移除事件监听 | 单功能包、完整释放监听，控制实现范围 |
 
-以上代码通过 GitHub 官方连接器读取，以固定提交源链接作为跨环境复核正本，详见[来源记录](../research/project-order-sources.md)。研究源码缓存属于本机可丢弃资源，评审环境按固定链接自行读取。当前仅参考设计；代码复用前核对应文件许可证及依赖。b-nnett 本次读取的 LICENSE 为 MIT；本轮未复制其实现到产品源码。
+以上代码通过 GitHub 官方连接器读取，以固定提交源链接作为跨环境复核正本，详见[公开来源与证据范围](../research/project-order-sources.md)。研究源码缓存属于本机可丢弃资源，评审环境按固定链接自行读取。当前仅参考设计；代码复用前核对应文件许可证及依赖。b-nnett 本次读取的 LICENSE 为 MIT；本轮未复制其实现到产品源码。
 
 ## 方案比较与推荐
 
@@ -166,7 +166,7 @@ A 通过条件：fixture 四类场景通过，当前安装版主来源的接缝�
 3. 真实 GUI：当前安装版由官方 Computer Use 验收，三个项目的前台与后台任务更新分别前移；折叠项目也生效；键盘与可见顺序一致；拖动/菜单/滚动期间保持锚点，交互结束应用最新顺序。测试任务仅作本地可逆交互，不发送外部消息。
 4. 恢复：正常重启保留草稿、任务、标签页；关闭自动排序并正常启动恢复原生顺序；helper 断连、crash、renderer reload、宿主升级各有记录；退出宿主后 listener 关闭。
 5. 资源：使用摘要/catalog 更新时总计算复杂度为 O(T + P log P)，T 为已覆盖任务键数、P 为默认项目数；通过当前实际项目数量观察稳定性和 CPU，无模型轮询。重复同序事件保留原对象引用，减轻 React 重渲染。
-6. 交付分别报告源码测试、签名安装、运行态和 Longbiao 接受；保留 Issue 验收开放。阶段 A 提供接缝证据，阶段 B 完成产品安装与真实用户路径验收。
+6. 交付分别报告源码测试、签名安装、运行态和 用户 接受；保留 Issue 验收开放。阶段 A 提供接缝证据，阶段 B 完成产品安装与真实用户路径验收。
 
 ## 依赖、风险与决策状态
 

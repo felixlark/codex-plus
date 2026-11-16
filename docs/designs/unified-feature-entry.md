@@ -1,8 +1,10 @@
 # Codex Plus 统一功能入口与页面贪吃蛇
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 - 日期：2026-11-12（Asia/Shanghai）
 - 状态：v5 按用户最新图标要求，统一页面、App 和菜单栏的圆形标识；v4 已确定的上方 Projects 后贪吃蛇、左下第一项 Plus 位置保留。0.5.1 build 10 的安装与实际验收见 `docs/acceptance.md`，历史候选记录保留。
-- 项目：`/Users/longbiao/Projects/codex-plus`；当前 chat：`01a1ce18-ffc0-7970-8506-a3ac001c388d`。
+- 项目：`PRIVATE_EVIDENCE_PATH`；当前 chat：`01a1ce18-ffc0-7970-8506-a3ac001c388d`。
 - 源码基线：`89fed51`，分支 `codex/project-activity-launcher`；设计前工作区干净。
 - 执行电脑：Sol；当前安装 Codex Plus 0.3.0 build 4，Codex 26.1106.51428。
 

@@ -1,5 +1,7 @@
 # Project 自动排序 EGM 评审
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 日期：2026-11-10；工程：Codex Plus；执行电脑：sol。
 目标：[Project 按任务更新自动排序方案](../designs/project-activity-order.md)。
 
@@ -13,9 +15,9 @@
 
 采用 [EGM auto-review](https://github.com/google/elephant-goldfish-model) 的独立方案评审：两名 fresh-context、只读 reviewer 分别审查设计与实施准备；修订后由第三名 fresh-context reviewer 聚焦复核。均由原生 `collaboration.spawn_agent` 创建，`fork_turns="none"`，未传递父对话或个人 memory。
 
-各 reviewer 实际读取对应 persona、feature-spec / implementation-readiness 标准和目标文档。复核 reviewer 另经官方 GitHub 连接器读取固定提交的 `qqheling/codexplusplus/cdp.rs` 与 `b-nnett/codex-plusplus/sidebar-adapter.js`，并核对 Electron 发布与 CDP Fetch 官方协议。源链接见[来源记录](../research/project-order-sources.md)。
+各 reviewer 实际读取对应 persona、feature-spec / implementation-readiness 标准和目标文档。复核 reviewer 另经官方 GitHub 连接器读取固定提交的 `qqheling/codexplusplus/cdp.rs` 与 `b-nnett/codex-plusplus/sidebar-adapter.js`，并核对 Electron 发布与 CDP Fetch 官方协议。源链接见[公开来源与证据范围](../research/project-order-sources.md)。
 
-本机 Skill：`/Users/longbiao/.codex/plugins/cache/created-by-me-remote/egm/0.1.2/skills/egm-auto-review/SKILL.md`。
+本机 Skill：`PRIVATE_EVIDENCE_PATH`。
 
 | 审阅实例 | 范围 | 结果 |
 | --- | --- | --- |
@@ -42,7 +44,7 @@
 - React 布局、可见顺序、键盘导航和交互锚点的一致性。
 - 断连、reload、窗口重建、草稿与标签页恢复、正常重启回退及 listener 退出。
 
-复核通过对应方案和下一原型的执行准备。阶段 B 发布与 Longbiao 最终接受各自保留独立验收记录。
+复核通过对应方案和下一原型的执行准备。阶段 B 发布与 用户 最终接受各自保留独立验收记录。
 
 ## 文档检查
 
@@ -50,7 +52,7 @@
 
 ## 阶段 A 原型实施与验证
 
-Longbiao 批准后已完成源码探测、隔离 fixture、CDP 原型和精确依赖清单。产品安装版仍为 Codex Plus 0.2.0。
+用户 批准后已完成源码探测、隔离 fixture、CDP 原型和精确依赖清单。产品安装版仍为 Codex Plus 0.2.0。
 
 | 检查 | 结果与覆盖 |
 | --- | --- |
@@ -68,10 +70,10 @@ Longbiao 批准后已完成源码探测、隔离 fixture、CDP 原型和精确�
 
 本机证据：
 
-- [静态接缝报告](/Users/longbiao/Library/Logs/codex-plus/project-order-probe-20261110/source.json)
-- [四类动态场景报告](/Users/longbiao/Library/Logs/codex-plus/project-order-probe-20261110/fixture.json)
-- [宿主保护状态](/Users/longbiao/Library/Logs/codex-plus/project-order-probe-20261110/host.json)
-- [官方 GUI 工具阻塞](/Users/longbiao/Library/Logs/codex-plus/project-order-probe-20261110/tool-blocker.json)
+- 静态接缝报告（受控本机证据）
+- 四类动态场景报告（受控本机证据）
+- 宿主保护状态（受控本机证据）
+- 官方 GUI 工具阻塞（受控本机证据）
 
 ### 真实宿主验收进展
 
@@ -85,7 +87,7 @@ Longbiao 批准后已完成源码探测、隔离 fixture、CDP 原型和精确�
 
 新增四类 fixture 布局回归通过，Pinned 与自定义区样本保持独立。EGM 定向复核另指出导航指标与多窗口覆盖问题，均已修订；随后收紧真实宿主固定路径和预审核完整 SHA-256，避免未知源码的两个独立接缝被误当作同一数据链。fixture 加入返回值断链、同名嵌套绑定、后续重赋、多义和重复适配反例。
 
-期间系统自动进入显示器睡眠并锁屏；公开电源管理命令仅唤醒显示器，随后由 Longbiao 本人解锁。解锁后继续完成真实交互，没有绕过锁屏或复制认证材料。
+期间系统自动进入显示器睡眠并锁屏；公开电源管理命令仅唤醒显示器，随后由 用户 本人解锁。解锁后继续完成真实交互，没有绕过锁屏或复制认证材料。
 
 最终原生 View → Next Sidebar Item 按可见 C/B/A 顺序选中测试聊天 C → B → A。reload 后窗口进入新聊天界面，未自动恢复原选中聊天；重选 A 后原测试草稿完整可见。正常退出独立实例 PID 99165 后，OS 检查确认端口 56399 不再监听；用同一独立资料目录、无调试参数正常启动为 PID 76238，显示原生 C/B/A，重选 A 后仍能读回原草稿。再向 A 发送只回复文本的恢复测试，得到 `CP-A RESTORE OK`，顺序继续 C/B/A，证明增强没有遗留为持续自动排序。
 
@@ -99,9 +101,9 @@ Longbiao 批准后已完成源码探测、隔离 fixture、CDP 原型和精确�
 | `/root/direct_chain_recheck` | fresh-context 独立验证上述反例均被拒绝，baseline/改名仍适配，host 摘要检查保留；Blocker 0 / Major 0 / Nit 0。 |
 | `/root/activity_clock_review` | 下一时间候选中的调用约定有一项 Blocker：RD 是通过 get 读取的响应式值。文档已改为 `get(module.RD,key)`；该候选未实施，A 的失败结论保留。 |
 
-协议 2 候选的静态接缝检查与四类受控 fixture 有效；真实完成事件和选中恢复失败决定 A 不通过。这些结果不等于阶段 B 发布或 Longbiao 接受自动排序功能。
+协议 2 候选的静态接缝检查与四类受控 fixture 有效；真实完成事件和选中恢复失败决定 A 不通过。这些结果不等于阶段 B 发布或 用户 接受自动排序功能。
 
-本轮证据位于 [project-order-live-20261110](/Users/longbiao/Library/Logs/codex-plus/project-order-live-20261110/)，包括 `host-layout.json`、`source-bound.json`、`fixture-layout.json`、`fixture-protocol2.json`、`fixture-data-chain-final.json` 和实际 GUI 截图。单一运行状态仍为 Codex Plus 0.2.0，当前产品源代码未改动。
+本轮证据位于 project-order-live-20261110（受控本机证据），包括 `host-layout.json`、`source-bound.json`、`fixture-layout.json`、`fixture-protocol2.json`、`fixture-data-chain-final.json` 和实际 GUI 截图。单一运行状态仍为 Codex Plus 0.2.0，当前产品源代码未改动。
 
 
 ## 2026-11-11 后续交付评审
