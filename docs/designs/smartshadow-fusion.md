@@ -23,7 +23,7 @@ helper保持原观察器、页面增强、F6、人窗与工具右屏路由、con
 
 主App只使用 [SMAppService.loginItem(identifier:)](https://developer.apple.com/documentation/servicemanagement/smappservice/loginitem(identifier:)) 登记包内helper，不使用mainApp登录登记。新helper需准确已安装bundle/path，拒绝旧Plus仍在运行；对原运行目录持有一个进程级独占文件锁后才启动观察器和socket，退出由内核释放。此锁不构成任务/业务存储。
 
-[Apple register](https://developer.apple.com/documentation/servicemanagement/smappservice/register())会立即启动LoginItem，异常或非零退出还会重启；[unregister](https://developer.apple.com/documentation/servicemanagement/smappservice/unregister())会终止运行中的LoginItem。因此同一helper无参数时只调用一次正式ss-service start/attach后正常退出，不持有手机/菜单/socket，不重试未知结果；常驻体由ss-service以`open -g -n <helper bundle> --args --managed-runtime`独立启动。runtime manifest追加`arguments:["--managed-runtime"]`，安装侧按完整argv区分短暂启动器与常驻实例。系统登录自动重启不能直接变成第二个业务runtime；helper的LaunchServices reopen也不打开Codex。
+[Apple register](https://developer.apple.com/documentation/servicemanagement/smappservice/register())会立即启动LoginItem，异常或非零退出还会重启；[unregister](https://developer.apple.com/documentation/servicemanagement/smappservice/unregister())会终止运行中的LoginItem。因此同一helper无参数时只调用一次正式ss-service start/attach后正常退出，不持有手机/菜单/socket，不重试未知结果；常驻体由ss-service以`open -g -n <helper bundle> --args --managed-runtime`独立启动。runtime manifest追加`arguments:["--managed-runtime"]`，安装侧按完整argv区分短暂启动器与常驻实例。helper不设置LSMultipleInstancesProhibited，允许短暂启动器等待独立常驻实例；业务单实例由仅常驻体持有的flock保证。系统登录自动重启不能直接变成第二个业务runtime；helper的LaunchServices reopen也不打开Codex。
 
 启用登录开关先由正式控制器启动/附着，再登记唯一LoginItem；UI说明它会即时启动后台。关闭只在正式inspect为stopped且准确新旧身份进程均不存在时注销，UI说明先正常停止后关闭，可随后手动启动。这样系统注销不绕过prepare/drain/stop。
 
@@ -49,6 +49,6 @@ MobileGateway仍使用原签名标识`me.longbiaochen.codex-plus.mobile-gateway`
 
 `scripts/build`一次构建两个可执行，输出一个新stage内的SmartShadow.app，并在完成内外签名后生成相邻SmartShadow.package.json。manifest保留source_commit/build/files，runtime为bundle_path/bundle_id/executable/resources，路径相对容器、files为路径到SHA256字典；build取helper版本。主容器版本另列。build-manager复用同一入口。install/install-manager只做已停完整包文件替换；ss-service选择和启动由#613办理。
 
-已完成源码层证据：Debug两个产品构建，28项相称Core单元（含偏好迁移/新动作协议），25项页面入口及原controller/mobile生命周期测试。正式签名包构建、UI关闭/退出独立、F6/增强/右屏、手机读发流式/草稿重连、TLS指纹、显式停启与保留人工窗、唯一登录项尚待#613同包真实验收。原Plus80手机与资源证据在未改部分复用，不外推新身份已验。
+已完成源码层证据：Debug两个产品构建，28项相称Core单元（含偏好迁移/新动作协议），25项页面入口及原controller/mobile生命周期测试，另1项真实shell CLI分派夹具。正式签名包构建、UI关闭/退出独立、F6/增强/右屏、手机读发流式/草稿重连、TLS指纹、显式停启与保留人工窗、唯一登录项尚待#613同包真实验收。原Plus80手机与资源证据在未改部分复用，不外推新身份已验。
 
 后续由#613在实际源码安全点迁入smart-shadow/native，从该仓独立构建、签名、安装并验收无codex-plus工作树依赖后，才退役旧安装、登录项和实时消费者及归档旧仓；原存储和历史unknown不因品牌迁移删除。
