@@ -319,17 +319,17 @@ async function main(){
     if(message.method==='Target.attachedToTarget'){
       const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
-    if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
+    if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId,undefined,message.method);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
     if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
-    if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
-    if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
+    if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId,message.method);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId,undefined,message.method);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
     if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
     if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
     if(message.method==='Fetch.requestPaused'){
       const work=response(message.sessionId,message.params).catch(fail);
       inFlight.add(work);void work.finally(()=>inFlight.delete(work));
     }
-    if(message.method==='connectionClosed'&&!stopping){state.phase='disconnected';void publish().then(()=>process.exit(1));}
+    if(message.method==='connectionClosed'&&!stopping)hostDisconnected();
   });
   async function attach({sessionId,targetInfo,waitingForDebugger}){
     const session={target:targetInfo.targetId,contexts:new Map(),main:false,human:!!humanMarker(targetInfo.url)};
@@ -421,14 +421,17 @@ async function main(){
   },1000);
 }
 function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
+function hostDisconnected(){
+ if(mobile){void mobile.terminate('host-disconnected','transport-closed').catch(()=>{});state.mobile=mobile.status();}
+ state.phase='disconnected';void publish().then(()=>process.exit(1));
+}
 function fail(error){state.errors.push(error.message);void publish();}
 async function lifecycleCommand(message){
  if(typeof message.requestId!=='string')return;
  try{
   if(message.action==='verify'){
    if(!quiesced)throw Error('Not prepared');
-   const status=mobile?.status()??null;
-   if(status?.targetId){const {targetInfos}=await cdp.call('Target.getTargets');if(!targetInfos.some(t=>t.targetId===status.targetId))throw Error('Anchor gone');}
+   const status=await mobile?.verifyStop()??null;
    process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:status})+'\n');
   }else if(message.action==='prepare'){
    const preparingDuringStartup=!startupReady;

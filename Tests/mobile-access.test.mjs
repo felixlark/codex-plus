@@ -196,6 +196,62 @@ test('losing the repaired preload context closes only the sticky target and neve
   assert.deepEqual(h.commands.filter(c => c.method === 'Target.closeTarget').map(c => c.params.targetId), ['owned']);
 });
 
+function terminalHarness() {
+  const state={targets:[{targetId:'sticky'}],events:[],closed:0};let manager;
+  manager=new MobileAccess({anchor:'a'}, {instance:'same-instance',stateFile:'/unused',sessions:new Map(),
+    cdp:{async call(method) {
+      if(method==='Target.closeTarget') {state.events.push('cleanup');state.closed++;manager.contextLost('anchor',undefined,'Target.detachedFromTarget');state.targets=[];return {};}
+      assert.equal(method,'Target.getTargets');return {targetInfos:state.targets};
+    }},
+    command:async()=>{},publish:async()=>{state.events.push(JSON.parse(JSON.stringify(manager.status())));},
+  });
+  manager.anchorTarget='sticky';manager.anchorSession='anchor';manager.creationAttempted=true;
+  manager.gateway={pid:123,stdin:{end(){}}};manager.gitOriginContext=7;manager.stage='gateway';
+  return {manager,state};
+}
+
+test('gateway exit publishes its first cause before cleanup and detach cannot overwrite it',async()=>{
+  const {manager,state}=terminalHarness();manager.gatewayExited(17,null);await manager.close();
+  assert.equal(state.events[0].terminalCause.kind,'gateway-exit');assert.deepEqual(state.events[0].gatewayExit,{code:17,signal:null});
+  assert.equal(state.events[1],'cleanup');assert.equal(manager.phase,'gateway-exited');
+  assert.equal(manager.status().gatewayPID,null);assert.equal(manager.terminalCause.kind,'gateway-exit');
+  assert.equal(manager.close(),manager.close());assert.equal(state.closed,1);
+});
+
+test('context-loss event is published even while quiesced and later exit only adds exit facts',async()=>{
+  const {manager,state}=terminalHarness();manager.quiesced=true;
+  manager.contextLost('anchor',7,'Runtime.executionContextDestroyed');await manager.close();
+  assert.equal(state.events[0].terminalCause.event,'Runtime.executionContextDestroyed');
+  manager.gatewayExited(null,'SIGTERM');
+  assert.equal(manager.terminalCause.event,'Runtime.executionContextDestroyed');
+  assert.equal(state.events.at(-1).gatewayExit.signal,'SIGTERM');
+});
+
+test('terminal prepare and verify retain sticky identity and prove absence anew',async()=>{
+  const {manager,state}=terminalHarness();manager.gatewayExited(0,null);await manager.close();
+  const scope=await manager.prepareStop();assert.equal(scope.terminalClosed,true);assert.equal(scope.targetId,'sticky');assert.equal(scope.gatewayPID,null);
+  assert.equal((await manager.verifyStop()).terminalClosed,true);assert.throws(()=>manager.resume(),/resume unavailable/);
+  state.targets=[{targetId:'sticky'}];await assert.rejects(manager.verifyStop(),/anchor still live/);assert.equal(manager.status().terminalClosed,false);
+});
+
+test('EOF without observed gateway exit and uncaptured creation never become closed proof',{timeout:1000},async()=>{
+  const h=terminalHarness();await h.manager.close();await assert.rejects(h.manager.prepareStop(),/gateway still live/);
+  assert.equal(h.manager.status().gatewayPID,123);assert.equal(h.manager.status().terminalClosed,false);
+  const unknown=terminalHarness();unknown.manager.anchorTarget=null;unknown.manager.gateway=null;
+  await unknown.manager.close();await assert.rejects(unknown.manager.prepareStop(),/cleanup outcome unknown/);
+  assert.equal(unknown.state.closed,0);assert.equal(unknown.manager.status().terminalClosed,false);
+});
+
+test('terminal prepare waits for the existing cleanup before claiming target absence',async()=>{
+  const {manager,state}=terminalHarness();let release,entered;
+  const gate=new Promise(r=>{release=r;}),ready=new Promise(r=>{entered=r;});
+  manager.cdp.call=async method=>{if(method==='Target.closeTarget'){entered();await gate;state.targets=[];return {};}return {targetInfos:state.targets};};
+  manager.gatewayEnded=true;const closing=manager.close();await ready;
+  let prepared=false;const preparing=manager.prepareStop().then(v=>{prepared=true;return v;});
+  await new Promise(r=>setImmediate(r));assert.equal(prepared,false);release();await closing;
+  assert.equal((await preparing).terminalClosed,true);
+});
+
 test('per-controller nonce routes exclude orphan anchors and human enhancement entry points', () => {
   const h = blankHarness(), old = {...h.manager.config, instance: 'previous'};
   const url = new URL('app://-/index.html'); url.searchParams.set('initialRoute', mobileAnchorRoute(old));

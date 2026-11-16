@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 import path from 'node:path';
+import {MobileAccess} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
 
 // Execute the real controller entry point without launching a host, creating
 // windows or opening its transport. The slice is bounded by adjacent functions.
@@ -19,7 +20,7 @@ function harness({targets = [], creations = new Map(), pending, queryError = fal
     fs: {async writeFile() {}, async rename() {}},
     humanMarker(value) { return new URL(value).searchParams.get('codexPlusHumanWindow'); },
     cdp: {async call(method) { calls.push(method); if (queryError) throw Error('unavailable'); return {targetInfos: targets}; }},
-    mobile: {quiesced: false, async prepareStop() { return {targetId: 'phone-anchor'}; }, resume() { this.quiesced = false; }},
+    mobile: {quiesced: false, async prepareStop() { return {targetId: 'phone-anchor'}; }, async verifyStop() { return {targetId:'phone-anchor'}; }, resume() { this.quiesced = false; }},
     publish: async () => { saved.push(JSON.parse(JSON.stringify(context.state))); },
     process: {stdout: {write: line => replies.push(JSON.parse(line))}},
   });
@@ -83,4 +84,28 @@ test('a failed target census remains unknown and resume does not repeat a window
   await h.run('resume');
   assert.equal(h.context.quiesced, false);
   assert.deepEqual(h.calls, ['Target.getTargets']);
+});
+
+test('controller verification propagates a fresh terminal resource proof and refuses a changed proof', async () => {
+  const h=harness();let closed=true,verifications=0;
+  h.context.mobile.verifyStop=async()=>{verifications++;if(!closed)throw Error('target reappeared');return {targetId:'sticky',terminalClosed:true,gatewayPID:null};};
+  await h.run('prepare');await h.run('verify');
+  assert.equal(h.replies.at(-1).ok,true);assert.equal(h.replies.at(-1).mobile.terminalClosed,true);
+  closed=false;await h.run('verify');assert.equal(h.replies.at(-1).ok,false);assert.equal(verifications,2);
+});
+
+test('an idle transport disconnect publishes its mobile cause before exit without needing a detach event',async()=>{
+  const state={},snapshots=[],exits=[];
+  const publish=async()=>{snapshots.push(JSON.parse(JSON.stringify(state)));};
+  const mobile=new MobileAccess({anchor:'a'},{stateFile:'/unused',cdp:{},sessions:new Map(),publish:async()=>{state.mobile=mobile.status();await publish();}});
+  const start=source.indexOf('function hostDisconnected('),end=source.indexOf('\nfunction fail(',start);
+  assert.ok(start>=0&&end>start);
+  const context=vm.createContext({state,mobile,publish,process:{exit:code=>exits.push(code)}});
+  vm.runInContext(source.slice(start,end),context);context.hostDisconnected();
+  await new Promise(r=>setImmediate(r));
+  assert.equal(snapshots[0].mobile.terminalCause.kind,'transport-closed');
+  assert.equal(snapshots.at(-1).phase,'disconnected');assert.deepEqual(exits,[1]);
+  await mobile.close();
+  // A later connectionClosed also cannot overwrite an already recorded cause.
+  const first=mobile.terminalCause;context.hostDisconnected();await new Promise(r=>setImmediate(r));assert.equal(mobile.terminalCause,first);
 });

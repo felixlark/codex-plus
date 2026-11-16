@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {CDP} from './cdp.mjs';
+import {catalogBackend} from './catalog-processes.mjs';
 
 const home=os.homedir(),app='/Applications/ChatGPT.app';
 const hostPath=app+'/Contents/MacOS/ChatGPT';
@@ -41,11 +42,7 @@ try{
  if(hash(await fs.readFile(binary))!==binaryHash)throw Error('original backend changed');
  const state=await privateJSON(launcher),endpoint=new URL(state.endpoint);
  if(endpoint.protocol!=='ws:'||endpoint.hostname!=='127.0.0.1')throw Error('non-local endpoint');
- const rows=execFileSync('/bin/ps',['-axo','pid=,ppid=,uid=,comm='],{encoding:'utf8'}).trim().split('\n').map(s=>{const m=s.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);return m&&{pid:+m[1],ppid:+m[2],uid:+m[3],path:m[4]};}).filter(Boolean);
- if(!rows.some(r=>r.pid===state.pid&&r.uid===process.getuid()&&r.path===hostPath))throw Error('host identity changed');
- const commands=execFileSync('/bin/ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');
- const backends=rows.filter(r=>r.ppid===state.pid&&r.uid===process.getuid()&&r.path===binary&&commands.some(s=>new RegExp('^\\s*'+r.pid+'\\s+').test(s)&&/\sapp-server(?:\s|$)/.test(s)));
- if(backends.length!==1)throw Error('backend identity changed');
+ const backend=catalogBackend({hostPID:state.pid,uid:process.getuid(),hostPath,binary});
  const sockets=execFileSync('/usr/sbin/lsof',['-nP','-a','-p',String(state.pid),'-iTCP','-sTCP:LISTEN','-Fn'],{encoding:'utf8'});
  if(!sockets.split('\n').includes('n127.0.0.1:'+endpoint.port))throw Error('listener identity changed');
  const host=await mappedHost();if(closing)throw Error('cancelled');
@@ -80,5 +77,5 @@ try{
  };
  const result=await cdp.call('Runtime.evaluate',{expression:`(${read.toString()})(${JSON.stringify(key)},${JSON.stringify(moduleURL)})`,awaitPromise:true,returnByValue:true},sid);
  if(result.exceptionDetails||!result.result?.value)throw Error('catalog unavailable');
- process.stdout.write(JSON.stringify({...result.result.value,hostId:'local',mappedHost:host,hostPid:state.pid,backendPid:backends[0].pid})+'\n');
+ process.stdout.write(JSON.stringify({...result.result.value,hostId:'local',mappedHost:host,hostPid:state.pid,backendPid:backend.pid})+'\n');
 }catch{process.stdout.write(JSON.stringify({error:'Codex 当前任务读取不可用',threads:[],complete:false})+'\n');process.exitCode=1;}finally{await close();}
