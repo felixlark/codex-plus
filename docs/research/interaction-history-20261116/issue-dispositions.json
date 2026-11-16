@@ -1,0 +1,191 @@
+{
+  "assigned_count": 20,
+  "reviewed_count": 23,
+  "comments_read": 152,
+  "issues": [
+    {
+      "issue": 117,
+      "assigned_to_this_audit": true,
+      "comments_read": 5,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 completed。真实 question reply 已收到并用于续办，[实际回复](https://github.com/felixlark/smart-shadow/issues/117#issuecomment-6208834065)、[最终三项验收](https://github.com/felixlark/smart-shadow/issues/117#issuecomment-6335677119)。仅证明提问流程修复，平台卡片消失根因仍未知。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 276,
+      "assigned_to_this_audit": true,
+      "comments_read": 24,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。PR279/280 的部分源码与“官方对话、四屏只读”历史有效；登录/AASA/生产配置恢复失败、统计原件、unknown 均保留。11月15日正文明确取消四屏与旧 App 安装；只将原前端会话能力归 #578，不补做旧四屏。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 333,
+      "assigned_to_this_audit": true,
+      "comments_read": 3,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。[PR334 候选验收](https://github.com/felixlark/smart-shadow/issues/333#issuecomment-6494045429)仅证明模拟器四 Tab 与未登录状态，未证明真实历史/目录；后续取消优先，不重开 Draft。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 339,
+      "assigned_to_this_audit": false,
+      "comments_read": 3,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 not_planned。PR348 已合源码与本地快照预览，不是生产监测验收；[明确缺口](https://github.com/felixlark/smart-shadow/issues/339#issuecomment-6502974034)。最新正文取消九席/监测页，仅保留 #611 已有真实健康与 unknown，不能塞入当前小看板。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 354,
+      "assigned_to_this_audit": true,
+      "comments_read": 1,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。只针对旧 PR334 的更新任务，随四屏取消；旧 owner 评论不构成恢复指令。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 357,
+      "assigned_to_this_audit": true,
+      "comments_read": 4,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。最初 grok.com 未登录观察不等于 Grok Bot；后续纠正对象但未完成真实对标。取消独立旧 App 对标，保留研究来源。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 374,
+      "assigned_to_this_audit": false,
+      "comments_read": 1,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。定期蒸馏/自学习没有转移到 #578 或后台服务；本轮不恢复收集。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 406,
+      "assigned_to_this_audit": true,
+      "comments_read": 0,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。旧文件链接修复只有候选/技术检查，未证明真机接受；当前原前端手机不是旧私有文稿目录解析器，不追加原范围。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 417,
+      "assigned_to_this_audit": true,
+      "comments_read": 40,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。旧网页/目录/多阶段 PR479 记录不等于当前采用。暂停、短暂文稿恢复及[停止独立开发](https://github.com/felixlark/smart-shadow/issues/417#issuecomment-6881711878)保留；移交的三份文稿已由 #578 [PR625 接收](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6882570960)，不复活旧 UI。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 425,
+      "assigned_to_this_audit": true,
+      "comments_read": 0,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。Cindy 属历史 HOW 参考，未授权多 Harness/Companion 实施；取消决定不扩入 #578。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 432,
+      "assigned_to_this_audit": true,
+      "comments_read": 0,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。11月3日已废止 DSH/第二 Agent Loop，后续旧正文不是新指令。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 469,
+      "assigned_to_this_audit": true,
+      "comments_read": 0,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 not_planned。旧 20 项目录、批量更名、禁拆批、自制页面取消；仅同一原会话读取/单次发送/流式/防重与 #578 重合。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 352,
+      "assigned_to_this_audit": true,
+      "comments_read": 8,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 completed。PR343 已同步 main，16文件410项检查及最终[合入/结案](https://github.com/felixlark/smart-shadow/issues/352#issuecomment-6509630540)有据。多个失败/误取消 execution 不合并或重放；本案仅重放目标完成，不证明宿主权限全链路。后续归 #611。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 324,
+      "assigned_to_this_audit": true,
+      "comments_read": 3,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 not_planned。初始候选两项CI失败已由[后继核收](https://github.com/felixlark/smart-shadow/issues/324#issuecomment-6601321574)解释，PR343合入不等于真实权限生效。旧PR271重放取消；当前权限/模型/cwd核验归 #611，安装归 #613。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 237,
+      "assigned_to_this_audit": true,
+      "comments_read": 3,
+      "proposed_future_module": "management",
+      "decision_and_evidence": "保持 completed。[PR240合入及两项签名夹具通过](https://github.com/felixlark/smart-shadow/issues/237#issuecomment-6362595180)，没有放宽生产签名、没有改正式安装包。归 #613签名/安装测试历史。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 217,
+      "assigned_to_this_audit": true,
+      "comments_read": 1,
+      "proposed_future_module": "management",
+      "decision_and_evidence": "保持 completed。[完整检索零命中与范围说明](https://github.com/felixlark/smart-shadow/issues/217#issuecomment-6335853255)完成称谓任务；未因纯文稿重跑全量。后续文稿规范归 #613，不改旧历史措辞。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 207,
+      "assigned_to_this_audit": true,
+      "comments_read": 4,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 completed。[满24小时无直推](https://github.com/felixlark/smart-shadow/issues/207#issuecomment-6356754721)及[结案](https://github.com/felixlark/smart-shadow/issues/207#issuecomment-6356982844)有据。旧 codex_decision 停用/原target保留，当前官方队列不是恢复旧直推；建议归 #611。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 222,
+      "assigned_to_this_audit": true,
+      "comments_read": 8,
+      "proposed_future_module": "management",
+      "decision_and_evidence": "保持 completed。[正式r6.4.58公开四路径200及helper ready](https://github.com/felixlark/smart-shadow/issues/222#issuecomment-6356381919)补齐Mac中继；旧blocked是防回退，不装旧候选。后加iOS五文件已拆 #406 且取消，不由Mac完成外推手机通过。建议归 #613。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 206,
+      "assigned_to_this_audit": true,
+      "comments_read": 2,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 completed。[10分钟528条采样](https://github.com/felixlark/smart-shadow/issues/206#issuecomment-6335802054)证明当时不抢前台，原PR209同步状态是另层事实，不重跑旧取样。建议归 #611后台项目/线程访问。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 203,
+      "assigned_to_this_audit": true,
+      "comments_read": 6,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 not_planned（重复跟踪合并），不误写已验收。[最新决定](https://github.com/felixlark/smart-shadow/issues/203#issuecomment-6889277940)明确转 #611并保留未勾选真实后台登记验收；旧正文“保持开放”已被该决定替代。原治理thread/暂停仍保留，不重启。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 193,
+      "assigned_to_this_audit": true,
+      "comments_read": 5,
+      "proposed_future_module": "taskd",
+      "decision_and_evidence": "保持 not_planned。单角色实验没有验收证据，旧治理thread明确暂停。正文取消独立CODEX_HOME/SQLite信箱/control socket路线；正式队列仅归 #611，不新建旧角色守护器。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 578,
+      "assigned_to_this_audit": true,
+      "comments_read": 30,
+      "proposed_future_module": "interactiond",
+      "decision_and_evidence": "保持 completed。初读29条，补读全量分配评论6905365297；原手机原前端、宿主、小看板和生命周期验收分别保留。最终 [acceptance](../../acceptance.md) 的 c8ce400 基线已记录 TF374、30分钟资源观察；真机连接未验收。",
+      "old_owner_pause_unknown": "preserve original issue and historical comments; no reactivation or metadata mutation"
+    },
+    {
+      "issue": 219,
+      "assigned_to_this_audit": false,
+      "comments_read": 1,
+      "proposed_future_module": "management",
+      "decision_and_evidence": "Keep completed: PR220 merged; historical open text superseded by final PR evidence.",
+      "old_owner_pause_unknown": "preserve original issue and comments"
+    }
+  ]
+}
