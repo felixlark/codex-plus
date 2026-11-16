@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>me.longbiaochen.codex-plus</string>
+	<string>io.github.felixlark.codex-plus</string>
 	<key>CFBundleName</key>
 	<string>CodexPlus</string>
 	<key>CFBundlePackageType</key>

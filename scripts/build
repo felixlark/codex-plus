@@ -1,23 +1,33 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ $# -ne 2 || "$1" != "--compatibility-input" ]]; then
+  echo "Usage: scripts/build --compatibility-input /absolute/private/input.json" >&2; exit 2
+fi
+INPUT="$2"
+if [[ -z "${CSC_NAME:-}" || "$CSC_NAME" == "-" ]]; then
+  echo "An explicit Apple signing identity is required" >&2; exit 2
+fi
 BUILD_ROOT="${CODEX_PLUS_BUILD_ROOT:-$HOME/Library/Caches/codex-plus/standalone/packages}"
 SCRATCH="${CODEX_PLUS_SCRATCH_PATH:-$HOME/Library/Caches/codex-plus/standalone/swift-build}"
 CACHE="$HOME/Library/Caches/codex-plus/standalone/swift-cache"
-IDENTITY="${CSC_NAME:-Developer ID Application: LONGBIAO CHEN (HJG65XBC25)}"
+INFO_CACHE="${CODEX_PLUS_INFO_CACHE:-$HOME/Library/Caches/codex-plus/standalone/compatibility-info}"
+IDENTITY="$CSC_NAME"
 cd "$ROOT"
 git diff --quiet HEAD -- Package.swift AppInfo.plist Sources scripts resources tools/project-order-probe LICENSE
-if [[ -n "$(git ls-files --others --exclude-standard -- Package.swift AppInfo.plist Sources resources tools/project-order-probe)" ]]; then
+if [[ -n "$(git ls-files --others --exclude-standard -- Package.swift AppInfo.plist Sources scripts/compatibility-input.py resources tools/project-order-probe)" ]]; then
   echo "Commit all package inputs before a release build" >&2; exit 1
 fi
-swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE"
-BIN="$(swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE" --show-bin-path)"
+SELECTED_INFO="$(python3 -B "$ROOT/scripts/compatibility-input.py" render --input "$INPUT" --template "$ROOT/AppInfo.plist" --cache-root "$INFO_CACHE")"
+EXPECTED_REQUIREMENT="$(python3 -B "$ROOT/scripts/compatibility-input.py" requirement --input "$INPUT")"
+CODEX_PLUS_LINK_INFO_PLIST="$SELECTED_INFO" swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE"
+BIN="$(CODEX_PLUS_LINK_INFO_PLIST="$SELECTED_INFO" swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE" --show-bin-path)"
 mkdir -p "$BUILD_ROOT"
 STAGE="$(mktemp -d "$BUILD_ROOT/codexplus.XXXXXX")"
 APP="$STAGE/Codex Plus.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/CodexPlus" "$APP/Contents/MacOS/"
-cp "$ROOT/AppInfo.plist" "$APP/Contents/Info.plist"
+cp "$SELECTED_INFO" "$APP/Contents/Info.plist"
 cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$APP/Contents/Resources/"
 cp "$ROOT/scripts/inspect-sidebar-model.mjs" "$APP/Contents/Resources/"
 cp "$ROOT/LICENSE" "$ROOT/third_party/OpenComputerUse-LICENSE" "$APP/Contents/Resources/"
@@ -29,7 +39,9 @@ cp "$ICONS/AppIcon.icns" "$ICONS/MenuBarIcon.pdf" "$APP/Contents/Resources/"
 ACORN="$HOME/Library/Caches/codex-plus/standalone/project-order-probe/node_modules/acorn"
 cp "$ACORN/dist/acorn.mjs" "$APP/Contents/Resources/"
 cp "$ACORN/LICENSE" "$APP/Contents/Resources/ACORN-LICENSE"
+python3 -B "$ROOT/scripts/compatibility-input.py" verify-app --input "$INPUT" --app "$APP"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
-python3 "$ROOT/scripts/package-manifest.py" "$APP" "$ROOT" "$STAGE/CodexPlus.package.json"
+codesign --verify --deep --strict -R="$EXPECTED_REQUIREMENT" "$APP"
+python3 -B "$ROOT/scripts/compatibility-input.py" verify-app --input "$INPUT" --app "$APP"
+python3 -B "$ROOT/scripts/package-manifest.py" --compatibility-input "$INPUT" "$APP" "$ROOT" "$STAGE/CodexPlus.package.json"
 printf '%s\n' "$APP"

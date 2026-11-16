@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s Tests -p 'test_compatibility_input.py'
 if [[ ! -f "$HOME/Library/Caches/codex-plus/standalone/project-order-probe/node_modules/acorn/dist/acorn.mjs" ]]; then
   "$ROOT/scripts/setup-project-order-probe"
 fi

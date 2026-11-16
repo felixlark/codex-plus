@@ -5,11 +5,7 @@ public enum ToolWindowPolicy {
     public enum Scope: Equatable { case document(URL), none }
     public static let enabledKey = "agentToolWindowsEnabled"
     public static let chromeEnabledKey = "chromeUsesAgentDisplay"
-    public static let protectedBundles: Set<String> = [
-        "com.openai.codex", "me.longbiaochen.codex-plus", "me.longbiaochen.smart-shadow.app", "me.longbiaochen.smart-shadow.interactiond", "com.webcatalog.juli.x-chat",
-        "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
-        "com.google.Chrome.app.ehpoaimemjameeijlpblkfpomemadkke"
-    ]
+    public static let protectedBundles = CodexPlusIdentity.current.protectedBundles
     public static func scope(bundleID: String, resource: URL?, existingDocuments: Set<URL>) -> Scope {
         guard !protectedBundles.contains(bundleID) else { return .none }
         guard let resource, resource.isFileURL else { return .none }

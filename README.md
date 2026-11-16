@@ -7,3 +7,5 @@ Mac 上的 Codex 界面增强与 iOS Smart Shadow 客户端统一由 SmartShadow
 现有功能、用户偏好、手机配对和未发草稿随实际消费者迁接。正式安装版的 Mac 与 iOS 验收通过后，才退役独立 Codex Plus 应用并归档本仓。
 
 [迁移与退役记录](docs/retirement.md)
+
+[公开源码身份与显式兼容输入](docs/compatibility-input.md)
