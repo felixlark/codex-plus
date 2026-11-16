@@ -1,18 +1,20 @@
 # SmartShadow 单包与独立交互后台
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 依据 [#613 用户定案 r2/r3](https://github.com/felixlark/smart-shadow/issues/613#issuecomment-6906325173)、[#578 切片](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6906331071)和[安装合同](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6906497695)。#578交付唯一源码与接口，#613交付正式安装切换、单仓迁入和最终退役。现役 Plus80 保留至新包实际验收。
 
 ## 一个安装入口，两个进程
 
 |项目|固定接口|
 |---|---|
-|容器|`/Applications/SmartShadow.app`，`me.longbiaochen.smart-shadow.app`|
+|容器|`/Applications/SmartShadow.app`，`LOCAL_SMARTSHADOW_BUNDLE_ID`|
 |主可执行|`Contents/MacOS/SmartShadowManager`|
 |后台 bundle|`Contents/Library/LoginItems/SmartShadowInteraction.app`|
-|后台身份|`me.longbiaochen.smart-shadow.interactiond`|
+|后台身份|`LOCAL_AUTHORITY_BUNDLE_ID`|
 |后台可执行|`Contents/Library/LoginItems/SmartShadowInteraction.app/Contents/MacOS/SmartShadowInteraction`|
 |后台资源|helper 的 `Contents/Resources`|
-|签名|主包/helper分别 Developer ID Team `HJG65XBC25`，先内后外；PID核helper身份|
+|签名|主包/helper分别 Developer ID Team `LOCAL_PUBLISHER_TEAM_ID`，先内后外；PID核helper身份|
 |版本|主App/helper 4.2.0（4200）|
 
 helper保持原观察器、页面增强、F6、人窗与工具右屏路由、controller、原前端手机宿主。菜单栏仅归helper，菜单打开主UI、打开Codex、正式停止交互服务。私有Agent设置窗口移除；设置及重新接入增强统一在主UI，通过原管理socket作用于helper。页面按钮显示SmartShadow，原DOM事件/排序/Snake结构不变。
@@ -37,9 +39,9 @@ helper保持原观察器、页面增强、F6、人窗与工具右屏路由、con
 
 ## 数据与生命周期
 
-已知偏好五项（自动展开、屏幕选择、自动发送建议、工具右屏、Chrome右屏）从旧suite一次复制到新`me.longbiaochen.smart-shadow.app`，已有新值优先、false及屏幕Data原样保留；迁移后只写新域。旧suite不写。原Application Support/codex-plus、移动配置、历史结果和未决操作继续保留原位。
+已知偏好五项（自动展开、屏幕选择、自动发送建议、工具右屏、Chrome右屏）从旧suite一次复制到新`LOCAL_SMARTSHADOW_BUNDLE_ID`，已有新值优先、false及屏幕Data原样保留；迁移后只写新域。旧suite不写。原Application Support/codex-plus、移动配置、历史结果和未决操作继续保留原位。
 
-MobileGateway仍使用原签名标识`me.longbiaochen.codex-plus.mobile-gateway`和原TLS Keychain tag，主helper不复制/导出密钥。新路径下TLS指纹与合法访问须真实核验；访问失败保留阻点，不能降低手机校验。
+MobileGateway仍使用原签名标识`LOCAL_APPLICATION_BUNDLE_ID`和原TLS Keychain tag，主helper不复制/导出密钥。新路径下TLS指纹与合法访问须真实核验；访问失败保留阻点，不能降低手机校验。
 
 管理协议仍为v1，runtime身份换成准确嵌套helper。新增`codex.open`/`enhancements.reconnect`必须带expected_runtime，且仅在running接受；不允许注入设置或任意命令。重新接入仍要求关闭自动发送，沿原controller检查未提交内容；未确认请求不重发。原prepare/drain/nonce保全/正常stop逻辑保持。
 

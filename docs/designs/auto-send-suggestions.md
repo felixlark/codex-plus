@@ -1,12 +1,14 @@
 # 建议提示词自动发送
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 > 历史0.5.x前台方案。0.6.0已由[后台原生方案](background-suggestions.md)替代自动执行路径，开关与去重记录沿用。
 
 2026-11-12，Sol，chat 01a1ce59-86c7-7be3-b6f5-2594bff9b46f。用户要求同案依次完成：方案评审 → 开发和真实验收 → 做好后发推。开发 push 沿既定授权，X 按 @felixlark 身份及已授权范围办理。默认关闭，用户可从统一设置随时开关。
 
 ## 事实、取舍与集成
 
-规范仓 /Users/longbiao/Projects/codex-plus，已取得 0.4.1 writer 释放，从 f456ef4 接续。正式 /Applications/Codex Plus.app 的 CodexLauncher 单独管理 controller.mjs，本机已连接官方 Codex 26.1106.51428。官方应用包和签名保持。已有控制器通过本地 CDP（浏览器调试协议）读取和适配经摘要审核的 renderer 脚本，正常退出 Plus 保留 Codex。
+规范仓 PRIVATE_EVIDENCE_PATH，已取得 0.4.1 writer 释放，从 f456ef4 接续。正式 /Applications/Codex Plus.app 的 CodexLauncher 单独管理 controller.mjs，本机已连接官方 Codex 26.1106.51428。官方应用包和签名保持。已有控制器通过本地 CDP（浏览器调试协议）读取和适配经摘要审核的 renderer 脚本，正常退出 Plus 保留 Codex。
 
 官方资源 webview/assets/async/864380.74f4445879.js，sha256 63ad0177e7b2d888cbf80db7ed6167c73f0012a652fc6ecd10f34052a1e87ff0，TBBz/dlg1 模块已读取。原生预测在完成且非 automation 的 turn 后产生，prediction.sourceTurnId 与 scope 的 latestTurnId 可匹配。widget 位于空白且非组合输入、非 mention 菜单的编辑器，data-cumberbatch 标记。原生 Tab 插入预测的 ProseMirror doc 并登记 accepted；随后通过原生 Send 按钮调用原提交路径。
 

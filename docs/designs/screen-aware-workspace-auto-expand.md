@@ -1,9 +1,11 @@
 # 按屏幕选择自动展开 Codex 右侧工作区
 
-- 作者：Longbiao CHEN
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
+- 作者：felixlark
 - 日期：2026-11-10（Asia/Shanghai）
-- 状态：Longbiao 于 2026-11-10 批准；已实施安装版 0.2.0，现场验收见 `docs/acceptance.md`
-- 源码基线：`cc28fe5`，规范 checkout `/Users/longbiao/Projects/codex-plus`
+- 状态：用户 于 2026-11-10 批准；已实施安装版 0.2.0，现场验收见 `docs/acceptance.md`
+- 源码基线：`cc28fe5`，规范 checkout `PRIVATE_EVIDENCE_PATH`
 - 范围：设置、偏好持久化、自动展开条件与只读诊断
 
 ## 1. 问题与目标
@@ -112,7 +114,7 @@ flowchart LR
 
 ### 4.1 数据与持久化
 
-在现有 `me.longbiaochen.codex-plus` 偏好域增加单个 `workspaceAutoExpandDisplaySelection` Data 值，以 Codable JSON 编解码。保留已有 `workspaceAutoExpand` Bool。
+在现有 `LOCAL_PLUS_BUNDLE_ID` 偏好域增加单个 `workspaceAutoExpandDisplaySelection` Data 值，以 Codable JSON 编解码。保留已有 `workspaceAutoExpand` Bool。
 
 | 字段 | 类型 | 约束 |
 | --- | --- | --- |
@@ -177,7 +179,7 @@ flowchart LR
 
 ## 5. 实施边界与步骤
 
-后续开发由当前 Codex Plus 项目执行，Longbiao 审阅设计与最终产品行为；Dock Switch 作为只读参考。
+后续开发由当前 Codex Plus 项目执行，用户 审阅设计与最终产品行为；Dock Switch 作为只读参考。
 
 | 阶段 | 文件范围 | 交付与检查 |
 | --- | --- | --- |
@@ -224,7 +226,7 @@ flowchart LR
 | 镜像模式 | 列表与逻辑屏幕对应；归属有歧义时跳过动作并给出原因 |
 | ChatGPT 模式、Rename、已展开任务 | 原有保护与标签页保持通过 |
 
-候选绑定记录位于 `~/Library/Logs/codex-plus/`，构建缓存位于 `~/Library/Caches/codex-plus/`。保留旧安装版用于回退；单 runtime 与原辅助功能授权沿用。最终运行现场恢复正常配置，Issue 的产品验收以 Longbiao 接受结果为准。
+候选绑定记录位于 `~/Library/Logs/codex-plus/`，构建缓存位于 `~/Library/Caches/codex-plus/`。保留旧安装版用于回退；单 runtime 与原辅助功能授权沿用。最终运行现场恢复正常配置，Issue 的产品验收以 用户 接受结果为准。
 
 ## 7. 备选方案与取舍
 

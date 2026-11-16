@@ -1,1 +1,0 @@
-v3 only changes restore operation guard ordering: capture immutable protectedOperation from record; failed full CG inventory cannot overwrite it; known gone/owner changed/launch changed reconciles; then protected operation returns before AX/frame diagnostics. Query failure never erases in-flight/unknown lifecycle. No other v2 source changes. Same pending runtime acceptance.

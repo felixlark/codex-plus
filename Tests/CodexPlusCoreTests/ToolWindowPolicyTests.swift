@@ -4,7 +4,7 @@ import XCTest
 final class ToolWindowPolicyTests: XCTestCase {
     func testOnlyExplicitFileClaimsAndProtectedBundles() {
         let resource = URL(fileURLWithPath: "/tmp/tool.txt")
-        for bundle in ["com.apple.TextEdit", "com.google.Chrome", "me.longbiaochen.dock-switch.settings", "com.deskvncviewer.desktop", "my.generated.tool"] {
+        for bundle in ["com.apple.TextEdit", "com.google.Chrome", "io.github.example.generated-settings", "com.deskvncviewer.desktop", "my.generated.tool"] {
             XCTAssertEqual(ToolWindowPolicy.scope(bundleID: bundle, resource: nil, existingDocuments: []), .none)
             XCTAssertEqual(ToolWindowPolicy.scope(bundleID: bundle, resource: URL(string: "https://example.com")!, existingDocuments: []), .none)
             XCTAssertEqual(ToolWindowPolicy.scope(bundleID: bundle, resource: resource, existingDocuments: []), .document(resource.resolvingSymlinksInPath()))

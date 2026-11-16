@@ -1,5 +1,7 @@
 # v4 独立人工增强：当前证据范围
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 本批只交独立源码/签名候选，不启动、注入或安装Plus。原生debug编译已通过，83项Node与80项无GUI Swift测试通过；其中无响应Unix socket在原生deadline后返回。独立复核发现的缓存布局、暂停/恢复迟到授权、原生deadline及厂商进程签名缺口已修复并读回。签名候选最终固定记录写原#578及PR。生产端目标用途合同、旧人工增强writer交接、两产品共享同后台/文件隔离和真实安装版交互尚待SmartShadow安全点及#613统一采用，不能据此宣布运行完成。
 
 各项目先总监、经理、专员，再按状态的实现和protocol10已保留。该排序此前在SmartShadow4204真实安装版有样本验收：[原回执](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6908472376)。经理、需处理与超过预览数量的真实数据样本当时缺失，沿定向测试覆盖，不冒认GUI全分支。
@@ -29,7 +31,7 @@ r1两个fresh-context独立审视及r2最终定向复审完成，见[审视记�
 
 ## Smart Shadow TestFlight 374（2026-11-16）
 
-用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `me.longbiaochen.smart-shadow`、ASC app6784136332、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
+用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `LOCAL_APPLICATION_BUNDLE_ID`、ASC app6784136332、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
 
 6项受影响移动资源/帧检查、两项现有CI、plist/shell/diff检查通过。Release仅关闭Web Inspector并增加正式签名/图标/方向/隐私配置，不改变原聊天前端和Mac运行体。最终archive/export均成功，包内身份、entitlement及iPad方向声明实读；全部19204文件摘要留本机。IPA SHA256为`1abaa8760dc0ddfa91ea81f494da440c8916f1aa28e8adc16fffa45c3da149a6`。
 
@@ -147,7 +149,7 @@ PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartSh
 - [x] 从正式安装版运行：手动收起新建页后返回已有聊天，再点击项目行 `Start new chat in codex-plus`，新建页右侧自动恢复；动作计数 1→2。OCU 控件树确认 `Chat tabs`、`Hide tabs` 和 New tab 内容可见。手动收起当前页保持，切换已收起聊天也能展开。
 - [x] 恢复原活动列表开启及本案聊天，窗口从 OCU 辅助屏恢复；宿主 PID 64999 保持，未发送验收消息。安装保留旧版回退包。
 - [ ] 带真实指针悬浮卡的点击路径未单独取得截图；该分支由结构回归覆盖。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/project-new-chat-20261114/`，含 tests.log、build.log、install.log、installed-hashes.txt、project-new-result.json、final-ocu.txt 及 final.png。OCU 在退出 Plus 后自动重新打开了旧版；最终通过公开 `NSRunningApplication.terminate()` 正常退出自有 Plus 后完成安装，未强制结束或重启宿主。
 
@@ -156,7 +158,7 @@ PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartSh
 - [x] 移除设置页待审列表、空状态、批准／拒绝／重审按钮及对应原生界面数据处理；提示文案不再引导到待审列表。后台审查规则保持，敏感或范围不明的建议不自动发送。
 - [x] 47 项 Node、40 项 Swift 检查通过；Developer ID 签名构建、正式安装及严格验签通过。构建与安装可执行文件 SHA256 均为 `fe9ff6ba40a9ad33b1ac5382621adedc862b9348e0fc4ca3ab1514e0ccf9c7ba`。
 - [x] 从 `/Applications/Codex Plus.app` 启动设置页，OCU 截图及完整控件树确认建议开关之后直接进入工作区设置，无待审区块或审批按钮。自动发送保留开启，宿主 PID 64999 未重启；页面入口、项目排序及连接均 active。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/settings-cleanup-20261114/`，含 tests.log、build.log、install.log、signing.log、settings-ocu.txt 及 final.json。安装脚本保留旧安装包供回退。本次只验收设置页变化，未重复后台发送或硬件快捷键验收。
 
@@ -169,7 +171,7 @@ PR27 合入 `15376e4087c6b5e82219c78d38a65d03c3a0f949`，由 #613 安装 SmartSh
 - [x] 在真实安装版收起本案工作区，切到已有验收聊天再返回，右侧工作区可见恢复；动作计数 0→1。
 - [x] 当前任务手动收起后保持收起；通过 OCU 的应用内 ⌘N 新建 Codex 页，工作区展开，动作计数 1→2。此项验证应用快捷键，不声称硬件 HID 路径。
 - [x] 切到 ChatGPT 模式，收起后应用内 ⌘N，保持收起，动作计数仍为 2。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/workspace-fix-20261114/`。既有用户偏好及未发送草稿保留，宿主进程未重启。旧安装包由安装脚本保存在 Library/Caches 下供回退。
 
@@ -188,13 +190,13 @@ Sol 正式安装版 `/Applications/Codex Plus.app` 0.6.0 build13；Mach-O UUID `
 
 ## 0.5.2 F6 沿用 Dock Switch 定位（2026-11-12）
 
-Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开从 Dock Switch 安装配置读取 ChatGPT 的 `placement`，当前为 `external_fill`；定位由 Dock Switch 按实际宿主 PID 执行。配置修改下次打开生效，读取失败保留窗口位置。构建与安装 Mach-O UUID 同为 `414C2C9A-79BC-382B-BDC9-F8B9A81FCFDC`，Developer ID Team HJG65XBC25、Hardened Runtime 和安全时间戳有效，安装版严格验签通过。旧版备份在 `~/Library/Caches/codex-plus/previous-install.jkIOi7/Codex Plus.app`。
+Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开从 Dock Switch 安装配置读取 ChatGPT 的 `placement`，当前为 `external_fill`；定位由 Dock Switch 按实际宿主 PID 执行。配置修改下次打开生效，读取失败保留窗口位置。构建与安装 Mach-O UUID 同为 `414C2C9A-79BC-382B-BDC9-F8B9A81FCFDC`，Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime 和安全时间戳有效，安装版严格验签通过。旧版备份在 `~/Library/Caches/codex-plus/previous-install.jkIOi7/Codex Plus.app`。
 
 - [x] 16 项 Node、35 项 Swift 检查通过。新增回归覆盖 ChatGPT 与 Codex 规则区分、设置更改后重新读取、铺满／半屏透传、不可读／缺失配置保持原位。
 - [x] F6 对应的实际启动命令在安装版上将既有窗口从右屏移回主外屏；状态为 `placementSource=dock-switch`、`placementRule=external_fill`、`placement=placed`。
-- [x] Longbiao 按一次实体 F6 后，入口计数 5→6，Plus PID4922、宿主 PID5156 保持；真实窗口 w-11718 从右屏 `(2022,-1050,1920,1050)` 回到 DELL U3219Q 工作区 `(-538,-1410,2560,1410)`，官方 Computer Use 可见确认。
+- [x] 用户 按一次实体 F6 后，入口计数 5→6，Plus PID4922、宿主 PID5156 保持；真实窗口 w-11718 从右屏 `(2022,-1050,1920,1050)` 回到 DELL U3219Q 工作区 `(-538,-1410,2560,1410)`，官方 Computer Use 可见确认。
 - [x] 最终页面入口与项目排序 active，自动建议 enabled=true、pageReady=true、unknown=0；工作区观察正常。现场保留主外屏正常运行，既有用户设置沿用。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。本次实体 F6 覆盖已运行宿主的打开路径。
+- [ ] 用户 最终接受；Issue #1 保持开放。本次实体 F6 覆盖已运行宿主的打开路径。
 
 证据：`~/Library/Logs/codex-plus/dock-placement-20261112/` 的 tests.log、build.log、install.log、installed-signing.log、dock-switch-rule.json、displays.json、before-physical-f6.json、after-physical-f6.json 和 physical-f6-windows.json。
 
@@ -207,7 +209,7 @@ Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开
 - [x] 关闭设置中的自动展开后停止动作，重新启用后恢复任务切换展开。
 - [x] 登录启动设置能保存，状态命令可回读系统注册状态。
 - [x] Dock Switch 安装版已移除对应设置、观察器和旧状态入口。
-- [ ] Longbiao 完成最终验收。
+- [ ] 用户 完成最终验收。
 
 运行记录保存在本机日志目录。GitHub 只记录脱敏结果、候选与安装身份。
 
@@ -219,7 +221,7 @@ Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.2 build 11。每次打开
 ## 交付验证
 
 2026-11-09 在 Sol 上完成。源码候选为 af634325757c92af2c482de5ac7e3c631c685b25，
-Codex Plus 版本为 0.1.0，签名使用 Developer ID Application、Team HJG65XBC25、
+Codex Plus 版本为 0.1.0，签名使用 Developer ID Application、Team LOCAL_PUBLISHER_TEAM_ID、
 Hardened Runtime 和安全时间戳。构建与安装的 Mach-O UUID 相同。
 
 本地与 GitHub Actions 的 21 项核心测试均通过。Dock Switch 的 102 项 Node 测试和
@@ -234,7 +236,7 @@ Hardened Runtime 和安全时间戳。构建与安装的 Mach-O UUID 相同。
 
 ## 0.2.0 按屏幕选择
 
-设计见[按屏幕自动展开方案](designs/screen-aware-workspace-auto-expand.md)，Longbiao 于 2026-11-10 批准实施。
+设计见[按屏幕自动展开方案](designs/screen-aware-workspace-auto-expand.md)，用户 于 2026-11-10 批准实施。
 
 - [x] 安装版列出当前实际屏幕，支持多选和所有屏幕模式。
 - [x] 取消当前屏幕勾选后，真实 ⌘N 保持收起，动作计数维持。
@@ -247,9 +249,9 @@ Hardened Runtime 和安全时间戳。构建与安装的 Mach-O UUID 相同。
 - [x] 33 项核心测试通过，包括屏幕几何、身份异常、持久化、配置变化的基线与生命周期。
 - [ ] 实体屏幕拔插、换接口和整机重启后核对身份恢复。
 - [ ] 真实镜像模式与全部跨屏布局现场验收。
-- [ ] Longbiao 最终接受屏幕选择功能。
+- [ ] 用户 最终接受屏幕选择功能。
 
-0.2.0（build 2）使用 Developer ID Application、Team HJG65XBC25、Hardened Runtime 和安全时间戳签名。
+0.2.0（build 2）使用 Developer ID Application、Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime 和安全时间戳签名。
 构建与安装的 Mach-O UUID 均为 `28E0E98E-613D-3AF4-BF0B-1AEB94D0CFD7`。
 本次先通过 Open Computer Use 插件执行按键与 header 控件检查，后通过 Codex 内置 Computer Use 完成保存、重启与设置恢复。
 本机证据位于 `~/Library/Logs/codex-plus/screen-design-20261110/`。
@@ -260,20 +262,20 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 ## 0.3.0 Project 活动排序与 F6 入口（2026-11-11）
 
-执行电脑 Sol。安装候选 0.3.0 build 4，Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-11 13:21:57；构建与安装 Mach-O UUID 同为 `1B48616F-C393-332B-AF49-AEB7ED5F2336`。官方宿主为原签名 Codex 26.1103.60933（本机包名ChatGPT.app，bundle com.openai.codex，Team 2DC432GLL2）。前后验签通过，供应商文件未改写。
+执行电脑 Sol。安装候选 0.3.0 build 4，Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime、安全时间戳 2026-11-11 13:21:57；构建与安装 Mach-O UUID 同为 `1B48616F-C393-332B-AF49-AEB7ED5F2336`。官方宿主为原签名 Codex 26.1103.60933（本机包名ChatGPT.app，bundle com.openai.codex，Team 2DC432GLL2）。前后验签通过，供应商文件未改写。
 
 - [x] 普通启动器与官方应用各有Dock item的实验已确认；最终Plus为LSUIElement/accessory，无自己的Dock item，官方Codex保留Dock item。
 - [x] 查实生效的Default Karabiner profile；仅四处Codex入口命令改到Plus，F3、普通F5、CapsLock、右Command及其他字段保持。配置备份及生成器check通过。
 - [x] 安装版冷启动参数--open-codex打开独立测试资料的官方宿主；两个已审资源在首次执行前适配，无额外Page.reload。
 - [x] 相同Karabiner命令重复打开走reopen；入口计数增加，Plus及宿主PID不变，右侧布局按已存在PID完成。
-- [x] Longbiao按实体F6后，入口计数由2增至7；仍为同一Plus与官方宿主，没有重复启动。
+- [x] 用户按实体F6后，入口计数由2增至7；仍为同一Plus与官方宿主，没有重复启动。
 - [x] 同一安装候选：折叠B执行sleep120；后来在C取得CP-C FINAL FOREGROUND OK并保留未发送草稿。B完成后置顶，B仍折叠、C仍选中、草稿完整。随后查看B，存在CP-B FINAL BACKGROUND OK及Worked for 2m 5s。
 - [x] 手动重载同一聊天后，所选C、原生草稿及B/C/A顺序恢复；活动时间与原生时间均参与。
 - [x] 新聊天重载保持新聊天，不错误打开此前C聊天或其草稿。DOM占位文字探针不可靠的一次失败保留；最终以AX的Do anything空输入及路由/旧内容缺席联合核验。
 - [x] 终止自有controller后，Swift自动重连；Plus PID84332、宿主PID84870不变，controller由84442变99173；没有强制刷新或关闭宿主，C及草稿保持，后续重载继续适配。
 - [x] 原生File → New Window创建第二真实窗口，首次执行即协议6；两个窗口均显示B/C/A，控制器无拦截错误。
 - [x] 33项Swift核心测试、3项活动时间/多窗口/路由回归、4类动态Electron fixture通过；Dock Switch全套Node及55项Swift测试通过。
-- [ ] Longbiao最终接受此功能；Issue #1保持开放。
+- [ ] 用户最终接受此功能；Issue #1保持开放。
 
 独立测试资料、三个本地项目和证据保留；覆盖为本地Codex项目。远程Codex/SSH及ChatGPT来源未作真实账号交互验收；不据本地结果外推。既有原生导航的消费者链及Pinned/自定义区回归复用对应未变接缝和fixture证据。
 
@@ -286,7 +288,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 ## 0.4.0 统一入口与贪吃蛇（2026-11-12）
 
-用户批准修正后的 GSE 方案：左下角按钮区第一项为 Codex Plus，末项为贪吃蛇；菜单栏程序保留。执行电脑 Sol，官方宿主 26.1106.51428，安装版 `/Applications/Codex Plus.app` 0.4.0 build 6。Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 13:34:48；构建与安装 Mach-O UUID 同为 `81F8BBC9-82AF-3626-9D0F-84613E6A0D56`。官方宿主前后验签通过，Team 2DC432GLL2，供应商安装包保持原样。
+用户批准修正后的 GSE 方案：左下角按钮区第一项为 Codex Plus，末项为贪吃蛇；菜单栏程序保留。执行电脑 Sol，官方宿主 26.1106.51428，安装版 `/Applications/Codex Plus.app` 0.4.0 build 6。Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime、安全时间戳 2026-11-12 13:34:48；构建与安装 Mach-O UUID 同为 `81F8BBC9-82AF-3626-9D0F-84613E6A0D56`。官方宿主前后验签通过，Team 2DC432GLL2，供应商安装包保持原样。
 
 - [x] 真实导航条底部为 Plus、Usage、Profile、贪吃蛇；Plus 第一、蛇最后，原有操作顺序保持。
 - [x] 页面 Plus 打开原生设置，`settingsRequests` 增加；菜单栏“设置…”打开同一窗口；窗口清单只有一个 Plus 设置窗口。
@@ -300,7 +302,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] 10 项 Node、33 项 Swift 检查通过。4 类隔离 Electron fixture 分别通过：late-attach、response-disconnect、source-mismatch、window-recreate；退出后调试监听清理由 fixture 检查。
 - [ ] 日常普通启动实例的首次 F6 冷启动接入。该实例正在执行其他任务，保留至用户正常退出后再从 F6 启动。
 - [ ] 更新版上的直接主页面重载，以及真实后台任务完成后排序的完整场景；结构检查、纯逻辑、fixture 与前版未变行为证据分别保留。Cmd+R 实际调用“Reload Browser Page”，本次未记作主页面重载通过。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 界面工具：官方 Computer Use 用于 Plus 设置与菜单退出。它按 bundle ID 选中日常实例，独立实例选择受限；按用户对原生控制的既有授权，使用 agent-desktop 1.2.0 的窗口编号 `w-8692`／`w-8750` 做验收，必要按键走 `--headed press --window-id`。公开 CoreGraphics 窗口清单与只读 CDP 状态作辅助证据。GUI 操作由主 Agent 单 writer 执行。独立资料沿用现有 acceptance-20261110，保留已有测试项目与草稿。
 
@@ -308,21 +310,21 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 ## 0.4.1 导航位置与图标修正（2026-11-12）
 
-按用户最新纠正：贪吃蛇移到左上导航按钮组 Projects／项目正下方，Codex Plus 保持左下角第一项并重设计图标。执行电脑 Sol，正式安装版 0.4.1 build 7；Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:05:08。构建与安装 Mach-O UUID 同为 `9598A7F8-F549-3AEA-8E71-8B12FCD42CAA`，安装版严格验签通过。
+按用户最新纠正：贪吃蛇移到左上导航按钮组 Projects／项目正下方，Codex Plus 保持左下角第一项并重设计图标。执行电脑 Sol，正式安装版 0.4.1 build 7；Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime、安全时间戳 2026-11-12 14:05:08。构建与安装 Mach-O UUID 同为 `9598A7F8-F549-3AEA-8E71-8B12FCD42CAA`，安装版严格验签通过。
 
 - [x] 官方 Computer Use 截图与可访问性树确认 Projects 后紧接贪吃蛇，底部顺序为 Plus、Usage、Profile，入口各一份。
 - [x] 只读页面尺寸核对：Projects、贪吃蛇、Plus 均为 36×36，SVG 均为 20×20，颜色相同；上方组间距为原生 8px，现有分隔线保留。Plus 使用侧栏窗口加号，蛇使用同线宽轮廓。
 - [x] 通过页面 Plus 实际打开安装版原生设置，`settingsRequests=1`，页面接入提示正确；关闭设置后通过蛇按钮打开游戏，真实关闭按钮返回原聊天。
 - [x] 替换 Plus 后接入已运行的日常官方宿主 40564，未退出或重载宿主；Plus 81083、controller 81102，页面与项目排序 active，现有任务继续。前版日常实例尚未接入的历史边界由本次当前运行态接入证据补充。
 - [x] 10 项 Node、33 项 Swift 检查通过；签名构建、安装与 `git diff --check` 通过。图标静态检查无发现。小范围位置与样式修正复用前版游戏逻辑及生命周期验证。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 官方 Computer Use 为本次 GUI 取证与点击主工具；菜单栏退出无窗口的旧 Plus 使用已授权的原生菜单工具。agent-desktop 截图因缺 Screen Recording 权限未成功，未新增权限，最终保存官方 Computer Use 实际返回的截图。证据：`~/Library/Logs/codex-plus/entry-refinement-20261112/`，含 installed-navigation.png、installed-snake.png、installed-layout.json、installed-status.json、tests.log、build.log。最终设置和游戏窗口关闭，菜单栏 Plus 与日常官方宿主正常运行。
 
 
 ## 0.5.0 建议提示词自动发送（2026-11-12）
 
-执行电脑 Sol，基线 f456ef4。最终安装版 `/Applications/Codex Plus.app` 0.5.0 build 9，Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:19:53；构建与安装 Mach-O UUID 均为 `92D67DC7-3145-3A31-95BF-89219FAC7013`。官方宿主 Codex 26.1106.51428、PID 40564，全程保留进程与已有任务。
+执行电脑 Sol，基线 f456ef4。最终安装版 `/Applications/Codex Plus.app` 0.5.0 build 9，Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime、安全时间戳 2026-11-12 14:19:53；构建与安装 Mach-O UUID 均为 `92D67DC7-3145-3A31-95BF-89219FAC7013`。官方宿主 Codex 26.1106.51428、PID 40564，全程保留进程与已有任务。
 
 - [x] 两位独立方案初审及一次 fresh-context 定向复审完成；修订后零 Blocker/Major。候选代码独立审查完成，状态显示及路由支持意见已落实。
 - [x] 16 项 Node、33 项 Swift 全测通过；最终结果观察分支的 6 项建议专项回归通过。隔离 Electron fixture 的 12 项页面动作/输入法/草稿/附件/卸载检查通过。
@@ -332,7 +334,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] 该原生采纳/提交接缝在 build 8 验收；最终 build 9 保持同一接缝和页面脚本，提交后焦点/输入 revision 变化的结果观察使用最终专项回归验证，复用未变接缝证据。最终 build 9 中人工草稿保持且零尝试，开关关闭和页面接入读回通过。
 - [x] 控制器层确定性覆盖：默认关闭、旧建议基线、跨窗口同 turn 单次认领、关闭发生于落盘等待期间、落盘失败停用、用户事件/焦点/路由取消、结果未知不重试、重连持久化防重放。原生读取函数的组合输入与附件保护由 fixture 补充。
 - [ ] 远程 Codex、更多界面语言和跨设备来源真实验收；当前原生验收覆盖本机英文界面。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 本机证据 `~/Library/Logs/codex-plus/auto-suggestion-20261112/`：tests.log、tests-final-suggestion.log、dom-fixture.json、build-final.log、install-final.log、native-auto-send.json、build9-native-observations.json、final-disabled-status.json。原生测试模型实际 GPT-6.1 Sol / High，未改变其他任务设置。界面由官方 Computer Use 和 agent-desktop 1.2.0（精确窗口 w-9427）操作；只读 CDP 和官方 read_thread 辅助核验。验收窗口关闭，原生草稿保留，正式 Plus 恢复默认关闭的正常运行状态。
 
@@ -340,7 +342,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 
 ## 0.5.1 圆形图标（2026-11-12）
 
-用户要求页面图标统一圆形，并设计 App 和菜单栏图标。以 3dc4bc9 为集成基线，采用 Impeccable 的局部图标精修流程。Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.1 build 10；Developer ID Team HJG65XBC25、Hardened Runtime、安全时间戳 2026-11-12 14:25:20。构建与安装 Mach-O UUID 均为 `B6B4216D-5ABD-37A2-97C0-36F932F41FA8`，严格验签通过。
+用户要求页面图标统一圆形，并设计 App 和菜单栏图标。以 3dc4bc9 为集成基线，采用 Impeccable 的局部图标精修流程。Sol 正式安装版 `/Applications/Codex Plus.app` 0.5.1 build 10；Developer ID Team LOCAL_PUBLISHER_TEAM_ID、Hardened Runtime、安全时间戳 2026-11-12 14:25:20。构建与安装 Mach-O UUID 均为 `B6B4216D-5ABD-37A2-97C0-36F932F41FA8`，严格验签通过。
 
 - [x] Plus 为圆环加号，蛇为同族圆环；安装版实际页面截图及只读几何核对确认入口各一份、按钮 36×36、SVG 20×20、圆环半径 7.25、线宽 1.4、fill=none，位置及原生展示属性保持。
 - [x] App 使用深墨绿圆底和浅薄荷标识，透明图形导出完整 16…1024 像素 ICNS；Finder 中的安装版图标已实际显示并保留 OCU 截图。
@@ -348,7 +350,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] 圆形蛇入口实际打开游戏，关闭回到原聊天；最终游戏和 Plus 设置关闭，本轮打开的 Finder Applications 验收窗口已关闭，原有 Finder 窗口保留。
 - [x] 16 项 Node、33 项 Swift 通过；Impeccable 图标静态检查无发现；签名构建、安装、plist 与 diff 检查通过。图标改动复用未变游戏和建议功能验收，未重复发送聊天测试消息。
 - [x] 原正式宿主 PID40564 全程保留，未退出或重载；新 Plus PID2438、controller2446，页面和排序 active。建议功能保持 disabled，既有旧页面的 page-reload-required 状态原样保留。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 证据：`~/Library/Logs/codex-plus/circular-identity-20261112/`，包括小尺寸浅深色预览、installed-navigation.png、installed-finder.png、installed-settings.png、installed-snake.png、installed-layout.json、installed-final-status.json、tests.log、build.log、signing.log。OCU 用于截图及页面/原生设置；无窗口的菜单栏由已授权原生工具操作。菜单图标的全屏像素截图未取得：OCU 无可选 key window，CUA 同样超时，原生截图工具缺 Screen Recording 权限；未新增权限，菜单可用性与安装包矢量资源分别取证，不将预览冒充实际菜单截图。
 
@@ -363,7 +365,7 @@ ChatGPT 模式切换后已观察到动作计数保持。此次在该模式发送
 - [x] 含邮件/微信的纯字符串夹具停在待审列表，OCU 读回具体行动、对象、范围和单次批准说明；提交数保持1。OCU 点击“批准本次”后，原生后台续轮 `01a1d889-220d-7d82-aac1-d36e4751c74a` completed，提交数变2。夹具禁止工具和实际通信，未执行真实敏感操作。
 - [x] 第二条敏感字符串建议进入待审后，OCU 点击“拒绝”，列表清空且 submitted 保持2，没有对应新增续轮。关闭验收开关并退出范围会话，正常重启后 scoped=false、日常自动发送仍关闭。
 - [x] 安装版无效 acceptance UUID 立即退出2，拒绝无范围启动；日常偏好不受验收开关影响。父进程退出后 controller 9.8秒内自行退出，宿主仍存活。
-- [ ] Longbiao 最终接受；Issue #1 保持开放。
+- [ ] 用户 最终接受；Issue #1 保持开放。
 
 本轮 Codex GUI 由已安装官方 OCU 原生 MCP/CLI 控制；连接器 transport 关闭时恢复同一 OCU 的 stdio MCP 会话。另一套统一 CUA 的拒绝不作为 OCU 拒绝证据。生产版本没有 Reload Window，未要求用户执行不存在的菜单。CDP 仅用于产品接入、只读观察及产品定义恢复动作；不以它代替 GUI 输入。
 

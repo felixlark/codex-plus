@@ -1,5 +1,7 @@
 # 独立人工增强 v4：源码与采用合同
 
+文中的 `LOCAL_*` 与 `PRIVATE_EVIDENCE_PATH` 表示受控记录中的本机兼容值或证据位置，不是新的运行默认值；历史验收结论仍对应原记录版本。
+
 ## 已批准范围与结果
 
 本人批准 [v4](https://github.com/felixlark/smart-shadow/issues/483#issuecomment-6909898465)，经理在 [原任务](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6910253612)明确独立源码先交付、SmartShadow安全点另接。这里记录已实现接缝及生产依赖，不新增产品架构。
@@ -16,11 +18,11 @@
 
 | 项目 | Plus 独占位置 |
 |---|---|
-| 安装 / 签名 | `/Applications/Codex Plus.app` / `me.longbiaochen.codex-plus` / team HJG65XBC25 |
+| 安装 / 签名 | `/Applications/Codex Plus.app` / `LOCAL_PLUS_BUNDLE_ID` / team LOCAL_PUBLISHER_TEAM_ID |
 | 运行锁 | `~/Library/Application Support/codex-plus/enhancements/runtime.lock` |
 | controller状态/建议尝试 | 同根 `launcher/state.json`、`launcher/suggestion-attempts.json` |
 | 状态 / 控制socket | 同根 `status.sock`、`tool-control.sock` |
-| 偏好domain | `me.longbiaochen.codex-plus.enhancements` |
+| 偏好domain | `LOCAL_ENHANCEMENT_PREFERENCES_DOMAIN` |
 | 构建/依赖缓存 | `~/Library/Caches/codex-plus/standalone/` |
 | 日志 | `~/Library/Logs/codex-plus/` |
 
