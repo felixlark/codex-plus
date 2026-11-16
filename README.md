@@ -1,3 +1,13 @@
+# Codex Plus 已退役
+
+本产品已融合到 **SmartShadow.app**。唯一活动源码和后续问题请转到 [smart-shadow/native/interaction](https://github.com/felixlark/smart-shadow/tree/main/native/interaction)，交付及验收见 [SmartShadow #613](https://github.com/felixlark/smart-shadow/issues/613)。本仓库保留历史，不再发布独立 Codex Plus。
+
+2026-11-16 完成单仓迁移、签名安装和原移动前端读取、单次发送、流式、正式停启重连与未发草稿保留验收；本轮移动交互证据来自既有模拟器，不声明真机/TestFlight全验收。旧App已移出 /Applications 并保留可回退原件；原数据和TLS身份保留。
+
+---
+
+## 历史 README
+
 # SmartShadow native source
 
 本仓当前提供一个 SmartShadow.app 安装包：主进程负责管理/设置/小看板，包内独立 interactiond helper 负责菜单栏、原 Codex 增强、F6、右屏和手机宿主。关闭或退出管理界面后手机继续；显式停止沿正式 ss-service。普通打开 UI 不启动已停后台。
