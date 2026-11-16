@@ -1,0 +1,29 @@
+--- a/dev-ops/tests/test_ss_service_consistent_backup.py
++++ b/dev-ops/tests/test_ss_service_consistent_backup.py
+@@ -17,11 +17,24 @@
+   self.assertEqual(r['integrity_check'],'ok');self.assertEqual(r['foreign_key_violations'],0);self.assertEqual(self.dst.stat().st_mode&0o777,0o600);self.assertEqual(r['sha256'],hashlib.sha256(self.dst.read_bytes()).hexdigest());self.assertEqual(self.before,hashlib.sha256(self.src.read_bytes()).hexdigest())
+   with closing(sqlite3.connect(self.dst)) as c:self.assertEqual(c.execute('SELECT * FROM original').fetchall(),[(1,'synthetic retained')])
+   self.assertEqual(json.loads(self.dst.with_suffix('.proof.json').read_text())['sha256'],r['sha256'])
+- def test_twelve_real_sqlite_backup_attempts_are_bounded(self):
++ def test_twelve_real_sqlite_backups_have_no_implicit_count_cap(self):
+   from unittest.mock import patch
+   from types import SimpleNamespace
+   created=0;skipped=0
+-  with patch.object(svc.os,'statvfs',return_value=SimpleNamespace(f_blocks=1000,f_frsize=1024*1024,f_bavail=500)):
++  with patch.dict(os.environ), patch.object(svc.os,'statvfs',return_value=SimpleNamespace(f_blocks=1000,f_frsize=1024*1024,f_bavail=500)):
++   os.environ.pop('SMART_SHADOW_CONSISTENT_BACKUP_KEEP',None)
++   for index in range(12):
++    parent=self.root/'Backups'/f'run-{index}';parent.mkdir(mode=0o700);destination=parent/'snapshot.sqlite'
++    try:self.c.backup_before_bootstrap(self.c.backup_target(destination));created+=1
++    except svc.Fault as error:
++     self.assertIn('consistent_backup_retention_limit',str(error));skipped+=1;self.assertFalse(destination.exists())
++  self.assertEqual((created,skipped),(12,0));self.assertEqual(len(list((self.root/'Backups').rglob('snapshot.sqlite'))),12)
++  self.assertEqual(self.before,hashlib.sha256(self.src.read_bytes()).hexdigest())
++ def test_explicit_backup_count_cap_rejects_after_configured_count(self):
++  from unittest.mock import patch
++  from types import SimpleNamespace
++  created=0;skipped=0
++  with patch.dict(os.environ,{'SMART_SHADOW_CONSISTENT_BACKUP_KEEP':'3'}), patch.object(svc.os,'statvfs',return_value=SimpleNamespace(f_blocks=1000,f_frsize=1024*1024,f_bavail=500)):
+    for index in range(12):
+     parent=self.root/'Backups'/f'run-{index}';parent.mkdir(mode=0o700);destination=parent/'snapshot.sqlite'
+     try:self.c.backup_before_bootstrap(self.c.backup_target(destination));created+=1
