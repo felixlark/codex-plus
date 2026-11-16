@@ -6,7 +6,18 @@ SCRATCH="${SMARTSHADOW_SCRATCH_PATH:-$HOME/Library/Caches/codex-plus/unified-swi
 CACHE="$HOME/Library/Caches/codex-plus/swift-cache"
 IDENTITY="${CSC_NAME:-Developer ID Application: LONGBIAO CHEN (HJG65XBC25)}"
 cd "$ROOT"
-git diff --quiet HEAD -- Package.swift AppInfo.plist ManagerInfo.plist Sources scripts mobile
+git diff --quiet HEAD -- Package.swift AppInfo.plist ManagerInfo.plist Sources scripts mobile third_party LICENSE
+python3 - <<'PY'
+import subprocess
+from pathlib import Path
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z']).decode().split('\0')
+def is_input(name):
+    p = Path(name)
+    return (name.startswith('Sources/') and p.suffix in {'.swift', '.m', '.mm', '.c', '.cpp', '.h'}) or name.startswith('Sources/SmartShadowManager/Resources/') or (name.startswith('Sources/CodexPlus/Resources/') and p.suffix == '.mjs') or (name.startswith(('mobile/Shared/', 'mobile/Gateway/')) and p.suffix == '.swift')
+missing = [name for name in untracked if name and is_input(name)]
+if missing:
+    raise SystemExit('Untracked package input must be committed before recording source_commit: ' + ', '.join(missing))
+PY
 # Both roles are built from one source snapshot, never separate app releases.
 swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE"
 BIN="$(swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE" --show-bin-path)"

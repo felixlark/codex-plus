@@ -48,6 +48,10 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             print("SmartShadow interactiond 4.2.0\nUsage: SmartShadowInteraction [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-restore --pid PID --window-id ID]\nF6 uses SmartShadowManager --open-codex. Settings are available in SmartShadow.")
             return
         }
+        if arguments.isEmpty { RuntimeBootstrap.run(); return }
+        guard arguments == ["--managed-runtime"] else {
+            fputs("Unknown helper operation; use the SmartShadow management entry.\n", stderr); exit(2)
+        }
         guard SuggestionAcceptance.isValidOrAbsent else {
             fputs("Invalid acceptance thread; refusing to start without a valid scope.\n", stderr)
             exit(2)
@@ -58,7 +62,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
               Bundle.main.bundleURL.standardizedFileURL.path == SmartShadowInstallation.helperPath,
               !NSRunningApplication.runningApplications(withBundleIdentifier: SmartShadowInstallation.legacyBundleID)
                 .contains(where: { !$0.isTerminated }) else {
-            fputs("Installed helper identity unavailable or legacy runtime still active.\n", stderr); exit(2)
+            fputs("Installed helper identity unavailable or legacy runtime still active.\n", stderr); return
         }
         let app = NSApplication.shared
         let delegate = CodexPlusApp()
@@ -68,7 +72,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fd = Darwin.open(leasePath.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0, flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             if fd >= 0 { close(fd) }
-            fputs("Interaction runtime already owned.\n", stderr); exit(2)
+            fputs("Interaction runtime already owned.\n", stderr); return
         }
         delegate.runtimeLease = fd
         retainedDelegate = delegate
@@ -183,8 +187,8 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard management.allowsEffects else { return true }
-        launcher.open(source: "reopen")
+        // LaunchServices/login attachment is not an F6 action. Only the explicit
+        // management request or menu opens Codex.
         return true
     }
 

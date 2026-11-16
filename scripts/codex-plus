@@ -4,7 +4,7 @@ set -euo pipefail
 APP="/Applications/SmartShadow.app"
 if [[ $# -eq 0 || "${1:-}" == "--settings" ]]; then
   exec open "$APP"
-elif [[ "$1" == "--open-codex" ]]; then
+elif [[ "$1" == "--open-codex" || "$1" == "--stop-interactiond" ]]; then
   exec "$APP/Contents/MacOS/SmartShadowManager" "$@"
 else
   exec "$APP/Contents/Library/LoginItems/SmartShadowInteraction.app/Contents/MacOS/SmartShadowInteraction" "$@"

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CodexPlusCore
 import Security
+import ServiceManagement
 
 @MainActor final class ManagerModel: ObservableObject {
     @Published private(set) var settings: ManagementProtocol.Settings?
@@ -13,6 +14,8 @@ import Security
     @Published private(set) var message = "正在读取服务状态…"
     @Published private(set) var modules: [String: ModuleObservation] = [:]
     @Published private(set) var moduleErrors: [String: String] = [:]
+    @Published private(set) var loginEnabled = SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID).status == .enabled
+    @Published private(set) var loginError: String?
     private var serviceConnection: ServiceControlClient?
     private var started = false
     private var current: Task<Void, Never>?
@@ -114,6 +117,38 @@ import Security
     }
     /// This button is an explicit start; merely opening the UI never calls it.
     func attach() { control("start", role: "interactiond") }
+    func setLogin(_ enabled: Bool) {
+        guard !busy else { return }
+        perform {
+            let login = SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID)
+            defer { self.loginEnabled = login.status == .enabled }
+            do {
+                let service = ServiceControlClient(); self.serviceConnection = service
+                defer { self.serviceConnection = nil }
+                if enabled {
+                    // register() may launch a login helper immediately. Start it
+                    // through the official controller first, then register that
+                    // same installed identity rather than create an unmanaged run.
+                    self.modules["interactiond"] = try await service.control("start", role: "interactiond")
+                    try login.register()
+                } else {
+                    // Apple unregister() terminates a live login item. A future
+                    // login preference must never bypass prepare/drain/stop.
+                    self.modules["interactiond"] = try await service.inspect("interactiond")
+                    guard self.modules["interactiond"]?.job == "stopped",
+                          [SmartShadowInstallation.helperBundleID, SmartShadowInstallation.legacyBundleID].allSatisfy({ id in
+                              !NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { !$0.isTerminated })
+                          }) else { throw ManagementProtocol.failure("请先通过停止按钮正常停止 interactiond，再关闭登录启动；之后仍可手动启动后台。") }
+                    try await login.unregister()
+                }
+                self.loginError = nil
+                self.message = login.status == .requiresApproval ? "登录启动等待系统设置批准" : "登录启动设置已读回"
+            } catch {
+                self.loginError = error.localizedDescription
+                self.message = "登录设置未确认；未重放请求，请按当前服务状态核对"
+            }
+        }
+    }
     func action(_ operation: ManagementProtocol.Operation) {
         guard !busy, let runtime, [.openCodex, .reconnect].contains(operation) else { return }
         perform {

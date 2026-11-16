@@ -18,7 +18,7 @@ def describe(app: Path, source: Path) -> dict:
         "schema": "smart-shadow.native-package/v1",
         "source_commit": subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip(),
         "container": {"path": "/Applications/SmartShadow.app", "bundle_id": info["CFBundleIdentifier"], "executable": info["CFBundleExecutable"]},
-        "runtime": {"bundle_path": str(helper.relative_to(app)), "bundle_id": helper_info["CFBundleIdentifier"], "executable": str((helper / "Contents/MacOS" / helper_info["CFBundleExecutable"]).relative_to(app)), "resources": str((helper / "Contents/Resources").relative_to(app))},
+        "runtime": {"bundle_path": str(helper.relative_to(app)), "bundle_id": helper_info["CFBundleIdentifier"], "executable": str((helper / "Contents/MacOS" / helper_info["CFBundleExecutable"]).relative_to(app)), "resources": str((helper / "Contents/Resources").relative_to(app)), "arguments": ["--managed-runtime"]},
         "version": helper_info["CFBundleShortVersionString"], "build": helper_info["CFBundleVersion"],
         "container_build": info["CFBundleVersion"],
         "login_item": helper_info["CFBundleIdentifier"],

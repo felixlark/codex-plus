@@ -37,8 +37,6 @@ struct ManagerView: View {
     let registerReopen: (@escaping () -> Void) -> Void
     let refreshTaskBoard: () -> Void
     @StateObject private var catalog = CodexWorkspaceDisplayCatalog()
-    @State private var login = SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID).status == .enabled
-    @State private var loginError: String?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -137,8 +135,11 @@ struct ManagerView: View {
                         Button("查看 interactiond 系统权限") {
                             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                         }
-                        Toggle("登录时启动 SmartShadow 后台", isOn: Binding(get: { login }, set: setLogin))
-                        if let loginError { Text(loginError).foregroundColor(.red) }
+                        Toggle("登录时启动 SmartShadow 后台", isOn: Binding(get: { model.loginEnabled }, set: model.setLogin))
+                            .disabled(model.busy)
+                        Text("启用会启动后台。关闭前先正常停止 interactiond，避免系统注销登录项时直接终止手机连接。")
+                            .font(.caption).foregroundColor(.secondary)
+                        if let loginError = model.loginError { Text(loginError).foregroundColor(.red) }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
             }.padding(24)
@@ -205,12 +206,5 @@ struct ManagerView: View {
     private func writeSelection(_ value: CodexWorkspaceDisplaySelection) {
         guard let raw = try? JSONEncoder().encode(value), let object = try? JSONSerialization.jsonObject(with: raw) else { return }
         model.write(["workspaceAutoExpandDisplaySelection": object])
-    }
-    private func setLogin(_ enabled: Bool) {
-        do {
-            if enabled { try SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID).register() } else { try SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID).unregister() }
-            loginError = nil
-        } catch { loginError = error.localizedDescription }
-        login = SMAppService.loginItem(identifier: SmartShadowInstallation.helperBundleID).status == .enabled
     }
 }

@@ -23,11 +23,17 @@ helper保持原观察器、页面增强、F6、人窗与工具右屏路由、con
 
 主App只使用 [SMAppService.loginItem(identifier:)](https://developer.apple.com/documentation/servicemanagement/smappservice/loginitem(identifier:)) 登记包内helper，不使用mainApp登录登记。新helper需准确已安装bundle/path，拒绝旧Plus仍在运行；对原运行目录持有一个进程级独占文件锁后才启动观察器和socket，退出由内核释放。此锁不构成任务/业务存储。
 
+[Apple register](https://developer.apple.com/documentation/servicemanagement/smappservice/register())会立即启动LoginItem，异常或非零退出还会重启；[unregister](https://developer.apple.com/documentation/servicemanagement/smappservice/unregister())会终止运行中的LoginItem。因此同一helper无参数时只调用一次正式ss-service start/attach后正常退出，不持有手机/菜单/socket，不重试未知结果；常驻体由ss-service以`open -g -n <helper bundle> --args --managed-runtime`独立启动。runtime manifest追加`arguments:["--managed-runtime"]`，安装侧按完整argv区分短暂启动器与常驻实例。系统登录自动重启不能直接变成第二个业务runtime；helper的LaunchServices reopen也不打开Codex。
+
+启用登录开关先由正式控制器启动/附着，再登记唯一LoginItem；UI说明它会即时启动后台。关闭只在正式inspect为stopped且准确新旧身份进程均不存在时注销，UI说明先正常停止后关闭，可随后手动启动。这样系统注销不绕过prepare/drain/stop。
+
 主可执行的 `--open-codex` 为显式F6命令：正式ss-service start/attach后，核容器、helper与运行PID签名，向准确instance发一次`codex.open`并退出，不创建第二UI。`--stop-interactiond`发一次正式停止并退出。普通打开主App不走这些分支。helper保留`--status`、`--lifecycle-*`和`--tool-*`；源CLI别名`scripts/codex-plus`只转到新包，不启动旧Plus。外部F6和配置生成器的实际迁接由#613完成。
 
 登录登记与显式停止为独立选择：停止后普通打开UI仍停；若登录开关开启，下次登录可启动同一helper。系统LoginItem所启动的准确新实例，需要安装侧按真实PID/出生/instance对账采用，不将旧stopped/unknown记录改签，也不另建监督进程。唯一登录项实测、旧登录项退出、helper系统权限由#613在真实安装验收。
 
 工具打开SmartShadow设置时复用同一主UI；仅带`--agent-settings`的新UI窗口初次定位到最右物理屏，既有人窗不重定位。helper不再创建第二套设置窗，旧ToolRouter的同进程设置窗设施不作为消费者使用。
+
+批准时已比较同进程常驻与单包双进程：前者关窗可保持手机，但退出/崩溃UI会停止交互；后者保留当前已验的UI退出独立行为，代价是两层签名/权限和安装配套。按用户选定r3采用后者；两个独立安装App会继续保留重复入口，不满足本轮单一产品目标。
 
 ## 数据与生命周期
 
