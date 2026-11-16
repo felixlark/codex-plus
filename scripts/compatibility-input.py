@@ -69,7 +69,7 @@ def parse_input_bytes(data):
         value = json.loads(text, object_pairs_hook=_unique_object)
     except InputError:
         raise
-    except (UnicodeError, ValueError, TypeError):
+    except (UnicodeError, ValueError, TypeError, RecursionError):
         raise InputError('compatibility_input_invalid', 'json') from None
     return validate_dictionary(value)
 

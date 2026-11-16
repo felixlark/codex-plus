@@ -92,6 +92,8 @@ class CompatibilityInputTests(unittest.TestCase):
             compatibility.parse_input_bytes(duplicate.encode())
         with self.assertRaises(compatibility.InputError):
             compatibility.parse_input_bytes(b"\xff")
+        with self.assertRaises(compatibility.InputError):
+            compatibility.parse_input_bytes(("[" * 10000 + "]" * 10000).encode())
 
     def test_invalid_values_and_collisions(self):
         for value in ["", "white space", 'test.quote"', "test.line\n", "test.\\path", "test.*", "test.中文", 1, True, None]:
