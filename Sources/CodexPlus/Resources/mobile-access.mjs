@@ -245,6 +245,7 @@ export class MobileAccess {
         await this.activate(client);
       } catch { if (this.clients.get(event.id) === client) await this.release(event.id); }
     } else if (event.type === 'frame') {
+      if (this.quiesced) { this.drop(event.id); return; }
       const client = this.clients.get(event.id);
       if (client?.phase !== 'active') { this.drop(event.id); return; }
       const value = JSON.parse(event.text);
@@ -317,7 +318,10 @@ export class MobileAccess {
     if (this.stopped) throw Error('Mobile stopped while preparing');
     return this.status();
   }
-  resume() { if (!this.stopped) this.quiesced = false; }
+  resume() {
+    if (this.stopped || [...this.clients.values()].some(c => c.phase !== 'active')) throw Error('Mobile resume unavailable');
+    this.quiesced = false;
+  }
   async close() {
     if (this.stopped) return; this.stopped = true;
     try {

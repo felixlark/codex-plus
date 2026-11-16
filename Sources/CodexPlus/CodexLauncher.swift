@@ -100,7 +100,8 @@ final class CodexLauncher: ObservableObject {
         var scope: [String: Any] = ["native":ProcessIdentity.read(getpid()) as Any? ?? NSNull(),
                                   "controller":controller.flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
                                   "host":ownedHost().flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
-                                  "mobile":reply["mobile"] ?? NSNull()]
+                                  "mobile":reply["mobile"] ?? NSNull(),
+                                  "human_creation_outcomes":reply["human_creation_outcomes"] ?? []]
         if let mobile = reply["mobile"] as? [String: Any], let number = ManagementProtocol.integer(mobile["gatewayPID"]), let pid = Int32(exactly:number) {
             guard let identity = ProcessIdentity.read(pid) else { throw ManagementProtocol.failure("gateway_identity_unknown") }
             scope["gateway"] = identity

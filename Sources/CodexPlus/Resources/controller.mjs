@@ -63,10 +63,10 @@ async function createHumanWindow(nonce){
 function humanMarker(value){try{const u=new URL(value);return u.searchParams.get('codexPlusHumanWindow')??new URL(u.searchParams.get('initialRoute')??'/','https://codex.invalid').searchParams.get('codexPlusHumanWindow');}catch{return null;}}
 async function settleHumanCreations(){
   if(stopping||quiesced)return;
-  if(![...humanCreations.values()].some(r=>r.phase==='requested'))return;
+  if(![...humanCreations.values()].some(r=>r.phase==='requested'&&!r.preserved))return;
   const {targetInfos}=await cdp.call('Target.getTargets');if(stopping||quiesced)return;
   for(const [nonce,request] of humanCreations){
-    if(request.phase!=='requested')continue;
+    if(request.phase!=='requested'||request.preserved)continue;
     const matching=targetInfos.filter(t=>t.type==='page'&&mainURL(t.url)&&humanMarker(t.url)===nonce);
     if(matching.length!==1)continue;
     const target=matching[0];
@@ -438,9 +438,28 @@ async function lifecycleCommand(message){
    await monitorWork;
    if(inFlight.size)await Promise.allSettled([...inFlight]);
    if(lifecycleOperations.size)await Promise.allSettled([...lifecycleOperations]);
-   if([...humanCreations.values()].some(r=>r.phase==='creating'||r.phase==='requested'))throw Error('Window creation pending');
+   // Native invokes above have drained. An acknowledged F6 request can remain
+   // "requested" after its AX owner timed out; it is an unknown human window,
+   // not a live operation or a resource that this controller may close.
+   let outcomes=state.humanCreationOutcomes??[];
+   if([...humanCreations.values()].some(r=>!r.preserved)){
+    const {targetInfos}=await cdp.call('Target.getTargets');
+    outcomes=[...outcomes];
+    for(const [nonce,request] of humanCreations){
+     if(request.preserved)continue;
+     if(request.phase==='creating')throw Error('Native request still in flight');
+     const matchingTargets=targetInfos.filter(t=>t.type==='page'&&humanMarker(t.url)===nonce).map(t=>t.targetId);
+     outcomes.push({nonce,phase:request.phase,outcome:matchingTargets.length?'observed':'unknown',matchingTargets});
+    }
+    const file=path.join(path.dirname(stateFile),`human-creation-outcomes-${connection}.json`);
+    await fs.writeFile(file+'.tmp',JSON.stringify(outcomes),{mode:0o600});await fs.rename(file+'.tmp',file);
+    // Permanent for this nonce, including after resume: never navigate a late
+    // window that the user may already have adopted or filled with a draft.
+    for(const request of humanCreations.values())request.preserved=true;
+    state.humanCreationOutcomes=outcomes;await publish();
+   }
    const mobileScope=await mobile?.prepareStop();
-   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:mobileScope??null})+'\n');
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:mobileScope??null,human_creation_outcomes:outcomes})+'\n');
   }else if(message.action==='resume'){
    if(stopping)throw Error('Stopping');mobile?.resume();quiesced=false;
    process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true})+'\n');
