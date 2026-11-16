@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
 import {isTailIPv4, isAnchorURL, MobileAccess, prepareMobileAnchor, probeUnclaimedMobileThread, mobileStartupReadiness, mobileAnchorRoute} from '../Sources/CodexPlus/Resources/mobile-access.mjs';
 import {isHumanWindowURL} from '../Sources/CodexPlus/Resources/human-window.mjs';
 import {installMobileEndpoint} from '../Sources/CodexPlus/Resources/mobile-endpoint.mjs';
@@ -174,6 +176,77 @@ test('the captured blank host repairs only its original preload world before ope
   assert.equal(h.state.starts, 1); assert.equal(h.manager.gitOriginContext, 3);
   assert.equal(h.state.probes.filter(id => id === 3).length, 1);
   assert.equal(h.commands.some(c => c.method === 'Page.createIsolatedWorld'), false);
+});
+
+async function preparedHarness(){const h=blankHarness();await h.manager.tick();h.commit();h.state.ready=true;await h.manager.tick();return h;}
+
+test('a verified context is monitored by identity without repeating its DOM initialization probe',async()=>{
+  const h=await preparedHarness(),before=h.commands.length,probes=h.state.probes.length;
+  h.manager.phase='connected';h.manager.evaluate=async()=>{throw Error('busy bridge must not be re-probed');};
+  for(let i=0;i<50;i++)await h.manager.tick();
+  assert.equal(h.manager.stopped,false);assert.equal(h.manager.phase,'connected');assert.equal(h.state.starts,1);
+  assert.equal(h.state.probes.length,probes);assert.ok(h.commands.slice(before).every(c=>c.method==='Target.getTargets'));
+});
+
+test('a verified target cannot keep its lease after same-ID context replacement or navigation',async()=>{
+  for(const change of ['default','preload','missing-preload','session','missing-session','missing-frame','new-session-without-frame','navigation']){
+    const h=await preparedHarness();
+    if(change==='default')h.contexts.set(2,{...h.contexts.get(2)});
+    if(change==='preload')h.contexts.set(3,{...h.contexts.get(3)});
+    if(change==='missing-preload')h.contexts.delete(3);
+    if(change==='session')h.manager.sessions.set('anchor',{...h.manager.sessions.get('anchor')});
+    if(change==='missing-session')h.manager.sessions.delete('anchor');
+    if(change==='missing-frame')h.manager.sessions.get('anchor').frame=null;
+    if(change==='new-session-without-frame')h.manager.sessions.set('anchor',{target:'owned',contexts:h.contexts});
+    if(change==='navigation')h.state.url='https://example.invalid/';
+    await h.manager.tick();assert.equal(h.manager.stopped,true,change);assert.equal(h.state.starts,1);
+    assert.equal(h.manager.failure,'Mobile anchor lost');
+    assert.deepEqual(h.commands.filter(c=>c.method==='Target.closeTarget').map(c=>c.params.targetId),['owned']);
+  }
+});
+
+test('initial probe failure and context replacement during probe or repair never start a gateway',async()=>{
+  for(const stage of ['failure','probe','repair']){
+    const h=blankHarness();await h.manager.tick();h.commit();h.state.ready=true;
+    const original=h.manager.evaluate.bind(h.manager);let release,entered;
+    const gate=new Promise(r=>{release=r;}),ready=new Promise(r=>{entered=r;});
+    h.manager.evaluate=async(source,...args)=>{
+      const repair=source.includes('installMobileGitOriginRepair');
+      if(stage==='failure')throw Error('CDP timeout: Runtime.evaluate');
+      if((stage==='repair')===repair){entered();await gate;}
+      return original(source,...args);
+    };
+    const ticking=h.manager.tick();
+    if(stage!=='failure'){await ready;const id=stage==='repair'?3:2;h.contexts.set(id,{...h.contexts.get(id)});release();}
+    await ticking;assert.equal(h.state.starts,0);assert.equal(h.manager.stopped,true);
+    assert.equal(h.manager.failure,stage==='failure'?'CDP timeout: Runtime.evaluate':'Mobile anchor lost');
+  }
+});
+
+function gatewayFixture(manager,{read}={}){
+  manager.startGateway=MobileAccess.prototype.startGateway;
+  let spawns=0;const child=new EventEmitter();child.pid=321;child.stdin=new PassThrough();child.stdout=new PassThrough();child.stderr=new PassThrough();
+  manager.gatewayIO={verify(){},read:read??(async()=>Buffer.from('fixture')),spawn(){spawns++;return child;}};
+  return {child,count:()=>spawns,finish(){child.stdout.end();child.stderr.end();child.stdin.end();}};
+}
+
+test('gateway file reads cannot commit a stale context lease to a first spawn',{timeout:1000},async()=>{
+  const h=await preparedHarness();h.manager.gateway=undefined;let release,entered;
+  const gate=new Promise(r=>{release=r;}),ready=new Promise(r=>{entered=r;});
+  const io=gatewayFixture(h.manager,{read:async()=>{entered();await gate;return Buffer.from('fixture');}});
+  const starting=h.manager.startGateway();await ready;h.contexts.set(3,{...h.contexts.get(3)});release();
+  await assert.rejects(starting,/Mobile anchor lost/);assert.equal(io.count(),0);io.finish();
+});
+
+test('quiesced initial gateway spawn resumes only on the same verified context',{timeout:1000},async()=>{
+  for(const changed of [false,true]){
+    const h=await preparedHarness();h.manager.gateway=undefined;const io=gatewayFixture(h.manager);
+    h.manager.quiesced=true;await h.manager.startGateway();assert.equal(io.count(),0);
+    if(changed)h.contexts.set(2,{...h.contexts.get(2)});
+    h.manager.resume();await h.manager.tick();
+    assert.equal(io.count(),changed?0:1);assert.equal(h.manager.stopped,changed);
+    io.finish();
+  }
 });
 
 test('a missing, ambiguous or failed preload repair never opens the gateway', async () => {
