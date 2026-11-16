@@ -10,7 +10,7 @@ git diff --quiet HEAD -- Package.swift AppInfo.plist ManagerInfo.plist Sources s
 python3 - <<'PY'
 import subprocess
 from pathlib import Path
-untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z', '--', 'Sources', 'mobile/Shared', 'mobile/Gateway', 'tools/project-order-probe']).decode().split('\0')
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '-z', '--', 'Sources', 'mobile/Shared', 'mobile/Gateway', 'tools/project-order-probe']).decode().split('\0')
 missing = [name for name in untracked if name]
 if missing:
     raise SystemExit('Untracked package input must be committed before recording source_commit: ' + ', '.join(missing))
@@ -36,9 +36,8 @@ cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$HELPER/Contents/Resources/"
 cp "$HOME/Library/Caches/codex-plus/mobile/bin/MobileGateway" "$HELPER/Contents/Resources/MobileGateway"
 cp "$ROOT/scripts/inspect-sidebar-model.mjs" "$HELPER/Contents/Resources/"
 ACORN="$HOME/Library/Caches/codex-plus/project-order-probe/node_modules/acorn"
-if [[ ! -f "$ACORN/dist/acorn.mjs" ]]; then
-  "$ROOT/scripts/setup-project-order-probe"
-fi
+# npm ci consumes the committed lock even when a previous cache exists.
+"$ROOT/scripts/setup-project-order-probe"
 cp "$ACORN/dist/acorn.mjs" "$HELPER/Contents/Resources/acorn.mjs"
 cp "$ACORN/LICENSE" "$HELPER/Contents/Resources/ACORN-LICENSE"
 # Preserve the gateway's existing signing requirement and Keychain TLS identity.
