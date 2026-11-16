@@ -31,7 +31,7 @@ r1两个fresh-context独立审视及r2最终定向复审完成，见[审视记�
 
 ## Smart Shadow TestFlight 374（2026-11-16）
 
-用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `LOCAL_APPLICATION_BUNDLE_ID`、ASC app6784136332、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
+用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `LOCAL_APPLICATION_BUNDLE_ID`、ASC app `LOCAL_APP_STORE_CONNECT_APP_ID`、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
 
 6项受影响移动资源/帧检查、两项现有CI、plist/shell/diff检查通过。Release仅关闭Web Inspector并增加正式签名/图标/方向/隐私配置，不改变原聊天前端和Mac运行体。最终archive/export均成功，包内身份、entitlement及iPad方向声明实读；全部19204文件摘要留本机。IPA SHA256为`1abaa8760dc0ddfa91ea81f494da440c8916f1aa28e8adc16fffa45c3da149a6`。
 
