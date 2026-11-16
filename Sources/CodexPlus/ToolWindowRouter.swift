@@ -21,8 +21,12 @@ final class ToolWindowRouter {
         let element: AXUIElement
         let windowID: UInt32
         let launchDate: Date
+        let mobileAnchor: Bool
         var lastKnownFrame: CGRect?
         var result: String
+        var compactAttempted = false
+        var resizeResult: Int32?
+        var minimizeResult: Int32?
     }
     var openOwnSettings: (() -> Void)?
     var ownAgentWindow: NSWindow?
@@ -236,7 +240,7 @@ final class ToolWindowRouter {
         guard id != 0, liveIdentity(window, pid: pid, id: id, launchDate: launchDate) else { return false }
         if managed.contains(where: { $0.pid == pid && $0.windowID == id }) { return true }
         let record = Managed(pid: pid, element: window, windowID: id, launchDate: launchDate,
-                             lastKnownFrame: original, result: "parking")
+                             mobileAnchor: mobileAnchor, lastKnownFrame: original, result: "parking")
         managed.append(record); placementRequests += 1
         ocu.call(arguments: ["app": String(pid), "window_id": Int(id), "window_placement": "right_display", "include_screenshot": false]) { [weak self] outcome in
             guard let self else { return }
@@ -271,18 +275,65 @@ final class ToolWindowRouter {
               let nonce = request["anchor"] as? String, UUID(uuidString: nonce) != nil,
               let instance = request["instance"] as? String, UUID(uuidString: instance) != nil else { return nil }
         if let id = request["windowID"] as? UInt32 {
-            guard let record = managed.first(where: { $0.pid == host.processIdentifier && $0.windowID == id }), live(record) else {
+            guard let index = managed.firstIndex(where: { $0.pid == host.processIdentifier && $0.windowID == id && $0.mobileAnchor }),
+                  live(managed[index]) else {
                 return ["phase": "unknown", "windowID": id]
             }
+            let record = managed[index]
             guard record.result != "parking" else { return ["phase": "placing", "windowID": id] }
-            if let actual = frame(record.element), let area = display.currentBounds(), ToolWindowPolicy.contained(actual, in: area) {
-                return ["phase": "ready", "windowID": id]
+            if !record.compactAttempted {
+                guard record.result == "parked", let actual = frame(record.element),
+                      let area = display.currentBounds(), ToolWindowPolicy.contained(actual, in: area) else {
+                    return ["phase": "unknown", "windowID": id]
+                }
+                // Only this nonce-bound, independently registered mobile sender.
+                // Attempt once: an AX success is not proof of actual dimensions.
+                managed[index].compactAttempted = true
+                managed[index].result = "mobile-compacting"
+                var size = CGSize(width: 1, height: 1)
+                if let value = AXValueCreate(.cgSize, &size) {
+                    managed[index].resizeResult = AXUIElementSetAttributeValue(record.element, kAXSizeAttribute as CFString, value).rawValue
+                }
+                // The vendor currently enforces 480x600 on primary windows.
+                // Minimizing keeps the same webContents/MessagePort alive and
+                // removes its screen footprint even when the resize is clamped.
+                if live(record) {
+                    managed[index].minimizeResult = AXUIElementSetAttributeValue(record.element, kAXMinimizedAttribute as CFString, kCFBooleanTrue).rawValue
+                }
             }
-            return ["phase": "unknown", "windowID": id]
+            let presentation = mobilePresentation(managed[index])
+            let hidden = presentation["mode"] as? String == "minimized"
+            managed[index].result = hidden ? "mobile-minimized" : "mobile-presentation-unconfirmed"
+            return ["phase": hidden ? "ready" : "unknown", "windowID": id]
         }
         guard let window = hostWindows.mobileAnchor(host, nonce: nonce, instance: instance) else { return nil }
         guard place(window.element, pid: host.processIdentifier, mobileAnchor: true) else { return nil }
         return ["phase": "placing", "windowID": window.id]
+    }
+
+    private func mobilePresentation(_ record: Managed) -> [String: Any] {
+        var result: [String: Any] = ["mode": "unconfirmed", "requestedSize": ["width": 1, "height": 1],
+                                     "sizeUnits": "display-points", "attempted": record.compactAttempted]
+        if let code = record.resizeResult { result["resizeAXResult"] = code }
+        if let code = record.minimizeResult { result["minimizeAXResult"] = code }
+        guard live(record), let info = windowInfo(record.windowID) else { return result }
+        let minimized = value(record.element, kAXMinimizedAttribute) as? Bool
+        // WindowServer omits kCGWindowIsOnscreen for minimized windows. Require
+        // a successful full onscreen inventory rather than treating a missing
+        // dictionary key (or a failed query) as proof of invisibility.
+        let onscreen = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]])
+            .map { $0.contains { ($0[kCGWindowNumber as String] as? UInt32) == record.windowID } }
+        guard live(record) else { return result }
+        if let minimized { result["minimized"] = minimized }
+        if let onscreen { result["onscreen"] = onscreen }
+        if let bounds = info[kCGWindowBounds as String] as? [String: Any],
+           let actual = CGRect(dictionaryRepresentation: bounds as CFDictionary) {
+            result["actualFrame"] = jsonFrame(actual)
+            result["onePointSizeAccepted"] = actual.width == 1 && actual.height == 1
+        }
+        // Both independent readbacks are required; a missing query is unknown.
+        if minimized == true && onscreen == false { result["mode"] = "minimized" }
+        return result
     }
 
     private func finishStopIfReady() {
@@ -570,7 +621,9 @@ final class ToolWindowRouter {
     }
 
     private func windowInfo(_ id: UInt32) -> [String: Any]? {
-        (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?
+        // IncludingWindow omits minimized Electron windows on this macOS.
+        // Keep exact-ID identity checks against the complete inventory instead.
+        (CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]])?
             .first { ($0[kCGWindowNumber as String] as? UInt32) == id }
     }
 
@@ -586,6 +639,7 @@ final class ToolWindowRouter {
         if let area = display.currentBounds() { target["id"] = display.id; target["name"] = display.name; target["frame"] = jsonFrame(area) }
         var windows = managed.map { record -> [String: Any] in
             var result: [String: Any] = ["pid": record.pid, "windowID": record.windowID, "result": record.result, "restoreMode": "release-only"]
+            if record.mobileAnchor { result["mobilePresentation"] = mobilePresentation(record) }
             if let frame = frame(record.element) { result["frame"] = jsonFrame(frame) }; return result
         }
         if let ownAgentWindow, ownAgentWindow.isVisible { windows.append(["pid": ProcessInfo.processInfo.processIdentifier, "windowID": ownAgentWindow.windowNumber, "result": "agent-settings"]) }
