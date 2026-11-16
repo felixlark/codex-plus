@@ -1,4 +1,5 @@
 import AppKit
+import AgentDisplayShim
 import ApplicationServices
 
 /// Owned by the existing codex-plus app. No helper, key interception, private
@@ -28,6 +29,20 @@ public final class CodexWorkspaceObserver {
 
     public init() {}
     deinit { stop() }
+
+    private var authorizationCycle = 0
+    private var authorizationInFlight = false
+    private var authorizedPID: pid_t?
+    private var authorizedWindows = Set<UInt32>()
+    public var refreshAuthorization: ((@escaping ([String: Any]?) -> Void) -> Void)?
+    public func authorize(_ scope: [String: Any]?) {
+        guard maintenance != nil else { return }
+        let claim = scope.flatMap(HumanTargetScope.init)
+        let windows = claim?.windowIDs ?? []
+        let selected = claim?.pid
+        if authorizedPID != selected || authorizedWindows != windows { detach() }
+        authorizedPID = selected; authorizedWindows = selected == nil ? [] : windows
+    }
 
     public func status() -> [String: Any] {
         var result: [String: Any] = ["enabled": CodexWorkspacePreference.enabled,
@@ -90,6 +105,8 @@ public final class CodexWorkspaceObserver {
     }
 
     public func stop() {
+        authorizationCycle += 1
+        authorizationInFlight = false
         maintenance?.invalidate()
         maintenance = nil
         for token in workspaceTokens { NSWorkspace.shared.notificationCenter.removeObserver(token) }
@@ -99,12 +116,23 @@ public final class CodexWorkspaceObserver {
     }
 
     private func reconcile() {
-        guard CodexWorkspacePreference.enabled, AXIsProcessTrusted() else {
+        guard let refreshAuthorization else { detach(); return }
+        guard maintenance != nil, !authorizationInFlight else { return }
+        authorizationInFlight = true
+        let cycle = authorizationCycle
+        refreshAuthorization { [weak self] scope in
+            guard let self, self.maintenance != nil, self.authorizationCycle == cycle else { return }
+            self.authorizationInFlight = false
+            self.authorize(scope); self.reconcileAuthorized()
+        }
+    }
+    private func reconcileAuthorized() {
+        guard !authorizedWindows.isEmpty, CodexWorkspacePreference.enabled, AXIsProcessTrusted() else {
             detach()
             awaitingCodexLaunch = false
             return
         }
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").first,
+        guard let authorizedPID, let app = NSRunningApplication(processIdentifier: authorizedPID), app.bundleIdentifier == "com.openai.codex",
               !app.isTerminated else {
             detach()
             awaitingCodexLaunch = true
@@ -197,7 +225,7 @@ public final class CodexWorkspaceObserver {
         }, unregister: { entry in
             AXObserverRemoveNotification(observer, entry.element.element, entry.notification as CFString)
         })
-        for window in windows { subscribe(window, kAXTitleChangedNotification) }
+        for window in windows where authorizedWindows.contains(cp_window_id(window)) { subscribe(window, kAXTitleChangedNotification) }
     }
 
     private func detach() {
@@ -211,11 +239,8 @@ public final class CodexWorkspaceObserver {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
         }
         subscriptions = CodexWorkspaceSubscriptions()
-        if requestedEnhancedUI, let application, AXIsProcessTrusted(),
-           !NSWorkspace.shared.isVoiceOverEnabled,
-           attribute(application, Self.enhancedUIAttribute) as? Bool == true {
-            _ = AXUIElementSetAttributeValue(application, Self.enhancedUIAttribute as CFString, kCFBooleanFalse)
-        }
+        // AXEnhancedUserInterface is shared application state. Detaching Plus
+        // never turns it off underneath another product or an assistive client.
         requestedEnhancedUI = false
         observer = nil
         application = nil
@@ -268,6 +293,14 @@ public final class CodexWorkspaceObserver {
     }
 
     private func inspect() {
+        guard let refreshAuthorization, maintenance != nil else { return }
+        let cycle = authorizationCycle, expected = generation
+        refreshAuthorization { [weak self] scope in
+            guard let self, self.maintenance != nil, self.authorizationCycle == cycle, self.generation == expected else { return }
+            self.authorize(scope); self.inspectAuthorized()
+        }
+    }
+    private func inspectAuthorized() {
         guard CodexWorkspacePreference.enabled, AXIsProcessTrusted(), let sample = sampleForInspection() else { return }
         guard tracker.observe(window: AXIdentity(sample.window), chat: AXIdentity(sample.toolbar), workspaceOpen: sample.open),
               let button = sample.expandControl else { return }
@@ -361,7 +394,8 @@ public final class CodexWorkspaceObserver {
     private func focusedStandardWindow() -> AXUIElement? {
         guard pid != nil, let application, let window = elementAttribute(application, kAXFocusedWindowAttribute),
               attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole,
-              attribute(window, kAXMinimizedAttribute) as? Bool == false else { return nil }
+              attribute(window, kAXMinimizedAttribute) as? Bool == false,
+              authorizedPID == pid, authorizedWindows.contains(cp_window_id(window)) else { return nil }
         return window
     }
 

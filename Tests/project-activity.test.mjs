@@ -39,6 +39,40 @@ test('complete thread model promotes old work before previews and keyboard navig
   assert.deepEqual(runtime.stats.order,[0]);
   assert.strictEqual(runtime.sort(result,()=>1,()=>1,state),result,'unchanged order keeps model identity');
 });
+test('each project orders explicit roles before status, with stable native ties and unlabelled tasks last',()=>{
+  const runtime=createProjectActivityRuntime(null,()=>999,sortProjectGroups);
+  const rows=[
+    ['plain','评估经理方案','input'],['specialist','专员｜采集','input'],
+    ['manager-idle','经理：交付','idle'],['director-idle','总监','idle'],
+    ['manager-active','经理｜开发','active'],['manager-unread','经理 / 审查','unread'],
+    ['manager-approval','经理（系统）','approval'],['manager-error','经理｜修复','error'],
+    ['manager-input','经理｜决策','input'],['misleading','总监控程序','active'],
+    ['missing',undefined,'idle'],
+  ];
+  const titles=Object.fromEntries(rows.map(([key,title])=>[key,title]));
+  const states=Object.fromEntries(rows.map(([key,,status])=>[key,status]));
+  const keys=rows.map(([key])=>key);
+  const input=[{projectId:'mixed',threadKeys:keys},{projectId:'second',threadKeys:['specialist','director-idle']}];
+  const render=()=>runtime.sort(input,()=>1,()=>1,key=>states[key],null,key=>titles[key]);
+  const result=render();
+  assert.deepEqual(result[0].threadKeys,['director-idle','manager-approval','manager-error','manager-input','manager-unread','manager-active','manager-idle','specialist','plain','misleading','missing']);
+  assert.deepEqual(result[1].threadKeys,['director-idle','specialist']);
+  assert.deepEqual(result[0].threadKeys.slice(0,5),['director-idle','manager-approval','manager-error','manager-input','manager-unread'],'role and status precede native preview truncation');
+  assert.strictEqual(input[0].threadKeys,keys);
+  titles.specialist='总监｜新标题';
+  assert.deepEqual(render()[0].threadKeys.slice(0,2),['specialist','director-idle'],'renaming updates the role on the next model projection');
+});
+test('role priority preserves selected-read deferral and does not change project status ordering',()=>{
+  const runtime=createProjectActivityRuntime(null,()=>100,sortProjectGroups);
+  const input=[{projectId:'director-only',threadKeys:['director']},{projectId:'mixed',threadKeys:['active','read','manager']}];
+  const states={director:'idle',active:'active',read:'unread',manager:'idle'};
+  const titles={director:'总监',active:'专员｜采集',read:'专员｜分析',manager:'经理'};
+  const render=selected=>runtime.sort(input,()=>1,()=>1,key=>states[key],selected,key=>titles[key]);
+  assert.deepEqual(ids(render('active')),['mixed','director-only'],'roles only change ordering inside each project');
+  states.read='idle';
+  assert.deepEqual(render('read')[0].threadKeys,['manager','read','active']);
+  assert.deepEqual(render('active')[0].threadKeys,['manager','active','read']);
+});
 test('highest priority task determines project class even when metadata is incomplete',()=>{
   const input=[{projectId:'unknown-idle',threadKeys:['unknown']},{projectId:'idle',threadKeys:['idle']},{projectId:'mixed',threadKeys:['idle','active']},{projectId:'attention',threadKeys:['input']}];
   const runtime=createProjectActivityRuntime(storage(),()=>1,sortProjectGroups);

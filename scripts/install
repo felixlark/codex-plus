@@ -1,6 +1,21 @@
 #!/bin/bash
 set -euo pipefail
-# File replacement only. #613 performs the stopped-service handoff and adopts
-# the signed package through the installed ss-service before starting it.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$ROOT/scripts/install-manager" "$@"
+SOURCE="${1:?Usage: scripts/install /absolute/path/Codex Plus.app}"
+TARGET="/Applications/Codex Plus.app"
+MANIFEST="$(dirname "$SOURCE")/CodexPlus.package.json"
+python3 "$(dirname "$0")/package-manifest.py" --verify "$SOURCE" "$MANIFEST"
+[[ "$SOURCE" = /* && "$SOURCE" != "$TARGET" ]]
+codesign --verify --deep --strict -R 'anchor apple generic and identifier "me.longbiaochen.codex-plus" and certificate leaf[subject.OU] = "HJG65XBC25"' "$SOURCE"
+python3 "$(dirname "$0")/native_install_guard.py" "$TARGET"
+STAGING="$(mktemp -d /Applications/.codexplus-install.XXXXXX)"
+ditto "$SOURCE" "$STAGING/Codex Plus.app"
+python3 "$(dirname "$0")/package-manifest.py" --verify "$STAGING/Codex Plus.app" "$MANIFEST"
+codesign --verify --deep --strict "$STAGING/Codex Plus.app"
+if [[ -e "$TARGET" ]]; then
+  BACKUP="$HOME/Library/Caches/codex-plus/standalone/rollback/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$BACKUP"; mv "$TARGET" "$BACKUP/Codex Plus.app"
+fi
+mv "$STAGING/Codex Plus.app" "$TARGET"
+rmdir "$STAGING"
+codesign --verify --deep --strict "$TARGET"
+# File replacement does not start Plus or touch SmartShadow. #613 owns adoption.

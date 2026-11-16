@@ -4,9 +4,9 @@ import PackageDescription
 let package = Package(
     name: "CodexPlus",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "SmartShadowInteraction", targets: ["CodexPlus"]), .executable(name: "SmartShadowManager", targets: ["SmartShadowManager"])],
+    products: [.executable(name: "CodexPlus", targets: ["CodexPlus"])],
     targets: [
-        .target(name: "CodexPlusCore"),
+        .target(name: "CodexPlusCore", dependencies: ["AgentDisplayShim"]),
         .target(name: "AgentDisplayShim", publicHeadersPath: "include",
                 cSettings: [.unsafeFlags(["-fobjc-arc"])],
                 linkerSettings: [.linkedFramework("CoreGraphics"), .linkedFramework("ApplicationServices")]),
@@ -19,7 +19,6 @@ let package = Package(
                 "-Xlinker", "__info_plist", "-Xlinker", "AppInfo.plist"
             ])]
         ),
-        .executableTarget(name: "SmartShadowManager", dependencies: ["CodexPlusCore"], resources: [.copy("Resources")]),
         .testTarget(name: "CodexPlusCoreTests", dependencies: ["CodexPlusCore"])
     ]
 )

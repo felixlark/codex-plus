@@ -4,15 +4,14 @@ import CryptoKit
 
 /// The accessory app owns one external controller. It never terminates Codex.
 final class CodexLauncher: ObservableObject {
-    @Published private(set) var summary = "F6 打开双屏 Codex"
-    @Published private(set) var pageSummary = "等待从 F6 启动 Codex"
+    @Published private(set) var summary = "打开 Codex · 人工窗口增强"
+    @Published private(set) var pageSummary = "等待人工窗口归属"
     @Published private(set) var suggestionSummary = "已关闭"
     @Published private(set) var reconnectResult: String?
     @Published private(set) var sidebarSummary = "等待页面接入"
     @Published private(set) var orderSummary = "等待连接"
     var onOpenSettings: (() -> Void)?
-    var onPlaceMobileWindow: ((NSRunningApplication, [String: Any]) -> [String: Any]?)?
-    private var mobileWindowRequest: [String: Any]?
+    var onOwnership: (([String: Any]?) -> Void)?
     private var controllerOutput: Pipe?
     private var controllerInput: FileHandle?
     private var outputBuffer = Data()
@@ -21,15 +20,17 @@ final class CodexLauncher: ObservableObject {
     private var timer: Timer?
     private var stopping = false
     private var quiesced = false
+    private var ownershipEpoch = 0
     private var lifecycleWait: (id: UUID, continuation: CheckedContinuation<[String: Any], Error>)?
     private var recovering = false
     private var snapshot: [String: Any] = [:]
     private var stopped: (() -> Void)?
     private var entryRequests = 0
     private var lastEntrySource = "none"
-    private var autoSendEnabled = !SuggestionAcceptance.isRequested && SmartShadowPreferences.defaults.bool(forKey: "autoSendSuggestions")
+    private var autoSendEnabled = !SuggestionAcceptance.isRequested && PlusPreferences.defaults.bool(forKey: "autoSendSuggestions")
     private let humanWindows = HumanWindows()
     private var needsPlacement = false
+    private var refreshingHumanPlacement = false
     private var placementStatus = "idle"
     private let appURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
     private let profile: String?
@@ -40,11 +41,11 @@ final class CodexLauncher: ObservableObject {
         if let index = args.firstIndex(of: "--acceptance-profile"), args.indices.contains(index + 1) {
             let value = args[index + 1]
             let expected = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/codex-plus/acceptance-20261110").path
+                .appendingPathComponent("Library/Application Support/codex-plus/enhancements/acceptance").path
             profile = value == expected ? value : nil
         } else { profile = nil }
         let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/codex-plus")
+            .appendingPathComponent("Library/Application Support/codex-plus/enhancements")
             .appendingPathComponent(profile == nil ? "launcher" : "installed-acceptance")
         stateURL = directory.appendingPathComponent("state.json")
     }
@@ -56,7 +57,7 @@ final class CodexLauncher: ObservableObject {
             do { try input.write(contentsOf: data + Data([10])); return true } catch { return false }
         }
         refresh()
-        if ownedHost() != nil { startController(attach: true) }
+        startController(attach: true)
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
@@ -66,24 +67,33 @@ final class CodexLauncher: ObservableObject {
         lastEntrySource = source
         needsPlacement = true
         refresh()
-        if let host = ownedHost() {
-            if controller == nil { recovering = false; startController(attach: true) }
-            host.activate(options: [.activateIgnoringOtherApps])
-            place(host)
-            return
+        refreshHumanPlacement()
+    }
+
+    private func refreshHumanPlacement() {
+        guard !refreshingHumanPlacement, !quiesced, !stopping,
+              needsPlacement || humanWindows.hasPendingRequest else { return }
+        refreshingHumanPlacement = true
+        let epoch = ownershipEpoch, expectedController = controller
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.refreshingHumanPlacement = false }
+            let scope = try? await HostOwnershipClient.read()
+            guard !self.quiesced, !self.stopping, self.ownershipEpoch == epoch, self.controller === expectedController else { return }
+            self.onOwnership?(scope)
+            guard let claim = scope.flatMap(HumanTargetScope.init),
+                  let host = self.ownedHost(), host.processIdentifier == claim.pid else {
+                self.humanWindows.authorizedWindowIDs = []
+                self.summary = "等待原 Codex 后台的准确人工窗口归属"; return
+            }
+            self.humanWindows.authorizedWindowIDs = claim.windowIDs
+            if self.needsPlacement { self.place(host) }
+            else { self.humanWindows.update(host) }
         }
-        if profile == nil, let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
-            .first(where: { !$0.isTerminated && $0.bundleURL == appURL }) {
-            existing.activate(options: [.activateIgnoringOtherApps])
-            place(existing)
-            summary = "已打开 Codex；正常退出后再按 F6，项目自动排序将生效"
-            return
-        }
-        guard controller == nil else { return }
-        startController(attach: false)
     }
 
     @discardableResult func stop(completion: (() -> Void)? = nil) -> Bool {
+        ownershipEpoch += 1
         stopping = true
         stopped = completion
         timer?.invalidate(); timer = nil
@@ -93,48 +103,41 @@ final class CodexLauncher: ObservableObject {
     }
 
     func prepareLifecycle() async throws -> [String: Any] {
+        ownershipEpoch += 1
         quiesced = true
         let expectedController = controller?.processIdentifier
         let reply = try await controllerLifecycle("prepare")
         guard controller?.processIdentifier == expectedController else { throw ManagementProtocol.failure("controller_changed") }
         var scope: [String: Any] = ["native":ProcessIdentity.read(getpid()) as Any? ?? NSNull(),
-                                  "controller":controller.flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
-                                  "host":ownedHost().flatMap { ProcessIdentity.read($0.processIdentifier) } as Any? ?? NSNull(),
-                                  "mobile":reply["mobile"] ?? NSNull(),
-                                  "human_creation_outcomes":reply["human_creation_outcomes"] ?? []]
-        if let mobile = reply["mobile"] as? [String: Any], let number = ManagementProtocol.integer(mobile["gatewayPID"]), let pid = Int32(exactly:number) {
-            guard let identity = ProcessIdentity.read(pid) else { throw ManagementProtocol.failure("gateway_identity_unknown") }
-            scope["gateway"] = identity
-        } else { scope["gateway"] = NSNull() }
+                                    "controller":expectedController.flatMap(ProcessIdentity.read) as Any? ?? NSNull()]
+        if let host = ownedHost() { scope["host"] = ProcessIdentity.read(host.processIdentifier) ?? [:] }
+        else { scope["host"] = NSNull() }
+        scope["human_creation_outcomes"] = reply["human_creation_outcomes"] ?? []
         let canonical = try JSONSerialization.data(withJSONObject: scope, options:.sortedKeys)
         let digest = SHA256.hash(data: canonical).map { String(format:"%02x", $0) }.joined()
         return ["state":"prepared", "owned_scope":scope, "scope_revision":digest, "scope_canonical_base64":canonical.base64EncodedString()]
     }
     func resumeLifecycle() async throws {
         _ = try await controllerLifecycle("resume")
+        ownershipEpoch += 1
         quiesced = false
     }
     func verifyLifecycleScope(_ prepared: [String: Any]) async -> Bool {
         guard quiesced, let scope = prepared["owned_scope"] as? [String: Any] else { return false }
-        for key in ["native", "controller", "gateway", "host"] {
+        for key in ["native", "controller", "host"] {
             if scope[key] is NSNull { continue }
             guard let saved = scope[key] as? [String: Any], let pid = ManagementProtocol.integer(saved["pid"]),
                   let actual = ProcessIdentity.read(pid_t(pid)), NSDictionary(dictionary:saved).isEqual(to:actual) else { return false }
         }
         do {
-            let current = try await controllerLifecycle("verify")
-            let saved = scope["mobile"] as? [String: Any]
-            let mobile = current["mobile"] as? [String: Any]
-            for key in ["anchor", "instance", "targetId", "gatewayPID", "terminalClosed"] {
-                if String(describing:saved?[key]) != String(describing:mobile?[key]) { return false }
-            }
+            _ = try await controllerLifecycle("verify")
             return true
         } catch { return false }
     }
     private func controllerLifecycle(_ action: String) async throws -> [String: Any] {
         guard lifecycleWait == nil else { throw ManagementProtocol.failure("lifecycle_in_progress") }
         guard let controller, controller.isRunning, let input = controllerInput else {
-            if controller == nil && snapshot.isEmpty { return ["mobile":NSNull()] }
+            if controller == nil && snapshot.isEmpty { return [:] }
             throw ManagementProtocol.failure("controller_unknown")
         }
         return try await withCheckedThrowingContinuation { continuation in
@@ -179,7 +182,6 @@ final class CodexLauncher: ObservableObject {
          "placementSource": "codex-plus-dual-window", "placementRule": "external-1-right-2",
          "humanWindows": humanWindows.status(), "nativeWindowDefaults": snapshot["nativeWindowDefaults"] ?? NSNull(),
          "controllerPID": controller?.processIdentifier ?? 0, "adaptedScripts": snapshot["adapted"] ?? 0,
-         "mobile": snapshot["mobile"] ?? NSNull(),
          "summary": summary, "acceptanceProfile": profile != nil,
          "pageEntries": snapshot["pageEntries"] ?? ["phase": "unavailable"],
          "projectOrder": snapshot["projectOrder"] ?? ["phase": "unavailable"],
@@ -192,11 +194,8 @@ final class CodexLauncher: ObservableObject {
     func runtimeComponents() -> [String: Any] {
         guard let controller, controller.isRunning,
               (snapshot["controllerPID"] as? NSNumber)?.int32Value == controller.processIdentifier else { return [:] }
-        let mobile = snapshot["mobile"] as? [String: Any]
         return ["controller_protocol": snapshot["protocol"] ?? NSNull(),
-                "controller_version": snapshot["version"] ?? NSNull(),
-                "mobile_protocol": mobile?["protocol"] ?? NSNull(),
-                "mobile_version": mobile?["version"] ?? NSNull()]
+                "controller_version": snapshot["version"] ?? NSNull()]
     }
 
     private func ownedHost() -> NSRunningApplication? {
@@ -220,22 +219,9 @@ final class CodexLauncher: ObservableObject {
     }
 
     private func refresh() {
-        if !quiesced, !stopping, let host = ownedHost() { humanWindows.update(host) }
         publishDisplays()
         if let data = try? Data(contentsOf: stateURL), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = value
-        }
-        if !quiesced, let host = ownedHost(), let request = mobileWindowRequest,
-           let placement = onPlaceMobileWindow?(host, request) {
-            if let id = placement["windowID"] { mobileWindowRequest?["windowID"] = id }
-            let phase = placement["phase"] as? String
-            if phase == "ready" || phase == "unknown" && request["reportedUnknown"] as? Bool != true {
-                var reply = request; reply["type"] = "mobile-window-result"
-                reply["phase"] = placement["phase"]; reply["windowID"] = placement["windowID"]
-                if phase == "ready" { mobileWindowRequest = nil }
-                else { mobileWindowRequest?["reportedUnknown"] = true }
-                if let data = try? JSONSerialization.data(withJSONObject: reply) { try? controllerInput?.write(contentsOf: data + Data([10])) }
-            }
         }
         let entries = snapshot["pageEntries"] as? [String: Any]
         let order = snapshot["projectOrder"] as? [String: Any]
@@ -267,18 +253,18 @@ final class CodexLauncher: ObservableObject {
         if controller?.isRunning == true {
             switch snapshot["phase"] as? String {
             case "active":
-                summary = "F6 打开双屏 Codex · Codex Plus 页面增强已连接"; recovering = false
-                if needsPlacement, let host = ownedHost() { place(host) }
+                summary = "打开 Codex · 人工窗口增强 · Codex Plus 页面增强已连接"; recovering = false
+                refreshHumanPlacement()
             case "failed", "disconnected": summary = "连接正在恢复；Codex 中的任务继续运行"
             default: summary = "正在连接 Codex…"
             }
         } else if ownedHost() != nil {
             summary = "Codex 正在运行；正在恢复自动排序连接"
         } else if profile == nil && !NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").isEmpty {
-            summary = "F6 打开双屏 Codex；正常退出后从 F6 启动可启用自动排序"
+            summary = "打开 Codex · 人工窗口增强；正常退出后从 F6 启动可启用自动排序"
         } else if snapshot["phase"] as? String == "failed" {
             summary = "自动排序暂不可用：\(snapshot["error"] as? String ?? "连接失败")"
-        } else { summary = "F6 打开双屏 Codex · Codex Plus 在菜单栏运行" }
+        } else { summary = "打开 Codex · 人工窗口增强 · Codex Plus 在菜单栏运行" }
     }
 
     private func place(_ host: NSRunningApplication) {
@@ -320,7 +306,6 @@ final class CodexLauncher: ObservableObject {
             self.controllerOutput?.fileHandleForReading.readabilityHandler = nil
             self.controllerOutput = nil
             self.controllerInput = nil
-            self.mobileWindowRequest = nil
             self.outputBuffer.removeAll()
             self.controller = nil; self.refresh()
             if let wait = self.lifecycleWait { self.lifecycleWait = nil; wait.continuation.resume(throwing:ManagementProtocol.failure("controller_exited")) }
@@ -353,9 +338,21 @@ final class CodexLauncher: ObservableObject {
                 else { wait.continuation.resume(throwing:ManagementProtocol.failure("scope_not_ready")) }
                 continue
             }
-            if value["type"] as? String == "mobile-window-request", value["version"] as? Int == 1 {
-                guard !stopping, mobileWindowRequest == nil else { continue }
-                mobileWindowRequest = value
+            if value["type"] as? String == "target-ownership-request", value["version"] as? Int == 1,
+               let requestID = value["requestId"] as? String, UUID(uuidString: requestID) != nil {
+                let expected = controller, epoch = ownershipEpoch
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let received = try? await HostOwnershipClient.read()
+                    guard self.controller === expected, expected?.isRunning == true, !self.stopping else { return }
+                    let scope = !self.quiesced && self.ownershipEpoch == epoch ? received : nil
+                    self.onOwnership?(scope)
+                    let claims = scope.flatMap(HumanTargetScope.init)
+                    self.humanWindows.authorizedWindowIDs = claims?.windowIDs ?? []
+                    var reply: [String: Any] = ["type":"target-ownership-result", "version":1, "requestId":requestID, "ok":scope != nil]
+                    if let scope { reply["scope"] = scope } else { reply["reason"] = "unavailable" }
+                    if let data = try? JSONSerialization.data(withJSONObject:reply) { try? self.controllerInput?.write(contentsOf:data + Data([10])) }
+                }
                 continue
             }
             if value["type"] as? String == "enhancement-reconnect-result" {

@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import CodexPlusCore
 
-/// The existing signed native body owns effects; the management App is a client.
+/// The independent signed Codex Plus body owns its enhancement effects.
 final class ManagementRuntime {
     private let instance = UUID()
     var readSettings: (() throws -> ManagementProtocol.Settings)?
@@ -26,9 +26,7 @@ final class ManagementRuntime {
               version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
               build: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
               controllerProtocol: components["controller_protocol"] as? Int,
-              controllerVersion: components["controller_version"] as? String,
-              mobileProtocol: components["mobile_protocol"] as? Int,
-              mobileVersion: components["mobile_version"] as? String)
+              controllerVersion: components["controller_version"] as? String)
     }
     private var capabilities: [String] {
         ["status", "lifecycle.prepare-stop", "lifecycle.stop", "lifecycle.resume"] + (readSettings == nil ? [] : ["settings.read"]) +

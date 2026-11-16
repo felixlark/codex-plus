@@ -1,6 +1,6 @@
 const constants = { PROJECT_ORDER: 'project-order' };
 const data = await fetch('scenario-data.json').then(response => response.json());
-const nativeClock = { Kr: (get, key) => get('recency', key), RD: 'updated', qM: 'status' };
+const nativeClock = { Kr: (get, key) => get('recency', key), RD: 'updated', qM: 'status', oB: (get, key) => ({summary: {title: get('title', key)}}) };
 function nativeOrder({ groups, projectOrder }) {
   return projectOrder.map(id => groups.find(group => group.projectId === id));
 }
@@ -8,7 +8,7 @@ function nativeThreads({ getRecencyAt, items, sortMode }) {
   return sortMode === 'updated_at' ? [...items].sort((a, b) => getRecencyAt(b) - getRecencyAt(a)) : items;
 }
 function model(input) {
-  const get = (selector, key) => selector === 'status' ? input.statuses?.[key] ?? 'idle' : selector === 'updated' ? input.updatedTimestamps?.[key] ?? input.timestamps[key] : input.timestamps[key];
+  const get = (selector, key) => selector === 'title' ? input.titles?.[key] : selector === 'status' ? input.statuses?.[key] ?? 'idle' : selector === 'updated' ? input.updatedTimestamps?.[key] ?? input.timestamps[key] : input.timestamps[key];
   const getRecencyAt = key => nativeClock.Kr(get, key);
   const orderByKey = { [constants.PROJECT_ORDER]: input.order };
   let groups = nativeOrder({ groups: input.groups, projectOrder: orderByKey[constants.PROJECT_ORDER] });
@@ -43,7 +43,7 @@ function render(input) {
     return item;
   }));
   globalThis.fixtureResult = { order: layout.projectKeys, navigation, pinned: layout.pinnedKeys, custom: layout.customKeys,
-    adapted: globalThis.__codexPlusProjectOrder?.protocol === 9 };
+    adapted: globalThis.__codexPlusProjectOrder?.protocol === 10 };
 }
 globalThis.fixtureUpdate = name => render(data[name]);
 render(data.initial);

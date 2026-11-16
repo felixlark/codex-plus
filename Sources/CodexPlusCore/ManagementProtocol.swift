@@ -2,12 +2,12 @@ import Foundation
 import CryptoKit
 import CoreFoundation
 
-/// Shared management data only. The native interactiond body owns all effects.
+/// Management data for the independent Codex Plus native process.
 public enum ManagementProtocol {
     public static let version = 1
-    public static let command = "management-v1"
-    public static let runtimeBundleID = SmartShadowInstallation.helperBundleID
-    public static let runtimePath = SmartShadowInstallation.helperPath
+    public static let command = "codex-plus-management-v1"
+    public static let runtimeBundleID = CodexPlusInstallation.bundleID
+    public static let runtimePath = CodexPlusInstallation.path
     public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", prepareStop = "lifecycle.prepare-stop", stop = "lifecycle.stop", resume = "lifecycle.resume", openCodex = "codex.open", reconnect = "enhancements.reconnect" }
     public enum Rejection: String { case unsupported, conflict }
     /// Only these protocol codes attest a pre-effect rejection. Arbitrary
@@ -59,17 +59,14 @@ public enum ManagementProtocol {
         public let build: String
         public let controller_protocol: Int?
         public let controller_version: String?
-        public let mobile_protocol: Int?
-        public let mobile_version: String?
         public init(instanceID: UUID, pid: Int32, bundleID: String, path: String, version: String, build: String,
-                    controllerProtocol: Int? = nil, controllerVersion: String? = nil, mobileProtocol: Int? = nil, mobileVersion: String? = nil) {
+                    controllerProtocol: Int? = nil, controllerVersion: String? = nil) {
             instance_id = instanceID; self.pid = pid; bundle_id = bundleID; self.path = path; self.version = version; self.build = build
             controller_protocol = controllerProtocol; controller_version = controllerVersion
-            mobile_protocol = mobileProtocol; mobile_version = mobileVersion
         }
         public var object: [String: Any] { get throws {
             var result = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as! [String: Any]
-            for key in ["controller_protocol", "controller_version", "mobile_protocol", "mobile_version"] where result[key] == nil { result[key] = NSNull() }
+            for key in ["controller_protocol", "controller_version"] where result[key] == nil { result[key] = NSNull() }
             return result
         } }
     }
@@ -123,5 +120,5 @@ public enum ManagementProtocol {
     }
     public static func uuid(_ value: Any?) -> UUID? { (value as? String).flatMap(UUID.init(uuidString:)) }
     public static func isDigest(_ value: String) -> Bool { value.count == 64 && value.allSatisfy { "0123456789abcdef".contains($0) } }
-    public static func failure(_ code: String) -> NSError { NSError(domain: "SmartShadow.Management", code: 1, userInfo: [NSLocalizedDescriptionKey: code]) }
+    public static func failure(_ code: String) -> NSError { NSError(domain: "CodexPlus.Management", code: 1, userInfo: [NSLocalizedDescriptionKey: code]) }
 }

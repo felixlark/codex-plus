@@ -52,7 +52,7 @@ public enum ToolCommand {
 /// One JSON line per connection; deliberately no launch/reopen/retry fallback.
 public enum ToolControlChannel {
     public static let path = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/codex-plus/tool-control.sock").path
+        .appendingPathComponent("Library/Application Support/codex-plus/enhancements/tool-control.sock").path
 
     public static func withAddress<T>(_ operation: (UnsafePointer<sockaddr>, socklen_t) -> T) throws -> T {
         var address = sockaddr_un(); address.sun_family = sa_family_t(AF_UNIX)

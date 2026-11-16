@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 
-export const toolRoot = path.join(os.homedir(), 'Library/Caches/codex-plus/project-order-probe');
+export const toolRoot = path.join(os.homedir(), 'Library/Caches/codex-plus/standalone/project-order-probe');
 export const reviewedHostResource = Object.freeze({
   path: 'webview/assets/async/907538.0572f09d40.js',
   sha256: 'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c',
@@ -138,9 +138,10 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
   const states = new Map();
   let deferredReadKey = null;
   let stats = null;
-  const runtime = { protocol: 9, get stats() { return stats; }, sort(groups, recency, updated, status, selectedKey = null) {
+  const runtime = { protocol: 10, get stats() { return stats; }, sort(groups, recency, updated, status, selectedKey = null, title = () => '') {
     const clocks = new Map();
     const priorities = new Map();
+    const roles = new Map();
     let changed = false;
     if (deferredReadKey !== selectedKey) deferredReadKey = null;
     mergeStored();
@@ -157,6 +158,11 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
       if (key === selectedKey && previous === 'unread' && current === 'idle') deferredReadKey = key;
       if (key === deferredReadKey && current !== undefined && current !== 'idle') deferredReadKey = null;
       priorities.set(key, ['input','approval','error'].includes(current) ? 0 : current === 'unread' || key === deferredReadKey ? 1 : current === 'active' ? 2 : 3);
+      // Roles are explicit title prefixes, never inferred from the conversation
+      // or a mention elsewhere in its title. Unlabelled tasks follow specialists.
+      const label = title(key);
+      const role = typeof label === 'string' ? label.match(/^\s*(总监|经理|专员)(?=$|[\s｜|：:·/（(【\[—-])/u)?.[1] : undefined;
+      roles.set(key, role ? ['总监','经理','专员'].indexOf(role) : 3);
       const a = recency(key), b = updated(key), c = times[key];
       const values = [a,b,c].filter(Number.isFinite);
       clocks.set(key, values.length ? Math.max(...values) : undefined);
@@ -165,9 +171,10 @@ export function createProjectActivityRuntime(storage, now, sortGroups) {
     // each other's entries; all readers merge task timestamps with max().
     if (changed) { try { storage?.setItem(storageKey, JSON.stringify({version:1,times:ownTimes})); } catch {} }
     // Sort the complete model before native preview truncation and navigation
-    // are derived. Preserve native order (including manual order) within a class.
+    // are derived. Roles precede status; project ordering still uses status and
+    // activity. Native/manual order breaks ties within the same role and status.
     let projected = groups.map(group => {
-      const threadKeys = [...group.threadKeys].sort((a,b) => priorities.get(a) - priorities.get(b));
+      const threadKeys = [...group.threadKeys].sort((a,b) => roles.get(a) - roles.get(b) || priorities.get(a) - priorities.get(b));
       return threadKeys.every((key,index) => key === group.threadKeys[index]) ? group : {...group,threadKeys};
     });
     if (projected.every((group,index) => group === groups[index])) projected = groups;
@@ -296,7 +303,9 @@ export async function adaptSidebar(source, { host = false, resourcePath } = {}) 
   // status/timestamp change; the fixture has no native selection module.
   // Capture outside the model: its local variables can shadow import aliases.
   const selection = host ? `${clock.get}(${selectionBinding})` : 'null';
-  const replacement = `globalThis.__codexPlusProjectOrder.sort(${source.slice(match.start, match.end)},${match.clock},key=>${clock.get}(${clock.module}.RD,key),key=>${clock.get}(${clock.module}.qM,key),${selection})`;
+  // oB reads both the native live summary and catalog-backed summary through
+  // this model's reactive getter, so renaming a task also updates its role.
+  const replacement = `globalThis.__codexPlusProjectOrder.sort(${source.slice(match.start, match.end)},${match.clock},key=>${clock.get}(${clock.module}.RD,key),key=>${clock.get}(${clock.module}.qM,key),${selection},key=>${clock.module}.oB(${clock.get},key)?.summary?.title)`;
   let adapted = source;
   const edits = [
     ...host ? [{start:match.selectionModule.at,end:match.selectionModule.at,replacement:`const ${selectionBinding}=${match.selectionModule.name}.oN;`}] : [],

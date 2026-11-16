@@ -3,7 +3,7 @@ import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
-import {launchHost,parentIsAlive} from './launch-host.mjs';
+import {parentIsAlive,verifyHost} from './launch-host.mjs';
 import {parseArgs} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import readline from 'node:readline';
@@ -16,21 +16,22 @@ import {initializePageSession} from './page-session.mjs';
 import {sidebarBinding,adaptSidebarLayout,resolveSidebarDisplay,sanitizeSidebarValues,SidebarProfiles,needsSidebarReconnect} from './sidebar-layout.mjs';
 import {backgroundGuardBinding,reviewedSamplingResource,reviewedBackgroundDependency,adaptBackgroundSuggestions,SuggestionCoordinator} from './suggestion-auto-send.mjs';
 import {policyForBackgroundPage,reviewedBackgroundPages,canReconnectPage,inspectReconnectSafety,createReconnectGuard,normalizeAcceptanceThread} from './suggestion-review.mjs';
-import {MobileAccess,mobileHostSupported,probeUnclaimedMobileThread} from './mobile-access.mjs';
+import {OwnershipAuthority,OwnershipRequests} from './target-ownership.mjs';
+import {loadAttemptLedger} from './attempt-ledger.mjs';
 
 let adapterURL=new URL('./inspect-sidebar-model.mjs',import.meta.url);
 try{await fs.access(adapterURL);}catch{adapterURL=new URL('../../../scripts/inspect-sidebar-model.mjs',import.meta.url);}
 const {openAsar,adaptSidebar,adaptReloadRoute,reviewedHostResource,reviewedRouteResource}=await import(adapterURL.href);
 const {values}=parseArgs({options:{app:{type:'string',default:'/Applications/ChatGPT.app'},profile:{type:'string'},state:{type:'string'},attach:{type:'boolean',default:false},'auto-send-suggestions':{type:'boolean',default:false},'suggestion-acceptance-thread':{type:'string'}}});
 const acceptanceThread=normalizeAcceptanceThread(values['suggestion-acceptance-thread']);
-const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/state.json');
+const stateFile=values.state??path.join(os.homedir(),'Library/Application Support/codex-plus/enhancements/launcher/state.json');
 await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
 const controllerVersion='sha256:'+createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex');
 let state={phase:'preparing',protocol:6,version:controllerVersion,controllerPID:process.pid,adapted:0,attached:0,resumed:0,errors:[],windowNumbers:{},humanTargets:{}};
 let publishing=Promise.resolve();
 function publish(){const data=JSON.stringify(state);publishing=publishing.then(async()=>{await fs.writeFile(stateFile+'.tmp',data,{mode:0o600});await fs.rename(stateFile+'.tmp',stateFile);process.stdout.write(data+'\n');});return publishing;}
 let cdp;
-let mobile, mobileSupported=false;
+
 const sessions=new Map();
 const inFlight=new Set();
 let stopping=false,quiesced=false;
@@ -84,44 +85,26 @@ async function settleHumanCreations(){
     await command(session[0],'Page.navigate',{url:url.href});
   }
 }
-async function repairNativeWindowDefaults(){
-  if(!humanFrames.length||!humanNativeSupported)return;
-  const destination=humanFrames.find(f=>f.number===1)??humanFrames[0];
-  const source=[...sessions].find(([,s])=>s.main);
-  if(!source||quiesced||stopping)return;
-  const bounds={x:destination.x,y:destination.y,width:destination.width,height:destination.height};
-  const evaluate=async(operation)=>{
-    const result=await command(source[0],'Runtime.evaluate',{expression:`(${nativeWindowDefaults.toString()})(${JSON.stringify(operation)},${JSON.stringify(bounds)})`,awaitPromise:true,returnByValue:true});
-    if(result.exceptionDetails)throw Error('Native geometry service unavailable');return result.result.value;
-  };
-  try{
-    const before=await evaluate('read');
-    if(before.present&&['x','y','width','height'].every(k=>before.value?.[k]===bounds[k])&&before.value?.isMaximized===false){await publishNativeWindowDefaults({phase:'ready'});return;}
-    await preserveNativeBounds(path.join(path.dirname(stateFile),'native-window-bounds-backup.json'),before,fs);
-    await publishNativeWindowDefaults(await evaluate('write'));
-  }catch{await publishNativeWindowDefaults({phase:'native-state-unavailable'});}
-}
-async function publishNativeWindowDefaults(value){if(JSON.stringify(value)!==JSON.stringify(state.nativeWindowDefaults)){state.nativeWindowDefaults=value;await publish();}}
+
 
 const sidebarProfiles=new SidebarProfiles(path.join(path.dirname(stateFile),'sidebar-layouts.json'),fs);
 await sidebarProfiles.load();
 let reviewDigest='';const reviewRequests=new Map();
 const attemptFile=path.join(path.dirname(stateFile),'suggestion-attempts.json');
-let attempts=[],attemptStoreReady=true;
-try{const value=JSON.parse(await fs.readFile(attemptFile,'utf8'));if(!Array.isArray(value)||value.some(k=>typeof k!=='string'))throw Error('Invalid attempt store');attempts=value;}catch(error){if(error.code!=='ENOENT')attemptStoreReady=false;}
+let attempts=[],attemptStoreReady=false;
+const legacyAttemptFile=path.join(os.homedir(),'Library/Application Support/codex-plus/launcher/suggestion-attempts.json');
 const suggestions=new SuggestionCoordinator({attempts,persist:async keys=>{if(!attemptStoreReady)throw Error('Attempt store unavailable');try{await fs.writeFile(attemptFile+'.tmp',JSON.stringify(keys),{mode:0o600});await fs.rename(attemptFile+'.tmp',attemptFile);}catch(error){attemptStoreReady=false;throw error;}}});
-suggestions.configure(values['auto-send-suggestions']&&attemptStoreReady);
+suggestions.configure(false);
 const suggestionPolicy=()=>({connection,revision:suggestions.revision,enabled:suggestions.enabled&&suggestionSupported&&attemptStoreReady,...acceptanceThread?{acceptanceThread}:{}});
 async function updateSuggestionPolicy(){const policy=suggestionPolicy();await Promise.allSettled([...sessions].filter(([,s])=>s.main).map(([id])=>command(id,'Runtime.evaluate',{expression:`(()=>{const bridge=globalThis.__codexPlusBackgroundSuggestions;bridge?.configure((${policyForBackgroundPage.toString()})(${JSON.stringify(policy)},bridge.protocol));})()`})));
 }
 function pageSet(){return JSON.stringify([...sessions].filter(([,s])=>s.main).map(([id,s])=>[id,s.frame,[...s.contexts.values()].filter(c=>c.auxData?.isDefault).map(c=>c.id)]));}
 async function probeSuggestions(target){
-  return probeUnclaimedMobileThread(mobile,target.threadId,async()=>{
+
   const generation=suggestions.revision,initial=pageSet(),ids=[...sessions].filter(([,s])=>s.main).map(([id])=>id);
   if(!ids.length)return false;
   const probe=async()=>Promise.all(ids.map(async id=>{const r=await command(id,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.probe(${JSON.stringify(target)})`,returnByValue:true});return r.result.value;}));
   try{const first=await probe();if(first.some(p=>!p?.ok))return false;const last=await probe();return suggestions.enabled&&generation===suggestions.revision&&initial===pageSet()&&last.every((p,i)=>p?.ok&&p.inputRevision===first[i].inputRevision);}catch{return false;}
-  });
 }
 async function suggestionGuard(message){
   const session=sessions.get(message.sessionId),event=message.params,context=session?.contexts.get(event.executionContextId);
@@ -131,7 +114,7 @@ async function suggestionGuard(message){
   const p=suggestions.pending;
   let ok=!!p&&message.sessionId===p.id&&request.operation===p.operation&&request.key===p.key&&request.reviewId===p.reviewId&&request.token===p.token&&request.connection===connection&&request.revision===p.revision&&suggestions.revision===p.revision&&suggestions.enabled;
   if(ok)ok=await probeSuggestions(p.target);
-  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping&&!mobile?.ownsThread(p.target.threadId);
+  ok=ok&&suggestions.pending===p&&suggestions.revision===p.revision&&suggestions.enabled&&!stopping;
   await command(message.sessionId,'Runtime.evaluate',{expression:`globalThis.__codexPlusBackgroundSuggestions?.resolveGuard(${JSON.stringify(request.requestId)},${ok})`,contextId:event.executionContextId});
 }
 async function reviewDecision(message){
@@ -188,12 +171,12 @@ async function reconnectEnhancements(){
   }
 }
 
-function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean'){suggestions.configure(message.enabled&&attemptStoreReady);void updateSuggestionPolicy();}}catch{}}
+function suggestionSettings(line){try{const message=JSON.parse(line);if(message.type==='suggestion-settings'&&message.version===1&&typeof message.enabled==='boolean'){values['auto-send-suggestions']=message.enabled;suggestions.configure(message.enabled&&attemptStoreReady&&!!ownership.scope);void updateSuggestionPolicy();}}catch{}}
 
 const featureSource=`if((${isHumanWindowURL.toString()})(location.href)){(${installFeatureEntry.toString()})(${JSON.stringify({connection,binding:featureBinding})},${createSnakeGame.toString()},${openSnakeDialog.toString()});}`;
 const replies=readline.createInterface({input:process.stdin});
-replies.on('close',()=>void shutdown());
-replies.on('line',line=>{try{const m=JSON.parse(line);if(m.type==='lifecycle'){void lifecycleCommand(m);return;}}catch{}if(quiesced||stopping)return;suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='mobile-window-result'&&reply.version===1){mobile?.windowPlacementResult(reply);return;}if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void trackLifecycle(createHumanWindow(reply.nonce));return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
+replies.on('close',()=>{ownershipRequests.close();void shutdown();});
+replies.on('line',line=>{try{const m=JSON.parse(line);if(ownershipRequests.receive(m))return;if(m.type==='lifecycle'){void lifecycleCommand(m);return;}}catch{}if(quiesced||stopping)return;suggestionSettings(line);try{const reply=JSON.parse(line);if(reply.type==='sidebar-displays'&&reply.version===1&&Array.isArray(reply.displays)){displays=reply.displays;humanFrames=Array.isArray(reply.humanWindows)?reply.humanWindows:[];return;}if(reply.type==='create-human-window'){void trackLifecycle(createHumanWindow(reply.nonce));return;}if(reply.type==='reconnect-enhancements'&&reply.version===1){void reconnectEnhancements();return;}if(reply.type==='suggestion-review'){void reviewDecision(reply).catch(()=>{});return;}const request=requests.get(reply.requestId);if(reply.type!=='ui-result'||!request)return;requests.delete(reply.requestId);const current=sessions.get(request.session);if(!current?.contexts.has(request.context))return;void command(request.session,'Runtime.evaluate',{expression:`globalThis.__codexPlusFeatures?.ack(${JSON.stringify(request.pageID)},${reply.ok===true})`,contextId:request.context}).catch(()=>{});}catch{}});
 function queueSidebar(id,event){
   const session=sessions.get(id);if(!session)return Promise.resolve();
   const task=(session.sidebarQueue??Promise.resolve()).catch(()=>{}).then(()=>syncSidebar(id,event));
@@ -246,7 +229,7 @@ async function samplingSupported(archive){
   for await(const chunk of createReadStream(path.join(values.app,reviewedSamplingResource.binaryPath)))hash.update(chunk);
   return hash.digest('hex')===reviewedSamplingResource.binarySHA256;
 }
-function mainURL(value){return isHumanWindowURL(value)&&!mobile?.isAnchorURL(value);}
+function mainURL(value){return isHumanWindowURL(value);}
 async function refreshWindowNumbers(){
   const {targetInfos}=await cdp.call('Target.getTargets');
   const targets=targetInfos.filter(t=>t.type==='page'&&t.url.startsWith('app://-/index.html')&&mainURL(t.url)).map(t=>t.targetId);
@@ -260,20 +243,49 @@ async function refreshWindowNumbers(){
   const numbers=allocateWindowNumbers(targets,state.windowNumbers,preferred,humanFrames.length?[1,2]:[]);
   if(bindingChanged||Object.keys(numbers).length!==Object.keys(state.windowNumbers).length||Object.entries(numbers).some(([target,number])=>state.windowNumbers[target]!==number)){state.windowNumbers=numbers;await publish();}
 }
-function command(session,method,params={}){return cdp.call(method,params,session);}
-function assertOwner(pid,endpoint){
-  const command=execFileSync('/bin/ps',['-p',String(pid),'-o','args='],{encoding:'utf8'});
-  const expected=path.join(values.app,'Contents/MacOS/ChatGPT');
-  if(!command.startsWith(expected)||(values.profile&&!command.includes(`--user-data-dir=${values.profile}/user-data`)))throw new Error('Host identity mismatch');
-  const port=new URL(endpoint).port;
-  const listener=execFileSync('/usr/sbin/lsof',['-nP','-a','-p',String(pid),`-iTCP:${port}`,'-sTCP:LISTEN'],{encoding:'utf8'});
-  if(!listener.includes(`127.0.0.1:${port}`)||listener.includes(`*:${port}`))throw new Error('Host listener mismatch');
+async function command(id,method,params={}){
+  const session=sessions.get(id);if(!session||stopping)throw Error('Session unavailable');
+  const frame=session.frame;
+  let world;
+  if(method==='Runtime.evaluate'){
+    world=params.contextId===undefined?[...session.contexts.values()].find(c=>c.auxData?.isDefault&&c.auxData.frameId===frame):session.contexts.get(params.contextId);
+    if(!session.main||!world?.auxData?.isDefault||world.auxData.frameId!==frame)throw Error('Document context unavailable');
+    params={...params,contextId:world.id};
+  }
+  const current=()=>sessions.get(id)===session&&session.frame===frame&&(!world||(session.main&&session.contexts.get(world.id)===world));
+  return ownership.run(session.target,frame,async()=>{
+    if(!current())throw Error('Session or document changed');
+    const result=await cdp.call(method,params,id);
+    if(!current())throw Error('Session or document changed');return result;
+  });
 }
+const ownershipRequests=new OwnershipRequests(message=>process.stdout.write(JSON.stringify(message)+'\n'));
+const ownership=new OwnershipAuthority(()=>ownershipRequests.read(),async()=>{
+  suggestions.configure(false);reviewRequests.clear();requests.clear();attemptStoreReady=false;
+  await Promise.allSettled([...sessions].map(([id,session])=>disposeSession(id,session)));
+});
+async function disposeSession(id,session){
+  sessions.delete(id);
+  if(!cdp?.open)return;
+  // This is bounded disposal of our own previously installed hooks in their
+  // exact old world. It cannot execute against a replacement document.
+  const context=[...session.contexts.values()].find(c=>c.auxData?.isDefault&&c.auxData.frameId===session.frame);
+  if(context)await cdp.call('Runtime.evaluate',{contextId:context.id,expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose();globalThis.__codexPlusFeatures?.dispose();globalThis.__codexPlusSidebarLayout?.suspend()'},id).catch(()=>{});
+  for(const name of [backgroundGuardBinding,featureBinding,sidebarBinding])await cdp.call('Runtime.removeBinding',{name},id).catch(()=>{});
+  await cdp.call('Fetch.disable',{},id).catch(()=>{});
+  await cdp.call('Target.detachFromTarget',{sessionId:id}).catch(()=>{});
+}
+async function loadAttempts(){
+  try{const keys=await loadAttemptLedger(fs,attemptFile,legacyAttemptFile);for(const key of keys)suggestions.attempts.add(key);attemptStoreReady=true;}
+  catch{attemptStoreReady=false;}
+  suggestions.configure(values['auto-send-suggestions']&&attemptStoreReady&&!!ownership.scope);
+}
+
+function assertOwner(pid,endpoint){verifyHost({app:values.app,pid,endpoint});}
 async function main(){
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict','-R=anchor apple generic and identifier "com.openai.codex" and certificate leaf[subject.OU] = "2DC432GLL2"',values.app],{stdio:'pipe'});
   const archive=await openAsar(values.app);
   try{
-    mobileSupported=await mobileHostSupported(archive);
     const runtimeEntry=archive.entries.find(e=>e.path===reviewedHumanRuntime.path);humanNativeSupported=!!runtimeEntry&&createHash('sha256').update(await archive.read(runtimeEntry)).digest('hex')===reviewedHumanRuntime.sha256;state.nativeWindowDefaults={phase:humanNativeSupported?'waiting-for-human-windows':'unsupported-host'};
     const footer=archive.entries.find(e=>e.path===reviewedFeatureResource.path);
     featureSupported=!!footer&&createHash('sha256').update(await archive.read(footer)).digest('hex')===reviewedFeatureResource.sha256;
@@ -296,101 +308,21 @@ async function main(){
     if(!state.projectOrder.supported){resources.length=0;suggestionSupported=false;sidebarSupported=false;state.sidebarLayout={supported:false,phase:'unsupported-host'};}
     state.suggestionAutoSend={...suggestions.status(),supported:suggestionSupported,storageReady:attemptStoreReady};
   }finally{await archive.close();}
-  if(stopping||quiesced)return;
-  if(values.attach){
-    const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));assertOwner(saved.pid,saved.endpoint);
-    if(stopping||quiesced)return;
-    state={...state,pid:saved.pid,endpoint:saved.endpoint,windowNumbers:saved.windowNumbers??{},humanTargets:saved.humanTargets??{},phase:'reconnecting'};cdp=await CDP.connect(saved.endpoint);
-  }else{
-    await publish();
-    state.phase='launching';state.launchMethod='launch-services';await publish();
-    if(stopping||quiesced)return;
-    const launched=await launchHost({app:values.app,profile:values.profile});
-    state.pid=launched.pid;state.endpoint=launched.endpoint;
-    await publish();
-    // The freshly written endpoint is authenticated against the real signed
-    // app process and all its listeners before any debug connection is made.
-    cdp=await CDP.connect(launched.endpoint);
-  }
-  if(stopping||quiesced)return;
-  try{mobile=await MobileAccess.create({cdp,command,sessions,stateFile,supported:mobileSupported,requestWindowPlacement:request=>process.stdout.write(JSON.stringify({type:'mobile-window-request',version:1,...request})+'\n'),publish:async()=>{state.mobile=mobile?.status();await publish();}});}catch{state.mobile={phase:'unavailable'};}
-  if(quiesced&&mobile)mobile.quiesced=true;
-  cdp.listeners.add(message=>{
-    if(message.method==='Target.attachedToTarget'){
-      const work=attach(message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));
-    }
-    if(message.method==='Target.detachedFromTarget'){mobile?.contextLost(message.params.sessionId,undefined,message.method);forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
-    if(message.method==='Runtime.executionContextCreated')sessions.get(message.sessionId)?.contexts.set(message.params.context.id,message.params.context);
-    if(message.method==='Runtime.executionContextDestroyed'){mobile?.contextLost(message.sessionId,message.params.executionContextId,message.method);sessions.get(message.sessionId)?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
-    if(message.method==='Runtime.executionContextsCleared'){mobile?.contextLost(message.sessionId,undefined,message.method);sessions.get(message.sessionId)?.contexts.clear();forgetRequests(message.sessionId);}
-    if(message.method==='Runtime.bindingCalled'){void mobile?.onBinding(message).catch(()=>{});void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
-    if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId){const session=sessions.get(message.sessionId);if(session){session.frame=message.params.frame.id;session.main=mainURL(message.params.frame.url);}}
-    if(message.method==='Fetch.requestPaused'){
-      const work=response(message.sessionId,message.params).catch(fail);
-      inFlight.add(work);void work.finally(()=>inFlight.delete(work));
-    }
-    if(message.method==='connectionClosed'&&!stopping)hostDisconnected();
-  });
-  async function attach({sessionId,targetInfo,waitingForDebugger}){
-    const session={target:targetInfo.targetId,contexts:new Map(),main:false,human:!!humanMarker(targetInfo.url)};
-    sessions.set(sessionId,session);state.attached++;
-    try{
-      if(targetInfo.type==='page'&&!stopping&&!quiesced){
-        session.script=await initializePageSession((method,params)=>command(sessionId,method,params),{
-          patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
-          bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
-          source:featureSupported?featureSource:undefined,
-        });
-        const {frameTree}=await command(sessionId,'Page.getFrameTree');session.frame=frameTree.frame.id;session.main=mainURL(frameTree.frame.url);
-        if(session.main&&!quiesced&&!stopping){
-          if(suggestionSupported)await updateSuggestionPolicy();
-          if(featureSupported&&!quiesced&&!stopping)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
-          const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
-          if(runtime.result.value===9)state.projectOrder.phase='active';
-          else if(runtime.result.value)state.projectOrder.phase='page-reload-required';
-        }
-        state.lastAttach={waitingForDebugger,setupDispatchedBeforeResume:true,resumeBeforeSetupAck:true};state.phase='active';
-      }
-    }finally{
-      await command(sessionId,'Runtime.runIfWaitingForDebugger').catch(()=>{});state.resumed++;await publish();
-    }
-  }
-  async function response(sessionId,event){
-    let body,finished=false;
-    const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await command(sessionId,'Fetch.continueRequest',{requestId:event.requestId});finished=true;};
-    try{
-      if(stopping||quiesced){await original();return;}
-      const {frameTree}=await command(sessionId,'Page.getFrameTree');
-      const resource=resources.find(resource=>resource.url===event.request.url);
-      if(!mainURL(frameTree.frame.url)||frameTree.frame.id!==event.frameId||!resource||event.resourceType!=='Script'||event.responseStatusCode!==200){await original();return;}
-      body=await command(sessionId,'Fetch.getResponseBody',{requestId:event.requestId});
-      if(stopping||quiesced){await original();return;}
-      const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
-      if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
-      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';if(resource.kind==='project-order')state.projectOrder.phase='active';
-    }catch(error){state.errors.push('Response adaptation failed');try{await original();}catch{await cdp.call('Target.detachFromTarget',{sessionId}).catch(()=>{});}}
-    finally{await publish();}
-  }
-  if(stopping){cdp.close();return;}
-  if(quiesced)return;
-  await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'page',exclude:false}]});
-  // Verify the kernel-owned socket after the early hook, not through shared discovery files.
-  assertOwner(state.pid,state.endpoint);await publish();
-  const suggestionHeartbeat=setInterval(()=>{if(!stopping&&!quiesced)void trackLifecycle(updateSuggestionPolicy());},1000);
+
+  await publish();
   let inspecting=false;
   const monitor=setInterval(async()=>{
     if(process.ppid!==parentPID||!parentIsAlive(parentPID)){clearInterval(monitor);void shutdown();return;}
-    try{process.kill(state.pid,0);}catch{clearInterval(monitor);state.phase='host-exited';void publish().then(()=>process.exit(0));return;}
     if(inspecting||stopping||quiesced)return;inspecting=true;
-    let monitorDone;monitorWork=new Promise(resolve=>{monitorDone=resolve;});
+    let done;monitorWork=new Promise(resolve=>{done=resolve;});
     try{
-      if(mobile){await mobile.tick();const current=mobile.status();if(JSON.stringify(current)!==JSON.stringify(state.mobile)){state.mobile=current;await publish();}}
+      await synchronizeOwnership();
+      if(!cdp?.open||!ownership.scope)return;
       await trackLifecycle(settleHumanCreations());
-      await repairNativeWindowDefaults();
       if(state.projectOrder.supported){
         const pages=[];
         for(const [id,s]of sessions)if(s.main){const r=await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});pages.push({protocol:r.result.value??null});}
-        const status={supported:true,protocol:9,phase:pages.length&&pages.every(p=>p.protocol===9)?'active':pages.some(p=>p.protocol!==null)?'page-reload-required':'waiting',pages};
+        const status={supported:true,protocol:10,phase:pages.length&&pages.every(p=>p.protocol===10)?'active':pages.some(p=>p.protocol!==null)?'page-reload-required':'waiting',pages};
         if(JSON.stringify(status)!==JSON.stringify(state.projectOrder)){state.projectOrder=status;await publish();}
       }
       if(sidebarSupported){
@@ -417,25 +349,101 @@ async function main(){
         if(!snapshot.pageReady)snapshot.reason='page-reload-required';
         if(JSON.stringify(snapshot)!==JSON.stringify(state.suggestionAutoSend)){state.suggestionAutoSend=snapshot;await publish();}
       }
-    }catch{}finally{inspecting=false;monitorDone();}
+
+    }catch{}finally{inspecting=false;done();}
   },1000);
 }
-function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
-function hostDisconnected(){
- if(mobile){void mobile.terminate('host-disconnected','transport-closed').catch(()=>{});state.mobile=mobile.status();}
- state.phase='disconnected';void publish().then(()=>process.exit(1));
+async function synchronizeOwnership(){
+  const scope=await ownership.refresh();
+  if(!scope){state.phase='waiting-for-target-ownership';await publish();return;}
+  if(cdp&&(!cdp.open||state.pid!==scope.host.pid||state.endpoint!==scope.host.endpoint)){
+    cdp.close();cdp=null;
+  }
+  if(!cdp){
+    assertOwner(scope.host.pid,scope.host.endpoint);
+    state.pid=scope.host.pid;state.endpoint=scope.host.endpoint;
+    cdp=await CDP.connect(scope.host.endpoint);
+    installTransportEvents();
+  }
+  if(!attemptStoreReady)await loadAttempts();
+  const {targetInfos}=await cdp.call('Target.getTargets');
+  for(const target of targetInfos){
+    if(stopping||quiesced)return;
+    if(target.type!=='page'||!mainURL(target.url)||!ownership.current(target.targetId)||[...sessions.values()].some(s=>s.target===target.targetId))continue;
+    await ownership.run(target.targetId,undefined,async ticket=>{
+      const {sessionId}=await cdp.call('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+      if(!ownership.valid(ticket)){await cdp.call('Target.detachFromTarget',{sessionId});return;}
+      await attach({sessionId,targetInfo:target});
+    });
+  }
+  state.phase='active';await publish();
 }
+function installTransportEvents(){
+  cdp.listeners.add(message=>{
+    const session=sessions.get(message.sessionId);
+    if(message.method==='Target.detachedFromTarget'){forgetRequests(message.params.sessionId);sessions.delete(message.params.sessionId);}
+    if(message.method==='Runtime.executionContextCreated'){session?.contexts.set(message.params.context.id,message.params.context);if(session&&message.params.context.auxData?.isDefault){session.main=false;void refreshDocument(message.sessionId).catch(()=>{});}}
+    if(message.method==='Runtime.executionContextDestroyed'){session?.contexts.delete(message.params.executionContextId);forgetRequests(message.sessionId,message.params.executionContextId);}
+    if(message.method==='Runtime.executionContextsCleared'){session?.contexts.clear();forgetRequests(message.sessionId);}
+    if(message.method==='Runtime.bindingCalled'){void nativeAction(message).catch(fail);void suggestionGuard(message).catch(()=>{});void sidebarAction(message).catch(()=>{});}
+    if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId&&session){session.frame=message.params.frame.id;session.main=false;}
+    if(message.method==='Fetch.requestPaused'){const work=response(message.sessionId,message.params).catch(fail);inFlight.add(work);void work.finally(()=>inFlight.delete(work));}
+    if(message.method==='connectionClosed'&&!stopping)hostDisconnected();
+  });
+}
+async function refreshDocument(id){
+  const session=sessions.get(id);if(!session||stopping||quiesced)return;
+  const {frameTree}=await command(id,'Page.getFrameTree');
+  if(!mainURL(frameTree.frame.url)||!ownership.current(session.target,frameTree.frame.id))return;
+  session.frame=frameTree.frame.id;session.main=true;
+  if(featureSupported)await command(id,'Runtime.evaluate',{expression:featureSource});
+}
+async function attach({sessionId,targetInfo}){
+  const claim=ownership.current(targetInfo.targetId);if(!claim){await cdp.call('Target.detachFromTarget',{sessionId});return;}
+  const session={target:targetInfo.targetId,frame:claim.frameId,contexts:new Map(),main:false,human:true};sessions.set(sessionId,session);state.attached++;
+  try{
+    await initializePageSession((method,params)=>command(sessionId,method,params),{
+      patterns:resources.map(resource=>({urlPattern:resource.url,resourceType:'Script',requestStage:'Response'})),
+      bindings:[...suggestionSupported?[backgroundGuardBinding]:[],...sidebarSupported?[sidebarBinding]:[],...featureSupported?[featureBinding]:[]],
+    });
+    const {frameTree}=await command(sessionId,'Page.getFrameTree');
+    if(frameTree.frame.id!==claim.frameId||!mainURL(frameTree.frame.url))throw Error('Document ownership changed');
+    session.main=true;
+    if(featureSupported)await command(sessionId,'Runtime.evaluate',{expression:featureSource});
+    if(suggestionSupported)await updateSuggestionPolicy();
+    const runtime=await command(sessionId,'Runtime.evaluate',{expression:'globalThis.__codexPlusProjectOrder?.protocol',returnByValue:true});
+    state.projectOrder.phase=runtime.result.value===10?'active':'page-reload-required';
+  }catch{await disposeSession(sessionId,session);}
+}
+  async function response(sessionId,event){
+    let body,finished=false;
+    const original=async()=>{if(finished)return;if(body)await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:event.responseStatusCode,responseHeaders:headers(event),body:body.base64Encoded?body.body:Buffer.from(body.body).toString('base64')});else await cdp.call('Fetch.continueRequest',{requestId:event.requestId},sessionId);finished=true;};
+    try{
+      if(stopping||quiesced){await original();return;}
+      const {frameTree}=await command(sessionId,'Page.getFrameTree');
+      const resource=resources.find(resource=>resource.url===event.request.url);
+      if(!mainURL(frameTree.frame.url)||frameTree.frame.id!==event.frameId||!resource||event.resourceType!=='Script'||event.responseStatusCode!==200){await original();return;}
+      body=await command(sessionId,'Fetch.getResponseBody',{requestId:event.requestId});
+      if(stopping||quiesced){await original();return;}
+      const bytes=body.base64Encoded?Buffer.from(body.body,'base64'):Buffer.from(body.body);
+      if(createHash('sha256').update(bytes).digest('hex')!==resource.sha256){state.errors.push('Unreviewed response');await original();return;}
+      await command(sessionId,'Fetch.fulfillRequest',{requestId:event.requestId,responseCode:200,responseHeaders:headers(event),body:resource.replacement});finished=true;state.adapted++;state.phase='active';if(resource.kind==='project-order')state.projectOrder.phase='active';
+    }catch(error){state.errors.push('Response adaptation failed');try{await original();}catch{await cdp.call('Target.detachFromTarget',{sessionId}).catch(()=>{});}}
+    finally{await publish();}
+  }
+function headers(event){return event.responseHeaders.filter(header=>!['content-length','content-encoding'].includes(header.name.toLowerCase()));}
+function hostDisconnected(){void ownership.revoke().then(()=>{state.phase='disconnected';return publish();});}
 function fail(error){state.errors.push(error.message);void publish();}
 async function lifecycleCommand(message){
  if(typeof message.requestId!=='string')return;
  try{
   if(message.action==='verify'){
    if(!quiesced)throw Error('Not prepared');
-   const status=await mobile?.verifyStop()??null;
-   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:status})+'\n');
+   const status=null;
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true})+'\n');
   }else if(message.action==='prepare'){
    const preparingDuringStartup=!startupReady;
-   quiesced=true;if(mobile)mobile.quiesced=true;
+   quiesced=true;suggestions.configure(false);
    await startupWork;
    if(preparingDuringStartup)throw Error('Startup was still in progress');
    await monitorWork;
@@ -461,41 +469,20 @@ async function lifecycleCommand(message){
     for(const request of humanCreations.values())request.preserved=true;
     state.humanCreationOutcomes=outcomes;await publish();
    }
-   const mobileScope=await mobile?.prepareStop();
-   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,mobile:mobileScope??null,human_creation_outcomes:outcomes})+'\n');
+
+   process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true,human_creation_outcomes:outcomes})+'\n');
   }else if(message.action==='resume'){
-   if(stopping)throw Error('Stopping');mobile?.resume();quiesced=false;
+   if(stopping)throw Error('Stopping');quiesced=false;
    process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:true})+'\n');
   }
  }catch{process.stdout.write(JSON.stringify({type:'lifecycle-result',requestId:message.requestId,ok:false})+'\n');}
 }
 async function shutdown(){
-  if(stopping)return;stopping=true;suggestions.configure(false);
-  // Cleanup is best effort after leases and admissions are revoked. Reuse the
-  // existing 10s CDP response budget; dead browser targets must not orphan us.
-  let timer;
-  const cleanup=(async()=>{
-    if(!cdp?.open)return;
-    await mobile?.close();
-    // Revoke visible entry points first, even if a page is no longer marked main.
-    const resumed=Promise.allSettled([...sessions.keys()].map(id=>command(id,'Runtime.runIfWaitingForDebugger')));
-    await removeFeatureEntries(sessions,command);
-    await resumed;
-    if(inFlight.size)await Promise.allSettled([...inFlight]);
-    await Promise.allSettled([...sessions].map(async([id,session])=>{
-      if(suggestionSupported){if(session.main)await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusBackgroundSuggestions?.dispose()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:backgroundGuardBinding}).catch(()=>{});}
-      if(sidebarSupported){await command(id,'Runtime.evaluate',{expression:'globalThis.__codexPlusSidebarLayout?.suspend()'}).catch(()=>{});await command(id,'Runtime.removeBinding',{name:sidebarBinding}).catch(()=>{});}
-      await command(id,'Fetch.disable').catch(()=>{});
-    }));
-    await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true}).catch(()=>{});
-  })();
-  await Promise.race([cleanup,new Promise(resolve=>{timer=setTimeout(resolve,10000);})]);
-  await sidebarProfiles.writes;
-  clearTimeout(timer);requests.clear();cdp?.close();
-  state.phase='stopped';
-  await publish().catch(()=>{});process.exit(0);
+  if(stopping)return;stopping=true;suggestions.configure(false);ownershipRequests.close();
+  await ownership.revoke();
+  if(inFlight.size)await Promise.allSettled([...inFlight]);
+  await sidebarProfiles.writes;requests.clear();cdp?.close();state.phase='stopped';await publish().catch(()=>{});process.exit(0);
 }
-
 process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
 let startupReady=false;
 startupWork=main().then(()=>{startupReady=true;});

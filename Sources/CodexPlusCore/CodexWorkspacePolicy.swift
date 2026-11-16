@@ -49,11 +49,11 @@ public struct CodexWorkspaceSwitchTracker<Identity: Equatable> {
 enum CodexWorkspaceStructuralContext { case clear, dialog, unknown }
 
 public enum CodexWorkspacePreference {
-    public static let domain = SmartShadowPreferences.domain
+    public static let domain = PlusPreferences.domain
     public static let key = "workspaceAutoExpand"
 
     public static var defaults: UserDefaults {
-        SmartShadowPreferences.defaults
+        PlusPreferences.defaults
     }
 
     public static var enabled: Bool {

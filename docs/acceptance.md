@@ -1,3 +1,17 @@
+# v4 独立人工增强：当前证据范围
+
+本批只交独立源码/签名候选，不启动、注入或安装Plus。原生debug编译已通过，83项Node与80项无GUI Swift测试通过；其中无响应Unix socket在原生deadline后返回。独立复核发现的缓存布局、暂停/恢复迟到授权、原生deadline及厂商进程签名缺口已修复并读回。签名候选最终固定记录写原#578及PR。生产端目标用途合同、旧人工增强writer交接、两产品共享同后台/文件隔离和真实安装版交互尚待SmartShadow安全点及#613统一采用，不能据此宣布运行完成。
+
+各项目先总监、经理、专员，再按状态的实现和protocol10已保留。该排序此前在SmartShadow4204真实安装版有样本验收：[原回执](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6908472376)。经理、需处理与超过预览数量的真实数据样本当时缺失，沿定向测试覆盖，不冒认GUI全分支。
+
+隔离检查覆盖无权/mobile/unknown拒绝、用途/出生/文档变化和迟到响应、只读历史unknown并集。现役SmartShadow源码和其85项原检查未修改。没有新增MacGUI XCTest套件。
+
+原手机target已absent/terminal，当前手机恢复仍按[原故障表](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6910209609)对账，旧成功录像不作为当前健康证明。下方为原版本历史验收，保留其准确版本与范围。
+
+---
+
+## 历史验收（不代表独立v4已采用）
+
 ## 移动宿主不占屏：80正式验收（2026-11-16）
 
 用户要求移动接入空白窗尽量缩到一个像素、不干扰屏幕。PR42合入661657a，PR43合入a935d54db2a1a83c4e988961234004ef9f5d8646；正式Plus0.10.0/build80由#613从固定b1c9e179dfa292c401007a88551ff5570d57519c签名安装，31文件与构建一致。79未单独安装。
