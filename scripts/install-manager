@@ -4,9 +4,12 @@ if [[ $# -ne 1 ]]; then
   printf '%s\n' 'Usage: install-manager /absolute/path/SmartShadow.app' >&2
   exit 2
 fi
-exec /usr/bin/python3 - "$1" <<'PY'
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec /usr/bin/python3 -B - "$1" "$SCRIPT_DIR" <<'PY'
 from pathlib import Path
 import datetime,os,plistlib,shutil,subprocess,sys
+sys.path.insert(0,sys.argv[2])
+from native_install_guard import running_package_pids
 candidate=Path(sys.argv[1]);target=Path('/Applications/SmartShadow.app')
 if not candidate.is_absolute() or candidate.name!='SmartShadow.app' or candidate.resolve()!=candidate:
     raise SystemExit('exact candidate app path required')
@@ -22,8 +25,7 @@ if helper_info.get('CFBundleIdentifier')!='me.longbiaochen.smart-shadow.interact
 subprocess.run(['/usr/bin/codesign','--verify','--strict','-R','=anchor apple generic and identifier "me.longbiaochen.smart-shadow.interactiond" and certificate leaf[subject.OU] = "HJG65XBC25"',str(helper)],check=True)
 # A live installed client must be handed off through official Computer Use first.
 # Never terminate by name or let an installer touch interactiond/its windows.
-rows=subprocess.check_output(['/bin/ps','-axo','pid=,comm='],text=True).splitlines()
-if any(len(row.strip().split(None,1))==2 and row.strip().split(None,1)[1].startswith(str(target)+'/Contents/') for row in rows):
+if running_package_pids(target):
     raise SystemExit('installed SmartShadow UI or helper is running; formal service stop and exact UI handoff required before installation')
 root=Path.home()/'Library/Caches/codex-plus/manager-installs';root.mkdir(parents=True,exist_ok=True)
 backup=root/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
