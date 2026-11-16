@@ -239,3 +239,31 @@ test('prepare freezes new startup while retaining the existing connection', asyn
   assert.equal(scope.connections,1);assert.equal(mobile.stopped,false);assert.equal(mobile.quiesced,true);
   mobile.resume();assert.equal(mobile.quiesced,false);
 });
+
+test('preparation rejects later frames on the existing peer and drains previously accepted work', async () => {
+  const mobile = new MobileAccess({}, {cdp:{},sessions:new Map(),stateFile:'/unused',publish:async()=>{},command:async()=>{}});
+  mobile.clients.set('phone',{id:'phone',phase:'active',connection:'same'});
+  let release, entered;
+  const gate = new Promise(r => { release = r; });
+  const started = new Promise(r => { entered = r; });
+  let effects = 0; const drops = [];
+  mobile.evaluate = async () => { effects++; entered(); await gate; };
+  mobile.drop = id => drops.push(id);
+  const frame = JSON.stringify({type:'frame',id:'phone',text:JSON.stringify({connection:'same',kind:'port-data'})});
+  const accepted = mobile.gatewayEvent(frame); await started;
+  let prepared = false; const preparation = mobile.prepareStop().then(() => { prepared = true; });
+  await mobile.gatewayEvent(frame);
+  assert.equal(effects,1); assert.deepEqual(drops,['phone']); assert.equal(prepared,false);
+  release(); await accepted; await preparation; assert.equal(prepared,true);
+});
+
+test('resume cannot report an already stopped or pending-handshake phone as running', () => {
+  for (const state of ['stopped','pending']) {
+    const mobile = new MobileAccess({}, {cdp:{},sessions:new Map(),stateFile:'/unused',publish:async()=>{},command:async()=>{}});
+    mobile.quiesced = true;
+    if(state==='stopped') mobile.stopped=true;
+    else mobile.clients.set('phone',{phase:'activating'});
+    assert.throws(() => mobile.resume(),/unavailable/);
+    assert.equal(mobile.quiesced,true);
+  }
+});

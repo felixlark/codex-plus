@@ -4,7 +4,7 @@
 
 ## 协议与责任
 
-停前采用明确两阶段：`lifecycle.prepare-stop`先冻结native/controller新资源准入，等待已在途的mobile初始化读取结束，返回当前live owned_scope及摘要；#613持久保存后再发`lifecycle.stop`。prepare是有副作用的显式停前动作，status保持纯读。prepare失败保留quiesced/unknown可查，不把失败解释为从未停止准入；不自动恢复或重复发送。已有连接在prepare期间保留，真正stop才断开。
+停前采用明确两阶段：`lifecycle.prepare-stop`先冻结native/controller新资源准入，等待已在途的mobile初始化读取结束，返回当前live owned_scope及摘要；#613持久保存后再发`lifecycle.stop`。prepare是有副作用的显式停前动作，status保持纯读。prepare失败保留quiesced/unknown可查，不把失败解释为从未停止准入；不自动恢复或重复发送。已有连接可在prepare期间保留，但80起若该peer再发新frame会被明确关闭，不把它送进原后台；prepare等待已经接受的操作排空。手机连接恢复仍需手动Reconnect，不重发旧业务。
 
 冻结从接受prepare即生效，包括controller自动恢复、设置/tool效果、新人窗/手机窗/网关/导航安装；失败或断连后仍保持。quiesce回执屏障覆盖所有已发资源变更和所有正在处理的初始化/创建/安装回调，等待其归并后再采集scope。无法证明全部收敛就prepare_unknown/scope_not_ready，不返回成功scope。回执绑定prepare request_id、native instance、controller PID/出生和scope revision；等待通过异步continuation，不能阻塞处理controller stdout的主线程。后续stop仅接受该次仍处于prepared的scope。
 
@@ -15,6 +15,14 @@
 另增`--lifecycle-prepare-stop --expected-instance UUID`，等待controller通过原stdin/stdout返回同request_id的quiesce响应。没有controller时仅可返回已证不存在的本代scope；存在controller而没有响应则prepare_unknown，不能凭旧状态文件组成成功scope。
 
 显式`lifecycle.resume`（同instance）可取消已知prepared阶段，解冻原连接/observer，不启动另一个controller或重放旧开窗。prepare_unknown时先只读对账；不能把resume成功解释为旧unknown已清除。该入口用于取消未执行的停止，不恢复用户明确暂停的业务来源。
+
+### 80：保全陈旧人窗请求，避免永久卡住prepare
+
+旧F6请求的Electron invoke可以已完成，但controller仍保留`requested`，原生AX侧超时不会清掉它。80在startup/monitor/已在途invoke全部排空后，对这些记录只读`Target.getTargets`，保存每个原nonce/phase与实际匹配target。没有匹配仍是unknown，不能伪造未创建或关闭它。结果先原子写入本机launcher下`human-creation-outcomes-<controller connection>.json`（0600），再随native scope返回`human_creation_outcomes`。每代文件跨重启保留，不只依赖下一次启动会覆盖的state.json。
+
+已经冻结的nonce标为`preserved`，后续settle永久跳过，resume也不解冻；迟到的窗口可能已有用户草稿，绝不能自动Page.navigate、重建或关掉。它们仍属于保留的原官方host，不加入本服务关闭资源。确有`creating`但未排空、Target清单失败或证据文件写入失败，仍拒绝prepare。原Scope摘要和同host出生校验保持。
+
+ManagementRuntime继续只允许prepared阶段resume，不开放prepare_unknown的普通恢复；后者可能涉及startup中断或已丢失的手机上下文。MobileAccess.resume对stopped或握手未完成返回失败，不把无操作当恢复成功。旧78明确失败prepare且未发送stop的恢复由#613正式恢复入口办理：先保存草稿/原unknown并关闭手机App，读回connections=0，再按原prepare request/instance/出生身份登记独立recovery observation，正常退出及资源消失读回；不冒称原stop已接受，不使用原finish接口伪造scope。恢复unknown只读结算，不重发Quit/stop。
 
 ToolControlServer 在处理该请求后构造独立的 afterReply 回调，写响应成功或失败后都调度到主线程；只有已核实例且已接受的stop含此回调。原生记录内存阶段 stop_requested → stopping，若窗口操作仍在途则 blocked_pending_window；原观察器完成后沿既有正常退出回调继续。重复stop只读回原阶段，不产生第二次动作。
 
