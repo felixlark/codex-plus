@@ -40,6 +40,16 @@ final class ManagementProtocolTests: XCTestCase {
         value["arbitrary_command"] = "never execute"
         XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
     }
+    func testExplicitCodexActionsRequireAnInstanceAndRejectWriteOrScopeFields() throws {
+        for operation in ["codex.open", "enhancements.reconnect"] {
+            var value = request(operation)
+            XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
+            value["expected_runtime"] = runtime.uuidString
+            XCTAssertEqual(try ManagementProtocol.Request.parse(value).expectedRuntime, runtime)
+            value["changes"] = ["autoSendSuggestions": true]
+            XCTAssertThrowsError(try ManagementProtocol.Request.parse(value))
+        }
+    }
     func testStrictSettingsTypesAndWhitelistRejectNumericBooleanAndExtraFields() {
         for changes: [String: Any] in [["workspaceAutoExpand": 1], ["autoSendSuggestions": "true"], ["path": "/fixture"], ["chromeUsesAgentDisplay": NSNull()]] {
             XCTAssertThrowsError(try ManagementProtocol.Settings.validateChanges(changes))

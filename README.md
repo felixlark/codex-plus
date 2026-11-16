@@ -1,4 +1,9 @@
-# Codex Plus
+# SmartShadow native source
+
+本仓当前提供一个 SmartShadow.app 安装包：主进程负责管理/设置/小看板，包内独立 interactiond helper 负责菜单栏、原 Codex 增强、F6、右屏和手机宿主。关闭或退出管理界面后手机继续；显式停止沿正式 ss-service。普通打开 UI 不启动已停后台。
+
+当前融合接口、签名与迁移边界见[单包合同](docs/designs/smartshadow-fusion.md)。原 Plus80 保留至新包正式验收，最终由 #613 将唯一源码迁入 smart-shadow/native、独立构建并退役旧安装/消费者；这里不复制第二套源码。
+
 
 0.9.1 在每个窗口左下角的 Codex Plus 圆形按钮中央显示窗口编号（1、2……），点击仍打开设置。编号跟随窗口，切换聊天、移屏、页面重载或重启 Plus 时保持；关闭窗口后编号可以供新窗口使用。无需新增侧栏按钮或重载已有页面。设计见[窗口编号](docs/designs/window-number.md)。
 
@@ -54,13 +59,12 @@ Projects 先显示需要输入／批准或报错的任务所属项目，再显�
 ```sh
 ./scripts/test
 ./scripts/build
-./scripts/install
 ./scripts/codex-plus --status
 ```
 
 构建使用 Xcode Command Line Tools，自带 Swift Package Manager。构建物和缓存位于 `~/Library/Caches/codex-plus/`。签名默认使用本机 Longbiao 的 Developer ID，可通过 `CSC_NAME` 指定已安装的签名身份。普通 CI 运行单元测试，签名安装在用户自己的 Mac 上完成。
 
-安装后从菜单栏打开设置，启用“自动展开 Codex 工作区”，授予辅助功能权限，并按需启用“登录时启动”。
+构建输出单一 SmartShadow.app 及相邻 SmartShadow.package.json。正式安装切换由 #613 沿 ss-service 办理；scripts/install / install-manager 只做已停包的文件替换，不启动后台。新 helper 辅助功能权限按实际新签名身份核验，登录开关只登记包内 helper。
 
 在“适用屏幕”切换到“所选屏幕”后逐屏勾选。首次自选会勾选当前可识别的在线屏幕；此后接入的新屏幕保持未选。屏幕身份读取失败或窗口归属有歧义时，自选模式跳过动作，并在只读状态中返回原因。设置窗口支持调整大小和滚动。
 

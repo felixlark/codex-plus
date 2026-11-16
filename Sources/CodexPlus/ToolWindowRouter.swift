@@ -58,10 +58,10 @@ final class ToolWindowRouter {
     private var observationErrors: [pid_t: Int] = [:]
     private var observationEpoch = UUID()
     private var screenToken: NSObjectProtocol?
-    private(set) var chromeUsesAgentDisplay = UserDefaults.standard.object(forKey: ToolWindowPolicy.chromeEnabledKey) as? Bool ?? true
+    private(set) var chromeUsesAgentDisplay = SmartShadowPreferences.defaults.object(forKey: ToolWindowPolicy.chromeEnabledKey) as? Bool ?? true
     var displaySummary: String { display.summary }
 
-    private(set) var enabled = UserDefaults.standard.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
+    private(set) var enabled = SmartShadowPreferences.defaults.object(forKey: ToolWindowPolicy.enabledKey) as? Bool ?? true
 
     func start() {
         guard tokens.isEmpty else { return }
@@ -348,7 +348,7 @@ final class ToolWindowRouter {
 
     func setChromeUsesAgentDisplay(_ flag: Bool) {
         chromeUsesAgentDisplay = flag
-        UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.chromeEnabledKey)
+        SmartShadowPreferences.defaults.set(flag, forKey: ToolWindowPolicy.chromeEnabledKey)
     }
 
     private func reconcileOwnership() {
@@ -435,7 +435,7 @@ final class ToolWindowRouter {
 
     func setEnabled(_ flag: Bool) {
         observationEpoch = UUID(); currentOpenDocument = nil; currentOpenID = nil
-        enabled = flag; UserDefaults.standard.set(flag, forKey: ToolWindowPolicy.enabledKey)
+        enabled = flag; SmartShadowPreferences.defaults.set(flag, forKey: ToolWindowPolicy.enabledKey)
         if flag { if tokens.isEmpty { start() } }
         else {
             for pid in Array(watches.keys) { removeWatch(pid) }
@@ -484,19 +484,19 @@ final class ToolWindowRouter {
 
     private func open(_ request: [String: Any]) -> [String: Any] {
         guard enabled, !stopping, !quiesced else { return error("Agent window routing is paused") }
-        guard AXIsProcessTrusted() else { return error("Codex Plus Accessibility permission is required") }
+        guard AXIsProcessTrusted() else { return error("SmartShadow Interaction Accessibility permission is required") }
         guard let path = request["appPath"] as? String, path.hasPrefix("/"),
               let bundle = Bundle(path: path), path.hasSuffix(".app") else { return error("An absolute app bundle is required") }
         let id = UUID().uuidString, epoch = observationEpoch
-        if bundle.bundleIdentifier == CodexWorkspacePreference.domain {
-            guard let openOwnSettings else { return error("Agent Settings entry unavailable") }
+        if bundle.bundleIdentifier == SmartShadowInstallation.containerBundleID {
+            guard let openOwnSettings else { return error("SmartShadow Settings entry unavailable") }
             currentOpenDocument = nil; currentOpenID = nil
             lastOpen = ["id": id, "state": "preparing-display"]
             prepareDisplay(id: id, epoch: epoch) { [weak self] in
                 guard let self else { return }
                 openOwnSettings()
                 if self.lastOpen["id"] as? String == id {
-                    self.lastOpen = ["id": id, "state": self.ownAgentWindow?.isVisible == true ? "registering-agent-settings" : "failed", "windowID": self.ownAgentWindow?.windowNumber ?? 0]
+                    self.lastOpen = ["id": id, "state": "requested-manager-ui"]
                 }
             }
             return ["ok": true, "requestID": id, "state": "requested"]

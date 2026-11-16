@@ -49,6 +49,12 @@ import Security
                 self.modules[role] = try await service.control(action, role: role)
                 self.moduleErrors[role] = nil
                 self.message = "\(role)：\(self.modules[role]?.job ?? "unknown")"
+                if role == "interactiond", action == "start" {
+                    self.status = try await self.call(.status)
+                    try self.acceptSettings(try await self.call(.settingsRead))
+                } else if role == "interactiond", action == "stop" {
+                    self.status = [:]; self.runtime = nil; self.settings = nil; self.revision = nil; self.capabilities = []
+                }
             } catch {
                 self.moduleErrors[role] = error.localizedDescription
                 self.message = "操作结果以刷新读回为准"
@@ -106,23 +112,14 @@ import Security
             }
         }
     }
-    func attach() {
-        guard !busy else { return }
-        let existing = NSRunningApplication.runningApplications(withBundleIdentifier: ManagementProtocol.runtimeBundleID)
-        if !existing.isEmpty { refresh(); return }
-        guard FileManager.default.fileExists(atPath: ManagementProtocol.runtimePath) else { message = "未找到已安装的 interactiond 原生载体"; return }
-        do {
-            var code: SecStaticCode?, requirement: SecRequirement?
-            let expression = "anchor apple generic and identifier \"me.longbiaochen.codex-plus\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
-            guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: ManagementProtocol.runtimePath) as CFURL, [], &code) == errSecSuccess,
-                  SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
-                  let code, SecStaticCodeCheckValidity(code, [], requirement) == errSecSuccess else { throw ManagementProtocol.failure("installed_runtime_signature") }
-        } catch { message = "运行主体身份核验失败"; refresh(); return }
-        let config = NSWorkspace.OpenConfiguration(); config.activates = false; config.addsToRecentItems = false
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: ManagementProtocol.runtimePath), configuration: config) { _, error in
-            Task { @MainActor in
-                if let error { self.message = "启动失败：\(error.localizedDescription)" } else { self.refresh() }
-            }
+    /// This button is an explicit start; merely opening the UI never calls it.
+    func attach() { control("start", role: "interactiond") }
+    func action(_ operation: ManagementProtocol.Operation) {
+        guard !busy, let runtime, [.openCodex, .reconnect].contains(operation) else { return }
+        perform {
+            _ = try await self.call(operation, extra: ["expected_runtime": runtime.instance_id.uuidString])
+            self.status = try await self.call(.status)
+            self.message = "请求已交给 interactiond；结果以当前状态为准"
         }
     }
     private func perform(_ work: @escaping @MainActor () async throws -> Void) {
@@ -161,14 +158,6 @@ import Security
         return response["result"] as? [String: Any] ?? [:]
     }
     private static func verify(_ identity: ManagementProtocol.RuntimeIdentity) throws {
-        guard identity.pid > 0, identity.bundle_id == ManagementProtocol.runtimeBundleID, identity.path == ManagementProtocol.runtimePath,
-              let app = NSRunningApplication(processIdentifier: identity.pid), app.bundleIdentifier == identity.bundle_id,
-              app.bundleURL?.standardizedFileURL.path == identity.path else { throw ManagementProtocol.failure("runtime_process_identity") }
-        var code: SecCode?, requirement: SecRequirement?
-        let attributes = [kSecGuestAttributePid as String: identity.pid] as CFDictionary
-        let expression = "anchor apple generic and identifier \"me.longbiaochen.codex-plus\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
-              SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
-              let code, SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { throw ManagementProtocol.failure("runtime_signature_identity") }
+        try SmartShadowInstallation.verifyRuntime(identity)
     }
 }

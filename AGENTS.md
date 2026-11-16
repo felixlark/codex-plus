@@ -5,18 +5,20 @@
 Owner is Longbiao. This repository owns the native `/Applications/Codex Plus.app`,
 Codex Web App enhancements, workspace observation, settings, the status CLI, and exact placement of Agent-owned windows on the rightmost physical screen. OCU virtual displays and their automatic recovery are retired.
 
-The native runtime and existing Codex enhancements remain owned here. The independent
-SmartShadow management App provides settings and component status. Its separate small
-task board combines taskd registered cases with current local Codex work, deduplicating
-only exact host/thread/run associations. Preserve the original mobile frontend and its Mac host.
-The page's Codex Plus button is the first item in the lower-left navigation footer;
-the Snake validation button follows Projects in the upper navigation group, using its native spacing and button presentation. Keep the independent menu-bar app.
+The approved fusion (#613 comment6906325173 r2/r3) packages one SmartShadow.app:
+its main UI owns management/settings/task board; the nested
+SmartShadowInteraction.app login helper owns the only menu icon, existing Codex
+enhancements and mobile host. Closing/quitting UI never stops the helper. UI launch
+only reads state; explicit F6/start/stop use the installed ss-service. Preserve
+Plus80 until #613 completes the real package switch and acceptance. The fixed
+contract is docs/designs/smartshadow-fusion.md. #613 alone installs, migrates the
+single source into smart-shadow/native, and retires the old product afterwards.
 
 ## Commands
 
 - Tests `./scripts/test`
 - Signed build `./scripts/build`
-- Install `./scripts/install`
+- File replacement only `./scripts/install /absolute/path/SmartShadow.app` (#613 owns the formal service handoff)
 - Live status `./scripts/codex-plus --status`
 
 Use the canonical checkout with one writer. Keep build output and caches under
@@ -46,9 +48,8 @@ issue with evidence; wait for personal acceptance only when explicitly required.
 The user approved resuming the simplified product on 2026-11-15. Deliver the thin service controls, small task board and original mobile frontend; do not restore the removed full workbench. #613 owns installation and service switching; shared source has one writer.
 Keep the existing installation, phone connection, drafts, and unresolved operations.
 The untracked `docs/designs/compact-task-board.md` is a preserved discussion draft,
-not a current requirement or an implementation instruction. The duplicate Agent
-Settings view still has a ToolWindowRouter consumer; its entry-point decision is
-deferred, so preserve it and the underlying settings callbacks in this phase.
+not a current requirement or an implementation instruction. Settings now open the
+one main UI; preserve the underlying management callbacks, not a second helper settings window.
 
 ## 自动交付
 

@@ -1,3 +1,7 @@
+# 当前单包接口
+
+融合后容器/嵌套helper、唯一登录项、F6、签名/manifest合同见[单包合同](designs/smartshadow-fusion.md)。runtimePath和runtimeBundleID现在指向包内SmartShadowInteraction；下面旧Plus安装证据为历史，不能据此给新helper签安装验收。主UI普通启动只读，设置/原controller重新接入统一从此UI经管理协议调用；旧私有设置窗口已删除。
+
 # SmartShadow 管理接缝 v1
 
 独立管理 App 提供设置和组件状态；Plus 原生运行体保留 controller、手机网关、窗口路由和现有增强。管理 App 退出只取消自己的连接，不停止运行体或手机宿主。

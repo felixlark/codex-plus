@@ -41,11 +41,6 @@ enum LifecycleCommand {
         dispatchMain()
     }
     private static func verify(_ identity: ManagementProtocol.RuntimeIdentity) throws {
-        guard identity.path == ManagementProtocol.runtimePath, identity.bundle_id == ManagementProtocol.runtimeBundleID,
-              let app = NSRunningApplication(processIdentifier:identity.pid), app.bundleURL?.path == identity.path else { throw ManagementProtocol.failure("runtime_identity") }
-        var code: SecCode?, requirement: SecRequirement?
-        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid as String:identity.pid] as CFDictionary, [], &code) == errSecSuccess,
-              SecRequirementCreateWithString("anchor apple generic and identifier \"me.longbiaochen.codex-plus\" and certificate leaf[subject.OU] = \"HJG65XBC25\"" as CFString, [], &requirement) == errSecSuccess,
-              let code, SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { throw ManagementProtocol.failure("runtime_signature") }
+        try SmartShadowInstallation.verifyRuntime(identity)
     }
 }
