@@ -6,9 +6,9 @@ import CoreFoundation
 public enum ManagementProtocol {
     public static let version = 1
     public static let command = "management-v1"
-    public static let runtimeBundleID = "me.longbiaochen.codex-plus"
-    public static let runtimePath = "/Applications/Codex Plus.app"
-    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", prepareStop = "lifecycle.prepare-stop", stop = "lifecycle.stop", resume = "lifecycle.resume" }
+    public static let runtimeBundleID = SmartShadowInstallation.helperBundleID
+    public static let runtimePath = SmartShadowInstallation.helperPath
+    public enum Operation: String { case status, settingsRead = "settings.read", settingsWrite = "settings.write", prepareStop = "lifecycle.prepare-stop", stop = "lifecycle.stop", resume = "lifecycle.resume", openCodex = "codex.open", reconnect = "enhancements.reconnect" }
     public enum Rejection: String { case unsupported, conflict }
     /// Only these protocol codes attest a pre-effect rejection. Arbitrary
     /// failures may follow an effect and must remain unknown to the client.
@@ -32,13 +32,13 @@ public enum ManagementProtocol {
             case .status: allowed.formUnion(["expected_runtime"])
             case .settingsRead: break
             case .settingsWrite: allowed.formUnion(["expected_runtime", "expected_settings_revision", "changes"])
-            case .prepareStop, .resume: allowed.insert("expected_runtime")
+            case .prepareStop, .resume, .openCodex, .reconnect: allowed.insert("expected_runtime")
             case .stop: allowed.formUnion(["expected_runtime", "expected_scope_revision"])
             }
             guard Set(value.keys).isSubset(of: allowed) else { throw failure("unexpected_field") }
             let runtime = uuid(value["expected_runtime"])
             if value["expected_runtime"] != nil && runtime == nil { throw failure("invalid_runtime") }
-            if [.settingsWrite, .prepareStop, .stop, .resume].contains(op) { guard runtime != nil else { throw failure("runtime_required") } }
+            if [.settingsWrite, .prepareStop, .stop, .resume, .openCodex, .reconnect].contains(op) { guard runtime != nil else { throw failure("runtime_required") } }
             let scope = value["expected_scope_revision"] as? String
             if op == .stop { guard let scope, isDigest(scope) else { throw failure("scope_required") } }
             let revision = value["expected_settings_revision"] as? String

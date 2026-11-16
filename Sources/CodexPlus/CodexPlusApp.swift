@@ -3,6 +3,7 @@ import ApplicationServices
 import CodexPlusCore
 import ServiceManagement
 import Security
+import Darwin
 import SwiftUI
 
 @main
@@ -14,7 +15,8 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let toolServer = ToolControlServer()
     private let management = ManagementRuntime()
     private var statusItem: NSStatusItem?
-    private var agentSettingsWindow: NSWindow?
+    private var runtimeLease: Int32 = -1
+    private var serviceRequest: Process?
     private let settings = SettingsModel()
     private let launcher = CodexLauncher()
 
@@ -28,7 +30,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 FileHandle.standardOutput.write(data)
                 if let result = try JSONSerialization.jsonObject(with: data) as? [String: Any], result["ok"] as? Bool == false { exit(1) }
             } catch {
-                fputs("Codex Plus tool command failed: \(error.localizedDescription)\n", stderr)
+                fputs("SmartShadow tool command failed: \(error.localizedDescription)\n", stderr)
                 exit(1)
             }
             return
@@ -37,24 +39,42 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 FileHandle.standardOutput.write(try StatusChannel.readStatus())
             } catch {
-                fputs("Codex Plus status unavailable: \(error.localizedDescription)\n", stderr)
+                fputs("SmartShadow status unavailable: \(error.localizedDescription)\n", stderr)
                 exit(1)
             }
             return
         }
         if CommandLine.arguments.contains("--help") {
-            print("Codex Plus 0.10.0\nUsage: CodexPlus [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-restore --pid PID --window-id ID]\nF6 opens Codex. Settings are available in the menu bar.")
+            print("SmartShadow interactiond 4.2.0\nUsage: SmartShadowInteraction [--status | --help | --tool-status | --tool-open --app-path PATH [--url URL] | --tool-place --pid PID --window-id ID | --tool-routing --enabled true/false | --tool-restore --pid PID --window-id ID]\nF6 uses SmartShadowManager --open-codex. Settings are available in SmartShadow.")
             return
+        }
+        if arguments.isEmpty { RuntimeBootstrap.run(); return }
+        guard arguments == ["--managed-runtime"] else {
+            fputs("Unknown helper operation; use the SmartShadow management entry.\n", stderr); exit(2)
         }
         guard SuggestionAcceptance.isValidOrAbsent else {
             fputs("Invalid acceptance thread; refusing to start without a valid scope.\n", stderr)
             exit(2)
         }
-        let currentPID = ProcessInfo.processInfo.processIdentifier
-        if NSRunningApplication.runningApplications(withBundleIdentifier: CodexWorkspacePreference.domain)
-            .contains(where: { $0.processIdentifier != currentPID && !$0.isTerminated }) { return }
+        // The old installed process must reach its normal shutdown safety point
+        // before the new identity can own sockets, controller or phone resources.
+        guard Bundle.main.bundleIdentifier == SmartShadowInstallation.helperBundleID,
+              Bundle.main.bundleURL.standardizedFileURL.path == SmartShadowInstallation.helperPath,
+              !NSRunningApplication.runningApplications(withBundleIdentifier: SmartShadowInstallation.legacyBundleID)
+                .contains(where: { !$0.isTerminated }) else {
+            fputs("Installed helper identity unavailable or legacy runtime still active.\n", stderr); return
+        }
         let app = NSApplication.shared
         let delegate = CodexPlusApp()
+        let leasePath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/codex-plus/interaction-runtime.lock")
+        do { try FileManager.default.createDirectory(at: leasePath.deletingLastPathComponent(), withIntermediateDirectories: true) }
+        catch { fputs("Runtime directory unavailable.\n", stderr); exit(2) }
+        let fd = Darwin.open(leasePath.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0, flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            if fd >= 0 { close(fd) }
+            fputs("Interaction runtime already owned.\n", stderr); return
+        }
+        delegate.runtimeLease = fd
         retainedDelegate = delegate
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
@@ -62,7 +82,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        ProcessInfo.processInfo.disableAutomaticTermination("Codex Plus observes Codex workspace events")
+        ProcessInfo.processInfo.disableAutomaticTermination("SmartShadow interactiond observes Codex workspace events")
         settings.onEnabledChange = { [weak self] in
             guard self?.management.allowsEffects == true else { return }
             self?.observer.stop()
@@ -75,7 +95,7 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onDisplaySelectionChange = { [weak self] in if self?.management.allowsEffects == true { self?.observer.displaySelectionDidChange() } }
         settings.readDisplayDecision = { [weak self] in self?.observer.displayDecision() }
         observer.start()
-        toolWindows.openOwnSettings = { [weak self] in self?.presentAgentSettings() }
+        toolWindows.openOwnSettings = { [weak self] in self?.openManager(agent: true) }
         settings.readToolRouting = { [weak self] in
             guard let self else { return (false, false, "等待连接") }
             return (self.toolWindows.enabled, self.toolWindows.chromeUsesAgentDisplay, self.toolWindows.displaySummary)
@@ -113,6 +133,16 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.toolWindows.resumeLifecycle()
             self.observer.start()
         }
+        management.performAction = { [weak self] operation in
+            guard let self else { throw ManagementProtocol.failure("unavailable") }
+            switch operation {
+            case .openCodex: self.launcher.open(source: "management-request")
+            case .reconnect:
+                guard !self.settings.autoSendSuggestions else { throw ManagementProtocol.failure("disable_auto_send_before_reconnect") }
+                try self.launcher.requestEnhancementReconnect()
+            default: throw ManagementProtocol.failure("unsupported")
+            }
+        }
         management.stopLifecycle = { NSApp.terminate(nil) }
         management.verifyPreparedScope = { [weak self] in await self?.launcher.verifyLifecycleScope($0) == true }
         do { try toolServer.start { [weak self] request in
@@ -125,63 +155,40 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.onPlaceMobileWindow = { [weak self] host, request in self?.toolWindows.routeMobileAnchor(host, request: request) }
         launcher.start()
-        if CommandLine.arguments.contains("--open-codex") { launcher.open(source: "launch-request") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let menuIcon = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "pdf")
-            .flatMap { NSImage(contentsOf: $0) }
-            ?? NSImage(systemSymbolName: "plus.circle", accessibilityDescription: "Codex Plus")
-        menuIcon?.isTemplate = true
-        menuIcon?.size = NSSize(width: 18, height: 18)
-        statusItem?.button?.image = menuIcon
-        statusItem?.button?.setAccessibilityLabel("Codex Plus")
-        statusItem?.button?.toolTip = "Codex Plus"
+        let icon = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "SmartShadow")
+        icon?.isTemplate = true
+        statusItem?.button?.image = icon
+        statusItem?.button?.setAccessibilityLabel("SmartShadow")
+        statusItem?.button?.toolTip = "SmartShadow"
         let menu = NSMenu()
         menu.delegate = self
-        let openItem = NSMenuItem(title: "打开双屏 Codex（F6）", action: #selector(openCodex), keyEquivalent: "")
-        openItem.target = self
-        menu.addItem(openItem)
-        menu.addItem(NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","))
-        let quiet = NSMenuItem(title: "Agent 工具窗口使用右屏", action: #selector(toggleToolWindows(_:)), keyEquivalent: "")
-        quiet.target = self
-        menu.addItem(quiet)
+        for (title, action) in [("打开 SmartShadow…", #selector(showSettings)), ("打开双屏 Codex（F6）", #selector(openCodex))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self; menu.addItem(item)
+        }
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q"))
+        let stop = NSMenuItem(title: "停止交互服务", action: #selector(stopInteraction), keyEquivalent: "")
+        stop.target = self; menu.addItem(stop)
         statusItem?.menu = menu
-        let mainMenu = NSMenu()
-        let appMenu = NSMenu()
-        let settingsItem = NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        appMenu.addItem(settingsItem)
-        appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "退出 Codex Plus", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        appMenu.addItem(quitItem)
-        let appMenuItem = NSMenuItem()
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-        NSApp.mainMenu = mainMenu
         do {
             try statusServer.start { [weak self] in
                 guard let self else { return ["ok": false] }
-                return ["ok": true, "app": "Codex Plus", "version": "0.10.0",
+                return ["ok": true, "app": "SmartShadow interactiond", "version": "4.2.0",
                         "build": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "unknown",
                         "pid": ProcessInfo.processInfo.processIdentifier,
-                        "launchAtLogin": SMAppService.mainApp.status == .enabled,
                         "workspace": self.observer.status(), "launcher": self.launcher.status(),
                         "toolWindows": self.toolWindows.command(["command": "tool-status"])]
             }
         } catch {
             settings.error = "状态接口启动失败。\(error.localizedDescription)"
         }
-        if CommandLine.arguments.contains("--settings") || !UserDefaults.standard.bool(forKey: "hasShownSettings") {
-            showSettings()
-            UserDefaults.standard.set(true, forKey: "hasShownSettings")
-        }
+
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard management.allowsEffects else { return true }
-        launcher.open(source: "reopen")
+        // LaunchServices/login attachment is not an F6 action. Only the explicit
+        // management request or menu opens Codex.
         return true
     }
 
@@ -202,17 +209,14 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        for item in menu.items where item.action == #selector(toggleToolWindows(_:)) { item.state = toolWindows.enabled ? .on : .off }
         settings.refresh()
     }
 
-    @objc private func toggleToolWindows(_ item: NSMenuItem) {
-        guard management.allowsEffects else { return }
-        toolWindows.setEnabled(!toolWindows.enabled)
-        item.state = toolWindows.enabled ? .on : .off
-    }
     @objc private func showSettings() {
-        let url = URL(fileURLWithPath: "/Applications/SmartShadow.app")
+        openManager(agent: false)
+    }
+    private func openManager(agent: Bool) {
+        let url = URL(fileURLWithPath: SmartShadowInstallation.containerPath)
         var code: SecStaticCode?, requirement: SecRequirement?
         let expression = "anchor apple generic and identifier \"me.longbiaochen.smart-shadow.app\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
         guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
@@ -220,29 +224,25 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let code, SecStaticCodeCheckValidity(code, [], requirement) == errSecSuccess else {
             settings.error = "已安装的 SmartShadow 管理 App 身份核验失败。"; return
         }
-        NSWorkspace.shared.openApplication(at: url, configuration: .init()) { [weak self] _, error in
+        let configuration = NSWorkspace.OpenConfiguration()
+        if agent { configuration.arguments = ["--agent-settings"] }
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { [weak self] _, error in
             if let error { DispatchQueue.main.async { self?.settings.error = "管理 App 打开失败：\(error.localizedDescription)" } }
         }
     }
 
-    private func presentAgentSettings() {
-        guard management.allowsEffects else { return }
-        settings.refresh()
-        if agentSettingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
-                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            window.title = "Codex Plus — Agent"
-            window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: 500, height: 340)
-            window.contentView = NSHostingView(rootView: SettingsView(model: settings, catalog: settings.catalog, launcher: launcher))
-            agentSettingsWindow = window
-        }
-        guard let window = agentSettingsWindow, toolWindows.prepareAgentWindow(window) else { return }
-        window.orderFront(nil)
-        toolWindows.registerAgentWindow(window)
+    @objc private func stopInteraction() {
+        guard serviceRequest == nil else { return }
+        do {
+            try SmartShadowInstallation.verifyBundle(path: SmartShadowInstallation.containerPath, bundleID: SmartShadowInstallation.containerBundleID)
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: SmartShadowInstallation.containerPath + "/Contents/MacOS/SmartShadowManager")
+            child.arguments = ["--stop-interactiond"]
+            child.standardInput = FileHandle.nullDevice; child.standardOutput = FileHandle.nullDevice; child.standardError = FileHandle.nullDevice
+            child.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.serviceRequest = nil } }
+            try child.run(); serviceRequest = child
+        } catch { settings.error = "正式停止入口不可用，请打开 SmartShadow 查看状态。" }
     }
-
-    @objc private func quit() { NSApp.terminate(nil) }
     @objc private func openCodex() { launcher.open() }
 }
 
@@ -252,13 +252,13 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var displayDecision: CodexWorkspaceDisplayDecision?
     @Published var enabled = CodexWorkspacePreference.enabled {
         didSet {
-            UserDefaults.standard.set(enabled, forKey: CodexWorkspacePreference.key)
+            SmartShadowPreferences.defaults.set(enabled, forKey: CodexWorkspacePreference.key)
             onEnabledChange?()
         }
     }
-    @Published var autoSendSuggestions = !SuggestionAcceptance.isRequested && UserDefaults.standard.bool(forKey: "autoSendSuggestions") {
+    @Published var autoSendSuggestions = !SuggestionAcceptance.isRequested && SmartShadowPreferences.defaults.bool(forKey: "autoSendSuggestions") {
         didSet {
-            if !SuggestionAcceptance.isRequested { UserDefaults.standard.set(autoSendSuggestions, forKey: "autoSendSuggestions") }
+            if !SuggestionAcceptance.isRequested { SmartShadowPreferences.defaults.set(autoSendSuggestions, forKey: "autoSendSuggestions") }
             onSuggestionChange?()
         }
     }
@@ -275,7 +275,6 @@ final class SettingsModel: ObservableObject {
         guard let state = readToolRouting?() else { return }
         toolWindowsEnabled = state.0; chromeUsesAgentDisplay = state.1; agentDisplaySummary = state.2
     }
-    @Published var launchAtLogin = false
     @Published var trusted = false
     @Published var error: String?
     var onEnabledChange: (() -> Void)?
@@ -283,7 +282,6 @@ final class SettingsModel: ObservableObject {
     var readDisplayDecision: (() -> CodexWorkspaceDisplayDecision?)?
 
     func refresh() {
-        launchAtLogin = SMAppService.mainApp.status == .enabled
         trusted = AXIsProcessTrusted()
         catalog.refresh()
         refreshToolRouting()
@@ -343,151 +341,4 @@ final class SettingsModel: ObservableObject {
         return "当前 Codex 窗口：\(name) · \(detail)"
     }
 
-    func setLaunchAtLogin(_ enabled: Bool) {
-        do {
-            if enabled { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
-            error = nil
-        } catch {
-            self.error = "登录启动设置失败。\(error.localizedDescription)"
-        }
-        refresh()
-    }
-
-    func requestAccessibility() {
-        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-        refresh()
-    }
-}
-
-struct SettingsView: View {
-    @ObservedObject var model: SettingsModel
-    @ObservedObject var catalog: CodexWorkspaceDisplayCatalog
-    @ObservedObject var launcher: CodexLauncher
-
-    var body: some View {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 18) {
-            Text("Codex Plus").font(.title2.bold())
-            Text("按 F6 打开双屏 Codex，项目随任务活动自动置顶。Codex Plus 在菜单栏运行。")
-            Text(launcher.summary).font(.callout).foregroundColor(.secondary)
-            Button("打开双屏 Codex（F6）") { launcher.open() }
-            Divider()
-            Text("页面增强").font(.headline)
-            Text(launcher.pageSummary).font(.callout).foregroundColor(.secondary)
-            Text("项目排序：\(launcher.orderSummary)").font(.callout).foregroundColor(.secondary)
-            Text("侧栏布局：\(launcher.sidebarSummary)").font(.callout).foregroundColor(.secondary)
-            Text("展开与折叠只影响当前窗口。移动到其他屏幕或新开窗口时，恢复该屏幕上次的布局；同屏已有窗口保持各自状态。布局仅保存在本机。")
-                .font(.caption).foregroundColor(.secondary)
-            Button("重新接入页面增强") { launcher.reconnectEnhancements() }
-                .disabled(model.autoSendSuggestions)
-            Text("更新后可在此重新接入；先关闭自动发送。有未提交输入、附件或对话框时不执行。")
-                .font(.caption).foregroundColor(.secondary)
-            if let result = launcher.reconnectResult { Text(result).font(.callout).foregroundColor(.secondary) }
-            Toggle("自动发送建议提示词", isOn: $model.autoSendSuggestions)
-            Text("无需打开任务。普通建议经审查后在后台发送；敏感或无法确认范围的建议不自动发送。关闭后停止尚未提交的动作。")
-                .font(.callout).foregroundColor(.secondary)
-            Text("建议提示词：\(launcher.suggestionSummary)").font(.callout).foregroundColor(.secondary)
-            if SuggestionAcceptance.threadID != nil {
-                Text("验收模式：仅处理指定测试任务；自动发送开关不保存到日常偏好。")
-                    .font(.caption).foregroundColor(.secondary)
-            }
-            Divider()
-            Text("新建 Codex 任务或切换任务时，自动展开已收起的右侧工作区。")
-                .foregroundColor(.secondary)
-            Toggle("自动展开 Codex 工作区", isOn: $model.enabled)
-            displaySettings.disabled(!model.enabled)
-            Text("ChatGPT 视图保持收起，已展开的任务保留现有标签页。")
-                .font(.callout).foregroundColor(.secondary)
-            Divider()
-            Text("Agent 窗口右屏路由").font(.headline)
-            Text(model.agentDisplaySummary).font(.callout).foregroundColor(.secondary)
-            Text("Agent 工具窗口使用当前最右侧物理屏；不创建虚拟屏。")
-                .font(.caption).foregroundColor(.secondary)
-            Toggle("Agent 工具窗口使用右屏", isOn: Binding(
-                get: { model.toolWindowsEnabled }, set: { model.setToolRouting($0) }
-            ))
-            Toggle("Agent Chrome 窗口使用右屏", isOn: Binding(
-                get: { model.chromeUsesAgentDisplay }, set: { model.setChromeRouting($0) }
-            ))
-            .disabled(!model.toolWindowsEnabled)
-            Text("只路由明确登记的 Agent 窗口；人工窗口保留。超大窗口适配右屏，手动移动后解除托管，停止路由不搬回原屏。")
-                .font(.caption).foregroundColor(.secondary)
-            Button("刷新物理屏状态") { model.refresh() }
-            Toggle("登录时启动", isOn: Binding(
-                get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }
-            ))
-            HStack {
-                Text(model.trusted ? "辅助功能权限已授权" : "需要辅助功能权限")
-                Spacer()
-                Button(model.trusted ? "查看权限" : "授权辅助功能…") { model.requestAccessibility() }
-            }
-            if let error = model.error { Text(error).foregroundColor(.red).font(.callout) }
-          }
-          .padding(26)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minWidth: 500, minHeight: 340)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.refresh()
-        }
-        .onReceive(catalog.$displays) { _ in model.refreshDisplayDecision(); model.refreshToolRouting() }
-    }
-
-    private var displaySettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("适用屏幕", selection: Binding(
-                get: { model.selection?.mode ?? .selected }, set: { model.setDisplayMode($0) }
-            )) {
-                Text("所有屏幕").tag(CodexWorkspaceDisplaySelection.Mode.all)
-                Text("所选屏幕").tag(CodexWorkspaceDisplaySelection.Mode.selected)
-            }
-            .pickerStyle(.segmented)
-            Text("选择后自动保存；在下一次新建或切换任务时应用。")
-                .font(.callout).foregroundColor(.secondary)
-            if model.selection == nil {
-                Text("屏幕设置读取失败，请重新选择").foregroundColor(.red)
-                Button("重设屏幕选择") { model.resetDisplaySelection() }
-            }
-            ForEach(catalog.displays) { display in
-                Toggle(isOn: Binding(
-                    get: { model.selection?.mode == .all || model.selection?.contains(display) == true },
-                    set: { checked in
-                        if let uuid = display.uuid { model.setDisplay(uuid: uuid, name: display.name, selected: checked) }
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(displayTitle(display))
-                        Text(display.identityUsable
-                             ? "\(display.isBuiltin ? "内屏" : "外屏") · \(Int(display.bounds.width)) × \(Int(display.bounds.height)) pt"
-                             : "屏幕身份暂不可用")
-                            .font(.caption).foregroundColor(.secondary)
-                    }
-                }
-                .disabled(model.selection?.mode == .all || !display.identityUsable)
-            }
-            ForEach(offlineSelections, id: \.uuid) { saved in
-                Toggle(isOn: Binding(get: { true }, set: { checked in
-                    model.setDisplay(uuid: saved.uuid, name: saved.lastKnownName, selected: checked)
-                })) {
-                    Text("\(saved.lastKnownName) · 已断开").foregroundColor(.secondary)
-                }
-                .disabled(model.selection?.mode == .all)
-            }
-            if model.selection?.mode == .selected && model.selection?.selectedDisplays.isEmpty == true {
-                Text("当前未选择屏幕，自动展开已暂停").font(.callout).foregroundColor(.secondary)
-            }
-            Text(model.displaySummary).font(.callout).foregroundColor(.secondary)
-        }
-    }
-
-    private var offlineSelections: [CodexWorkspaceDisplaySelection.SelectedDisplay] {
-        (model.selection?.selectedDisplays ?? []).filter { saved in !catalog.displays.contains { $0.uuid == saved.uuid } }
-    }
-
-    private func displayTitle(_ display: CodexWorkspaceDisplay) -> String {
-        guard catalog.displays.filter({ $0.name == display.name }).count > 1 else { return display.name }
-        return "\(display.name) · (\(Int(display.bounds.minX)), \(Int(display.bounds.minY))) · \(display.uuid?.suffix(6) ?? "")"
-    }
 }

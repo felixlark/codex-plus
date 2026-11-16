@@ -27,7 +27,7 @@ final class CodexLauncher: ObservableObject {
     private var stopped: (() -> Void)?
     private var entryRequests = 0
     private var lastEntrySource = "none"
-    private var autoSendEnabled = !SuggestionAcceptance.isRequested && UserDefaults.standard.bool(forKey: "autoSendSuggestions")
+    private var autoSendEnabled = !SuggestionAcceptance.isRequested && SmartShadowPreferences.defaults.bool(forKey: "autoSendSuggestions")
     private let humanWindows = HumanWindows()
     private var needsPlacement = false
     private var placementStatus = "idle"
@@ -156,13 +156,17 @@ final class CodexLauncher: ObservableObject {
     }
 
     func reconnectEnhancements() {
-        guard !autoSendEnabled, let input = controllerInput else { return }
+        try? requestEnhancementReconnect()
+    }
+
+    func requestEnhancementReconnect() throws {
+        guard !quiesced, !stopping, !autoSendEnabled, let input = controllerInput else { throw ManagementProtocol.failure("enhancements_not_ready") }
         let message: [String: Any] = ["type": "reconnect-enhancements", "version": 1]
-        guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
+        let data = try JSONSerialization.data(withJSONObject: message)
         do {
             try input.write(contentsOf: data + Data([10]))
             reconnectResult = "正在检查未提交内容并重新接入…"
-        } catch { reconnectResult = "连接暂不可用，页面未重新接入。" }
+        } catch { reconnectResult = "连接暂不可用，页面未重新接入。"; throw error }
     }
 
     func status() -> [String: Any] {

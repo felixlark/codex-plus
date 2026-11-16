@@ -1,37 +1,49 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_ROOT="${CODEX_PLUS_BUILD_ROOT:-$HOME/Library/Caches/codex-plus/build}"
-SCRATCH="$HOME/Library/Caches/codex-plus/swift-build"
+BUILD_ROOT="${SMARTSHADOW_BUILD_ROOT:-$HOME/Library/Caches/codex-plus/unified-build}"
+SCRATCH="${SMARTSHADOW_SCRATCH_PATH:-$HOME/Library/Caches/codex-plus/unified-swift-build}"
 CACHE="$HOME/Library/Caches/codex-plus/swift-cache"
 IDENTITY="${CSC_NAME:-Developer ID Application: LONGBIAO CHEN (HJG65XBC25)}"
 cd "$ROOT"
-swift build -c release --product CodexPlus --scratch-path "$SCRATCH" --cache-path "$CACHE"
-BIN="$(swift build -c release --product CodexPlus --scratch-path "$SCRATCH" --cache-path "$CACHE" --show-bin-path)"
-APP="$BUILD_ROOT/Codex Plus.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-ICONS="$HOME/Library/Caches/codex-plus/icons"
-swift -module-cache-path "$CACHE" "$ROOT/scripts/render-icons.swift" "$ICONS"
-iconutil -c icns "$ICONS/AppIcon.iconset" -o "$ICONS/AppIcon.icns"
-cp "$ICONS/AppIcon.icns" "$ICONS/MenuBarIcon.pdf" "$APP/Contents/Resources/"
-cp "$BIN/CodexPlus" "$APP/Contents/MacOS/CodexPlus"
-cp "$ROOT/AppInfo.plist" "$APP/Contents/Info.plist"
-rm -f "$APP/Contents/LICENSE"
+git diff --quiet HEAD -- Package.swift AppInfo.plist ManagerInfo.plist Sources scripts mobile third_party tools/project-order-probe LICENSE
+python3 - <<'PY'
+import subprocess
+from pathlib import Path
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '-z', '--', 'Sources', 'mobile/Shared', 'mobile/Gateway', 'tools/project-order-probe']).decode().split('\0')
+missing = [name for name in untracked if name]
+if missing:
+    raise SystemExit('Untracked package input must be committed before recording source_commit: ' + ', '.join(missing))
+PY
+# Both roles are built from one source snapshot, never separate app releases.
+swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE"
+BIN="$(swift build -c release --scratch-path "$SCRATCH" --cache-path "$CACHE" --show-bin-path)"
+mkdir -p "$BUILD_ROOT"
+STAGE="$(mktemp -d "$BUILD_ROOT/smartshadow.XXXXXX")"
+APP="$STAGE/SmartShadow.app"
+HELPER="$APP/Contents/Library/LoginItems/SmartShadowInteraction.app"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources"
+cp "$BIN/SmartShadowManager" "$APP/Contents/MacOS/SmartShadowManager"
+cp -R "$BIN/CodexPlus_SmartShadowManager.bundle" "$APP/Contents/Resources/"
+cp "$ROOT/ManagerInfo.plist" "$APP/Contents/Info.plist"
+cp "$BIN/SmartShadowInteraction" "$HELPER/Contents/MacOS/SmartShadowInteraction"
+cp "$ROOT/AppInfo.plist" "$HELPER/Contents/Info.plist"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
-cp "$ROOT/third_party/OpenComputerUse-LICENSE" "$APP/Contents/Resources/OpenComputerUse-LICENSE"
-# Retired modules must not survive a reused build directory.
-rm -f "$APP/Contents/Resources/workbench.mjs" "$APP/Contents/Resources/workbench-view.mjs" "$APP/Contents/Resources/task-workspace.mjs"
-cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$APP/Contents/Resources/"
+cp "$ROOT/LICENSE" "$HELPER/Contents/Resources/LICENSE"
+cp "$ROOT/third_party/OpenComputerUse-LICENSE" "$HELPER/Contents/Resources/OpenComputerUse-LICENSE"
+cp "$ROOT/Sources/CodexPlus/Resources/"*.mjs "$HELPER/Contents/Resources/"
 "$ROOT/scripts/build-mobile-gateway"
-cp "$HOME/Library/Caches/codex-plus/mobile/bin/MobileGateway" "$APP/Contents/Resources/MobileGateway"
-cp "$ROOT/scripts/inspect-sidebar-model.mjs" "$APP/Contents/Resources/"
+cp "$HOME/Library/Caches/codex-plus/mobile/bin/MobileGateway" "$HELPER/Contents/Resources/MobileGateway"
+cp "$ROOT/scripts/inspect-sidebar-model.mjs" "$HELPER/Contents/Resources/"
 ACORN="$HOME/Library/Caches/codex-plus/project-order-probe/node_modules/acorn"
-if [[ ! -f "$ACORN/dist/acorn.mjs" ]]; then
-  "$ROOT/scripts/setup-project-order-probe"
-fi
-cp "$ACORN/dist/acorn.mjs" "$APP/Contents/Resources/acorn.mjs"
-cp "$ACORN/LICENSE" "$APP/Contents/Resources/ACORN-LICENSE"
-xattr -cr "$APP"
+# npm ci consumes the committed lock even when a previous cache exists.
+"$ROOT/scripts/setup-project-order-probe"
+cp "$ACORN/dist/acorn.mjs" "$HELPER/Contents/Resources/acorn.mjs"
+cp "$ACORN/LICENSE" "$HELPER/Contents/Resources/ACORN-LICENSE"
+# Preserve the gateway's existing signing requirement and Keychain TLS identity.
+codesign --verify --strict "$HELPER/Contents/Resources/MobileGateway"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$HELPER"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
+python3 "$ROOT/scripts/package-manifest.py" "$APP" "$ROOT" "$STAGE/SmartShadow.package.json"
 printf '%s\n' "$APP"

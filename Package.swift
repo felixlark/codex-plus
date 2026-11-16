@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "CodexPlus",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "CodexPlus", targets: ["CodexPlus"]), .executable(name: "SmartShadowManager", targets: ["SmartShadowManager"])],
+    products: [.executable(name: "SmartShadowInteraction", targets: ["CodexPlus"]), .executable(name: "SmartShadowManager", targets: ["SmartShadowManager"])],
     targets: [
         .target(name: "CodexPlusCore"),
         .target(name: "AgentDisplayShim", publicHeadersPath: "include",

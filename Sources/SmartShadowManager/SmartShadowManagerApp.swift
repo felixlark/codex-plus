@@ -14,7 +14,7 @@ import CodexPlusCore
     func applicationWillTerminate(_ notification: Notification) { model?.cancel() }
 }
 
-@main struct SmartShadowManagerApp: App {
+struct SmartShadowManagerApp: App {
     @NSApplicationDelegateAdaptor(ManagerDelegate.self) private var delegate
     @StateObject private var model = ManagerModel()
     @StateObject private var taskBoard = TaskBoardModel()
@@ -22,8 +22,9 @@ import CodexPlusCore
         WindowGroup("SmartShadow", id: "manager") {
             ManagerView(model: model, registerReopen: { delegate.reopenManager = $0 }, refreshTaskBoard: { taskBoard.refresh() })
                 .onAppear { delegate.model = model }
+                .background(ManagerWindowPlacement(enabled: CommandLine.arguments.contains("--agent-settings")))
         }
-        Window("任务看板", id: "task-board") { TaskBoardView(model: taskBoard) }.defaultSize(width: 460, height: 380)
+        Window("任务看板", id: "task-board") { TaskBoardView(model: taskBoard).background(ManagerWindowPlacement(enabled: CommandLine.arguments.contains("--agent-settings"))) }.defaultSize(width: 460, height: 380)
         .commands {
             CommandGroup(replacing: .appInfo) { Button("关于 SmartShadow") { NSApp.orderFrontStandardAboutPanel() } }
         }
@@ -36,8 +37,6 @@ struct ManagerView: View {
     let registerReopen: (@escaping () -> Void) -> Void
     let refreshTaskBoard: () -> Void
     @StateObject private var catalog = CodexWorkspaceDisplayCatalog()
-    @State private var login = SMAppService.mainApp.status == .enabled
-    @State private var loginError: String?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -48,10 +47,12 @@ struct ManagerView: View {
                     }
                     Spacer()
                     Button("任务看板") { refreshTaskBoard(); openWindow(id: "task-board") }
-                    Button("启动或附着 interactiond") { model.attach() }.disabled(model.busy)
+                    Button("启动 interactiond") { model.attach() }.disabled(model.busy)
                     Button("刷新") { catalog.refresh(); model.refresh() }.disabled(model.busy)
                 }
                 Text(model.message).font(.callout).textSelection(.enabled)
+                Text("关闭窗口或退出管理界面后后台继续运行；停止按钮只停止选定服务。")
+                    .font(.caption).foregroundColor(.secondary)
                 GroupBox("interactiond") {
                     VStack(alignment: .leading, spacing: 8) {
                         if let runtime = model.runtime {
@@ -89,9 +90,29 @@ struct ManagerView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
+                GroupBox("手机接入") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let launcher = model.status["launcher"] as? [String: Any],
+                           let mobile = launcher["mobile"] as? [String: Any] {
+                            Text("状态：\(mobile["phase"] as? String ?? "未知")")
+                            Text("连接：\(ManagementProtocol.integer(mobile["connections"]) ?? 0) · 宿主：\(ManagementProtocol.boolean(mobile["anchorReady"]) == true ? "就绪" : "未就绪")")
+                        } else { Text("手机宿主状态暂不可用").foregroundColor(.secondary) }
+                        Text("原手机 App、配对及草稿保持。退出管理界面后，手机由后台继续连接。")
+                            .font(.caption).foregroundColor(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
+                }
                 if let settings = model.settings {
                     GroupBox("页面增强") {
                         VStack(alignment: .leading, spacing: 10) {
+                            Button("打开双屏 Codex（F6）") { model.action(.openCodex) }
+                                .disabled(model.busy || !model.capabilities.contains("codex.open"))
+                            if let launcher = model.status["launcher"] as? [String: Any], let summary = launcher["summary"] as? String {
+                                Text(summary).font(.caption).foregroundColor(.secondary)
+                            }
+                            Button("重新接入页面增强") { model.action(.reconnect) }
+                                .disabled(model.busy || settings.autoSendSuggestions || !model.capabilities.contains("enhancements.reconnect"))
+                            Text("关闭自动发送后可重新接入；原页面有未提交内容时保持现状。")
+                                .font(.caption).foregroundColor(.secondary)
                             setting("自动发送建议提示词", key: "autoSendSuggestions", value: settings.autoSendSuggestions)
                             setting("自动展开 Codex 工作区", key: "workspaceAutoExpand", value: settings.workspaceAutoExpand)
                             displaySettings(settings.workspaceAutoExpandDisplaySelection).disabled(!settings.workspaceAutoExpand)
@@ -114,8 +135,11 @@ struct ManagerView: View {
                         Button("查看 interactiond 系统权限") {
                             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                         }
-                        Toggle("登录时启动管理 App", isOn: Binding(get: { login }, set: setLogin))
-                        if let loginError { Text(loginError).foregroundColor(.red) }
+                        Toggle("登录时启动 SmartShadow 后台", isOn: Binding(get: { model.loginEnabled }, set: model.setLogin))
+                            .disabled(model.busy)
+                        Text("启用会启动后台。关闭前先正常停止 interactiond，避免系统注销登录项时直接终止手机连接。")
+                            .font(.caption).foregroundColor(.secondary)
+                        if let loginError = model.loginError { Text(loginError).foregroundColor(.red) }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
             }.padding(24)
@@ -182,12 +206,5 @@ struct ManagerView: View {
     private func writeSelection(_ value: CodexWorkspaceDisplaySelection) {
         guard let raw = try? JSONEncoder().encode(value), let object = try? JSONSerialization.jsonObject(with: raw) else { return }
         model.write(["workspaceAutoExpandDisplaySelection": object])
-    }
-    private func setLogin(_ enabled: Bool) {
-        do {
-            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            loginError = nil
-        } catch { loginError = error.localizedDescription }
-        login = SMAppService.mainApp.status == .enabled
     }
 }

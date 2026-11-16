@@ -13,6 +13,7 @@ final class ManagementRuntime {
     var resumeLifecycle: (() async throws -> Void)?
     var stopLifecycle: (() -> Void)?
     var verifyPreparedScope: (([String: Any]) async -> Bool)?
+    var performAction: ((ManagementProtocol.Operation) throws -> Void)?
     private var lifecyclePhase = "running"
     private var preparedScope: [String: Any]?
     private var prepareRequestID: UUID?
@@ -31,7 +32,7 @@ final class ManagementRuntime {
     }
     private var capabilities: [String] {
         ["status", "lifecycle.prepare-stop", "lifecycle.stop", "lifecycle.resume"] + (readSettings == nil ? [] : ["settings.read"]) +
-        (writeSettings == nil ? [] : ["settings.write"])
+        (writeSettings == nil ? [] : ["settings.write"]) + (performAction == nil ? [] : ["codex.open", "enhancements.reconnect"])
     }
     func handle(_ object: [String: Any]) async -> ToolControlServer.Reply {
         let request: ManagementProtocol.Request
@@ -57,6 +58,11 @@ final class ManagementRuntime {
                 guard let readSettings else { return reply(error: "unsupported") }
                 let settings = try readSettings()
                 return reply(["settings": try settings.object, "settings_revision": try settings.revision])
+            case .openCodex, .reconnect:
+                guard allowsEffects else { return reply(error: "lifecycle_quiesced") }
+                guard let performAction else { return reply(error: "unsupported") }
+                try performAction(request.operation)
+                return reply(["state": "requested"])
             case .settingsWrite:
                 guard allowsEffects else { return reply(error: "lifecycle_quiesced") }
                 guard let readSettings, let writeSettings else { return reply(error: "unsupported") }

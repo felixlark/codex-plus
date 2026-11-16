@@ -6,7 +6,7 @@ public enum ToolWindowPolicy {
     public static let enabledKey = "agentToolWindowsEnabled"
     public static let chromeEnabledKey = "chromeUsesAgentDisplay"
     public static let protectedBundles: Set<String> = [
-        "com.openai.codex", "me.longbiaochen.codex-plus", "com.webcatalog.juli.x-chat",
+        "com.openai.codex", "me.longbiaochen.codex-plus", "me.longbiaochen.smart-shadow.app", "me.longbiaochen.smart-shadow.interactiond", "com.webcatalog.juli.x-chat",
         "com.google.Chrome.app.lodlkdfmihgonocnmddehnfgiljnadcf",
         "com.google.Chrome.app.ehpoaimemjameeijlpblkfpomemadkke"
     ]
