@@ -1,3 +1,18 @@
+## 移动宿主不占屏：80正式验收（2026-11-16）
+
+用户要求移动接入空白窗尽量缩到一个像素、不干扰屏幕。PR42合入661657a，PR43合入a935d54db2a1a83c4e988961234004ef9f5d8646；正式Plus0.10.0/build80由#613从固定b1c9e179dfa292c401007a88551ff5570d57519c签名安装，31文件与构建一致。79未单独安装。
+
+- 两次启动均自动请求1×1显示点，AX返回0，WindowServer实际均为480×600，`onePointSizeAccepted=false`。不声称已达到一个物理像素。随后同一专用宿主自动最小化，AXMinimized=true且成功的完整CG onscreen清单不含该准确窗口，大空白区不再占屏。原Codex主窗最小尺寸/厂商签名未改，普通Agent窗口仍走右物理屏。
+- iOS53在既有iPhone18Pro/iOS27模拟器一次Reconnect，N历史与O完整未发草稿184字符/SHA256保持。唯一新消息CP-PIXEL-80-20261116在原官方thread `01a1e24d-def5-7ba3-bc28-4d77040715b9` / turn `01a1e24d-ebd5-7b81-9db8-5346a3d37ecc` completed/8913ms；官方回读1条用户消息、0工具，手机C01—C20及PIXEL80完成可见。
+- 正式prepare→resume→ss-service正常stop→start均通过。原80实例native6189/controller6208/gateway7112及专用22586消失，官方host29252/出生身份保持；重连恢复同一结果且不重发。最终native12629/controller12648/gateway13383，target4B8B85E751C9B3093A7AD2D36A8FE94F/window22656，connected=1/anchorReady=true/quiesced=false，实际480×600、minimized=true、onscreen=false。#578最终只读status也独立核到同一结果。
+- 人工主窗21519及Settings21570的frame/onscreen保持；两个旧隐藏对话窗自然退出，不声称所有瞬态窗口完全不变。手机GUI与安装全程由#613单writer，原#578只操作准确旧宿主的官方OCU最小化及开发；最终还原新建页原P草稿110字符并逐字核对一致，原O草稿184字符保持；旧unknown保留，未操作物理iPhone或重发TestFlight。
+
+首次对旧78停止准备失败的记录单列：没有发送/接受stop，`prepare_unknown/owned_scope=null`。源码回归确认陈旧F6 requested足以阻塞prepare，当前现场符合但未读取旧controller内存，不把推断当实时map事实。#613 PR743以同prepare request/instance/出生、手机已关闭且connections=0为前置，经正式recover-failed-native-prepare一次正常Quit，核旧owned资源消失、原host/人工窗保留；恢复不冒称78正常stop通过。80保存未知human请求的原nonce/phase及观察结果到0600每代文件/native scope，并永久退出自动settle；详情见[生命周期](designs/interactiond-lifecycle.md)。
+
+r1两个fresh-context独立审视及r2最终定向复审完成，见[审视记录](reviews/mobile-anchor-lifecycle.md)。真实controller回归旧版3项失败，修复后27项相关Node通过；15项未变窗口/路由/管理Core证据、Debug编译、语法/plist/diff/Gitleaks通过，PR42/43各两项现有CI成功。
+
+本次为局部呈现及有限停机流程修改，没有新常驻循环；#613按实际影响面复用78资源证据，未新做或声称80的30分钟性能观察。此前候选评论所列新观察安排按本段收敛，不将未执行项写成通过。私有证据归`Library/Logs/codex-plus/mobile-anchor-pixel-20261116/`（acceptance80.md、artifact80.json、唯一Run/手机草稿与prepare/resume/stop/start/最终状态）及`mobile-anchor-compact-20261116/`（前后最小化、源码回归、独立审视和最终只读状态）。本次窗口需求及相称交互验收完成，最终保持正常运行连接。安装结果正本为[#578回执](https://github.com/felixlark/smart-shadow/issues/578#issuecomment-6906111966)。
+
 ## Smart Shadow TestFlight 374（2026-11-16）
 
 用户本轮要求沿用原Smart Shadow图标和身份发布TF，随后明确“你只管发tf”；没有连接或操作真机。发布候选cf9e40e（PR38合入e7742ea），正式名称Smart Shadow、bundle `me.longbiaochen.smart-shadow`、ASC app6784136332、0.3.1/build374。复用原App Store分发签名与有效profile，原1024px图标逐字节一致；模拟器53的bundle与状态保持。
