@@ -5,7 +5,7 @@ TARGET="/Applications/Codex Plus.app"
 MANIFEST="$(dirname "$SOURCE")/CodexPlus.package.json"
 python3 "$(dirname "$0")/package-manifest.py" --verify "$SOURCE" "$MANIFEST"
 [[ "$SOURCE" = /* && "$SOURCE" != "$TARGET" ]]
-codesign --verify --deep --strict -R 'anchor apple generic and identifier "me.longbiaochen.codex-plus" and certificate leaf[subject.OU] = "HJG65XBC25"' "$SOURCE"
+codesign --verify --deep --strict '-R=anchor apple generic and identifier "me.longbiaochen.codex-plus" and certificate leaf[subject.OU] = "HJG65XBC25"' "$SOURCE"
 python3 "$(dirname "$0")/native_install_guard.py" "$TARGET"
 STAGING="$(mktemp -d /Applications/.codexplus-install.XXXXXX)"
 ditto "$SOURCE" "$STAGING/Codex Plus.app"
