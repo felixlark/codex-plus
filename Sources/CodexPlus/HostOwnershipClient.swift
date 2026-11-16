@@ -6,7 +6,7 @@ import CodexPlusCore
 /// evidence is waiting, never permission to discover and adopt another page.
 enum HostOwnershipClient {
     static let authorityPath = "/Applications/SmartShadow.app/Contents/Library/LoginItems/SmartShadowInteraction.app"
-    static let authorityBundle = "me.longbiaochen.smart-shadow.interactiond"
+    static let authorityBundle = CodexPlusIdentity.current.authorityBundleID
     static let socketPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/SmartShadow/interactiond/management.sock").path
 
@@ -14,13 +14,14 @@ enum HostOwnershipClient {
         guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
               app.bundleIdentifier == authorityBundle, app.bundleURL?.path == authorityPath else { throw ManagementProtocol.failure("ownership_authority_unavailable") }
         var code: SecCode?, requirement: SecRequirement?
-        let expression = "anchor apple generic and identifier \"\(authorityBundle)\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
+        let expression = try CodexPlusIdentity.current.authorityRequirement()
         guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid as String:pid] as CFDictionary, [], &code) == errSecSuccess,
               SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
               let code, SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { throw ManagementProtocol.failure("ownership_authority_signature") }
     }
 
     static func read() async throws -> [String: Any] {
+        _ = try CodexPlusIdentity.current.requireOperational()
         let request: [String: Any] = ["command":"management-v1", "protocol":1,
                                     "request_id":UUID().uuidString, "operation":"status"]
         let response = try await ManagementConnection(path: socketPath, timeout: 10, verifyPeer: verifyAuthority).request(request)
@@ -34,7 +35,7 @@ enum HostOwnershipClient {
             throw ManagementProtocol.failure("ownership_authority_unavailable")
         }
         var code: SecCode?, requirement: SecRequirement?
-        let expression = "anchor apple generic and identifier \"\(authorityBundle)\" and certificate leaf[subject.OU] = \"HJG65XBC25\""
+        let expression = try CodexPlusIdentity.current.authorityRequirement()
         guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid as String:pid] as CFDictionary, [], &code) == errSecSuccess,
               SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
               let code, SecCodeCheckValidity(code, [], requirement) == errSecSuccess,

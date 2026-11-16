@@ -20,13 +20,15 @@ final class CodexPlusApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
+        if args == ["--help"] { print("CodexPlus [--settings | --open-codex | --status | --tool-status]");return }
+        do { _ = try CodexPlusIdentity.current.requireOperational() }
+        catch { fputs("Codex Plus compatibility input is required for product operations.\n", stderr); exit(1) }
         if LifecycleCommand.run(args) { return }
         if args.first?.hasPrefix("--tool-") == true {
             do { FileHandle.standardOutput.write(try ToolControlChannel.request(ToolCommand.parse(args)!)) }
             catch { fputs("Codex Plus tool unavailable.\n", stderr); exit(1) }; return
         }
         if args == ["--status"] { do { FileHandle.standardOutput.write(try StatusChannel.readStatus()) } catch { fputs("Codex Plus status unavailable.\n",stderr);exit(1) };return }
-        if args == ["--help"] { print("CodexPlus [--settings | --open-codex | --status | --tool-status]");return }
         guard args.isEmpty || args == ["--settings"] || args == ["--open-codex"], SuggestionAcceptance.isValidOrAbsent,
               Bundle.main.bundleIdentifier == CodexPlusInstallation.bundleID,
               Bundle.main.bundleURL.path == CodexPlusInstallation.path else { fputs("Use the installed standalone Codex Plus app.\n",stderr);return }
