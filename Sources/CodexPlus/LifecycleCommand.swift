@@ -41,6 +41,6 @@ enum LifecycleCommand {
         dispatchMain()
     }
     private static func verify(_ identity: ManagementProtocol.RuntimeIdentity) throws {
-        try SmartShadowInstallation.verifyRuntime(identity)
+        try CodexPlusInstallation.verifyRuntime(identity)
     }
 }

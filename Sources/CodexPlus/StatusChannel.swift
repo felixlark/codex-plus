@@ -3,7 +3,7 @@ import Foundation
 
 enum StatusChannel {
     static let path = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("codex-plus/status.sock").path
+        .appendingPathComponent("codex-plus/enhancements/status.sock").path
 
     static func address() throws -> sockaddr_un {
         var address = sockaddr_un()

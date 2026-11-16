@@ -4,7 +4,7 @@ import XCTest
 final class ManagementProtocolTests: XCTestCase {
     private let runtime = UUID()
     private func request(_ operation: String) -> [String: Any] {
-        ["command": "management-v1", "protocol": 1, "request_id": UUID().uuidString, "operation": operation]
+        ["command": "codex-plus-management-v1", "protocol": 1, "request_id": UUID().uuidString, "operation": operation]
     }
     private func settings() -> ManagementProtocol.Settings {
         .init(workspaceAutoExpand: true, autoSendSuggestions: false,

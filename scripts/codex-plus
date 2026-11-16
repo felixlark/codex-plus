@@ -1,11 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-# Historical source CLI alias only; no old app, login item or runtime is launched.
-APP="/Applications/SmartShadow.app"
-if [[ $# -eq 0 || "${1:-}" == "--settings" ]]; then
-  exec open "$APP"
-elif [[ "$1" == "--open-codex" || "$1" == "--stop-interactiond" ]]; then
-  exec "$APP/Contents/MacOS/SmartShadowManager" "$@"
-else
-  exec "$APP/Contents/Library/LoginItems/SmartShadowInteraction.app/Contents/MacOS/SmartShadowInteraction" "$@"
-fi
+APP="/Applications/Codex Plus.app"
+if [[ $# -eq 0 ]]; then exec open "$APP"; fi
+exec "$APP/Contents/MacOS/CodexPlus" "$@"

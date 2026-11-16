@@ -35,7 +35,7 @@ export function installFeatureEntry(options, createGame, openGame) {
   `;
   let notice=null,noticeTimer=null;
   function notify(message){notice?.remove();clearTimeout(noticeTimer);notice=document.createElement('div');notice.id='codex-plus-notice';notice.setAttribute('role','status');notice.textContent=message;document.body.append(notice);noticeTimer=setTimeout(()=>{notice?.remove();notice=null;},5000);}
-  function complete(requestId,ok){if(pending?.id!==requestId)return;clearTimeout(pending.timer);pending=null;buttons.get('settings')?.removeAttribute('aria-busy');if(!ok)notify('SmartShadow 连接暂不可用，请从菜单栏打开设置。');}
+  function complete(requestId,ok){if(pending?.id!==requestId)return;clearTimeout(pending.timer);pending=null;buttons.get('settings')?.removeAttribute('aria-busy');if(!ok)notify('Codex Plus 连接暂不可用，请从菜单栏打开设置。');}
   function settings(){
     if(pending)return;
     const id=crypto.randomUUID();pending={id,timer:setTimeout(()=>complete(id,false),5000)};
@@ -44,7 +44,7 @@ export function installFeatureEntry(options, createGame, openGame) {
   }
   const ring='<circle cx="10" cy="10" r="7.25"/>';
   const icons={settings:`<circle cx="10" cy="10" r="9.25"/><path data-codex-plus-window-fallback d="M10 6.75v6.5M6.75 10h6.5"/><text data-codex-plus-window-number x="10" y="10.35" text-anchor="middle" dominant-baseline="central" fill="currentColor" stroke="none" font-family="system-ui, sans-serif" font-weight="600"></text>`,snake:`${ring}<path d="M7 6.5h4.5c2.3 0 2.3 3.5 0 3.5h-3c-2.3 0-2.3 3.5 0 3.5H13"/>`};
-  for(const [id,label,action] of [['settings','SmartShadow',settings],['snake','贪吃蛇',()=>{if(game){game.focus();return;}game=openGame(createGame,()=>{game=null;});}]]){
+  for(const [id,label,action] of [['settings','Codex Plus',settings],['snake','贪吃蛇',()=>{if(game){game.focus();return;}game=openGame(createGame,()=>{game=null;});}]]){
     const b=document.createElement('button');b.type='button';b.dataset.codexPlusEntry=id;b.title=label;b.setAttribute('aria-label',label);
     // Icons are fixed product markup, never host or message content.
     const inner=document.createElement('span');
@@ -56,7 +56,7 @@ export function installFeatureEntry(options, createGame, openGame) {
     const button=buttons.get('settings'),text=button.querySelector('[data-codex-plus-window-number]');
     text.textContent=String(number);text.setAttribute('font-size',String(Math.min(12.5,16/String(number).length)));
     button.querySelector('[data-codex-plus-window-fallback]')?.remove();
-    button.title=`SmartShadow · 窗口 ${number}`;button.setAttribute('aria-description',`窗口 ${number}`);
+    button.title=`Codex Plus · 窗口 ${number}`;button.setAttribute('aria-description',`窗口 ${number}`);
     state.windowNumber=number;
   }
   function applyPresentation(button,template){

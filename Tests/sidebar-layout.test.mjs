@@ -74,7 +74,7 @@ test('only expansion values are admitted, not arbitrary data, commands or unknow
   assert.deepEqual(sanitizeSidebarValues({builtin:{threads:true},list:false,[custom]:true}),{builtin:{threads:true},list:false,[custom]:true});
 });
 test('protocol5 without sidebar bridge must reload; readiness requires both bridges',()=>{
-  const bg={protocol:5,registered:2};assert.equal(needsSidebarReconnect(bg,null,true,9),true);assert.equal(needsSidebarReconnect(bg,{protocol:1,bound:false},true,9),true);assert.equal(needsSidebarReconnect(bg,{protocol:1,bound:true},true,9),false);assert.equal(needsSidebarReconnect(bg,null,false,9),false);
+  const bg={protocol:5,registered:2};assert.equal(needsSidebarReconnect(bg,{protocol:1,bound:true},true,9),true);assert.equal(needsSidebarReconnect(bg,null,true,10),true);assert.equal(needsSidebarReconnect(bg,{protocol:1,bound:false},true,10),true);assert.equal(needsSidebarReconnect(bg,{protocol:1,bound:true},true,10),false);assert.equal(needsSidebarReconnect(bg,null,false,10),false);
 });
 test('reconnect upgrades old project ordering even when the other page bridges are ready',()=>{
   const bg={protocol:5,registered:2},sidebar={protocol:1,bound:true};
@@ -83,7 +83,8 @@ test('reconnect upgrades old project ordering even when the other page bridges a
   assert.equal(needsSidebarReconnect(bg,sidebar,true,null),true);
   assert.equal(needsSidebarReconnect(bg,sidebar,true,7),true);
   assert.equal(needsSidebarReconnect(bg,sidebar,true,8),true);
-  assert.equal(needsSidebarReconnect(bg,sidebar,true,9),false);
+  assert.equal(needsSidebarReconnect(bg,sidebar,true,9),true);
+  assert.equal(needsSidebarReconnect(bg,sidebar,true,10),false);
 });
 test('actual reviewed host composes all three adapters, parses, and removes only shared collapse writers',async t=>{
   let a;try{a=await openAsar('/Applications/ChatGPT.app');}catch(e){if(e.code==='ENOENT'){t.skip();return;}throw e;}

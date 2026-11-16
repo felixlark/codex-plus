@@ -1,43 +1,14 @@
-"""Read only the installed package's candidate processes; never signal them."""
-import ctypes
-import errno
-import re
-import subprocess
+#!/usr/bin/env python3
+"""Refuse replacement while this exact standalone product still runs."""
+import ctypes,subprocess,sys
 from pathlib import Path
-
-
-def process_path(pid):
-    lib = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
-    lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
-    lib.proc_pidpath.restype = ctypes.c_int
-    # PROC_PIDPATHINFO_MAXSIZE from the public macOS libproc/proc_info headers.
-    buffer = ctypes.create_string_buffer(4096)
-    ctypes.set_errno(0)
-    size = lib.proc_pidpath(pid, buffer, len(buffer))
-    if size <= 0:
-        code = ctypes.get_errno()
-        if code == errno.ESRCH:
-            return None  # The listed process has already exited.
-        raise OSError(code, 'installed package process path unavailable')
-    return buffer.value.decode('utf-8')
-
-
-def running_package_pids(target, *, run=subprocess.run, read_path=process_path):
-    # Match known executable basenames even when argv[0] is not an absolute path.
-    # libproc then verifies the real executable, excluding namesakes/argv matches.
-    pattern = r'(^|/)(SmartShadowManager|SmartShadowInteraction|MobileGateway)( |$)'
-    result = run(['/usr/bin/pgrep', '-f', pattern], capture_output=True, text=True)
-    if result.returncode == 1 and not result.stdout.strip():
-        return []
-    if result.returncode != 0:
-        raise RuntimeError('installed package process census unavailable')
-    rows = result.stdout.split()
-    if not rows or any(not re.fullmatch(r'[1-9][0-9]*', row) for row in rows):
-        raise RuntimeError('installed package process census invalid')
-    prefix = str(Path(target)) + '/Contents/'
-    active = []
-    for pid in sorted({int(row) for row in rows}):
-        path = read_path(pid)
-        if path is not None and path.startswith(prefix):
-            active.append(pid)
-    return active
+root=Path(sys.argv[1]).resolve()
+if root!=Path('/Applications/Codex Plus.app'):raise SystemExit('unexpected standalone target')
+r=subprocess.run(['/usr/bin/pgrep','-a','-f',str(root)],capture_output=True,text=True)
+if r.returncode not in (0,1):raise SystemExit('process inventory unavailable')
+lib=ctypes.CDLL('/usr/lib/libproc.dylib');lib.proc_pidpath.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_uint32]
+for value in r.stdout.split():
+ if not value.isdecimal():raise SystemExit('invalid process inventory')
+ buf=ctypes.create_string_buffer(4096)
+ if lib.proc_pidpath(int(value),buf,len(buf))<=0:continue
+ if Path(buf.value.decode()).is_relative_to(root):raise SystemExit('standalone product still running; preserve its unknown operations before adoption')

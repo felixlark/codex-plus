@@ -11,6 +11,7 @@ final class HumanWindows {
         let frame: CGRect
         let url: URL
     }
+    var authorizedWindowIDs = Set<UInt32>()
     private var host: NSRunningApplication?
     private var bindings: [Int: UInt32] = [:]
     private var token: String?
@@ -20,6 +21,7 @@ final class HumanWindows {
     private var error: String?
     private var requested = false
     var createWindow: ((String) -> Bool)?
+    var hasPendingRequest: Bool { requested }
 
     func open(_ app: NSRunningApplication) {
         if !requested { deadline = Date().addingTimeInterval(30); error = nil }
@@ -30,7 +32,7 @@ final class HumanWindows {
     func update(_ app: NSRunningApplication) {
         if host?.processIdentifier != app.processIdentifier || host?.launchDate != app.launchDate {
             host = app; bindings = [:]; token = nil; opening = false
-            if let saved = UserDefaults.standard.dictionary(forKey: "humanWindows"),
+            if let saved = PlusPreferences.defaults.dictionary(forKey: "humanWindows"),
                saved["pid"] as? Int32 == app.processIdentifier,
                saved["launch"] as? Double == app.launchDate?.timeIntervalSince1970 {
                 for slot in [1, 2] { if let id = saved[String(slot)] as? UInt32 { bindings[slot] = id } }
@@ -97,7 +99,7 @@ final class HumanWindows {
         let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
         for (slot, name) in [(1, "DELL U3219Q"), (2, "Mi Monitor (2)")] {
             let key = "humanDisplayUUID\(slot)"
-            let saved = UserDefaults.standard.string(forKey: key)
+            let saved = PlusPreferences.defaults.string(forKey: key)
             let matches = NSScreen.screens.filter { screen in
                 guard let n = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
                 let id = n.uint32Value
@@ -108,7 +110,7 @@ final class HumanWindows {
             guard matches.count == 1, let screen = matches.first,
                   let n = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
             let id = n.uint32Value
-            if saved == nil, let uuid = CGDisplayCreateUUIDFromDisplayID(id) { UserDefaults.standard.set(CFUUIDCreateString(nil, uuid.takeRetainedValue()) as String, forKey: key) }
+            if saved == nil, let uuid = CGDisplayCreateUUIDFromDisplayID(id) { PlusPreferences.defaults.set(CFUUIDCreateString(nil, uuid.takeRetainedValue()) as String, forKey: key) }
             let v = screen.visibleFrame
             result[slot] = (CGDisplayBounds(id), CGRect(x: v.minX, y: primaryHeight - v.maxY, width: v.width, height: v.height))
         }
@@ -118,7 +120,7 @@ final class HumanWindows {
     private func save(_ app: NSRunningApplication) {
         var saved: [String: Any] = ["pid": app.processIdentifier, "launch": app.launchDate?.timeIntervalSince1970 ?? 0]
         for (slot, id) in bindings { saved[String(slot)] = id }
-        UserDefaults.standard.set(saved, forKey: "humanWindows")
+        PlusPreferences.defaults.set(saved, forKey: "humanWindows")
     }
 
     private func marker(_ url: URL) -> String? {
@@ -128,30 +130,12 @@ final class HumanWindows {
         return initial.flatMap { URLComponents(string: "https://codex.invalid" + $0)?.queryItems?.first(where: { $0.name == "codexPlusHumanWindow" })?.value }
     }
 
-    /// Locate only the newly-created, nonce-tagged mobile window before its
-    /// document is replaced by the isolated app-host. No human placement runs.
-    func mobileAnchor(_ app: NSRunningApplication, nonce: String, instance: String) -> (element: AXUIElement, id: UInt32)? {
-        guard let launch = app.launchDate, !app.isTerminated else { return nil }
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        let matches = (value(root, kAXWindowsAttribute) as? [AXUIElement] ?? []).compactMap { element -> (AXUIElement, UInt32)? in
-            guard let url = webURL(element), url.scheme == "app", url.host == "-", url.path == "/index.html",
-                  let route = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "initialRoute" })?.value,
-                  let parts = URLComponents(string: "https://codex.invalid" + route),
-                  parts.queryItems?.first(where: { $0.name == "codexPlusMobileAnchor" })?.value == nonce,
-                  parts.queryItems?.first(where: { $0.name == "codexPlusMobileInstance" })?.value == instance else { return nil }
-            let id = cp_window_id(element)
-            return id == 0 ? nil : (element, id)
-        }
-        guard matches.count == 1, app.launchDate == launch else { return nil }
-        return (matches[0].0, matches[0].1)
-    }
-
     private func windows(_ app: NSRunningApplication) -> [Window] {
         guard !app.isTerminated else { return [] }
         let root = AXUIElementCreateApplication(app.processIdentifier)
         return (value(root, kAXWindowsAttribute) as? [AXUIElement] ?? []).compactMap { element in
             let id = cp_window_id(element)
-            guard id != 0, let frame = frame(element), let url = mainURL(element) else { return nil }
+            guard id != 0, authorizedWindowIDs.contains(id), let frame = frame(element), let url = mainURL(element) else { return nil }
             return Window(id: id, element: element, frame: frame, url: url)
         }
     }

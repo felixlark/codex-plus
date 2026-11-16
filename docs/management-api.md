@@ -1,47 +1,17 @@
-# 当前单包接口
+# Codex Plus 独立管理协议
 
-融合后容器/嵌套helper、唯一登录项、F6、签名/manifest合同见[单包合同](designs/smartshadow-fusion.md)。runtimePath和runtimeBundleID现在指向包内SmartShadowInteraction；下面旧Plus安装证据为历史，不能据此给新helper签安装验收。主UI普通启动只读，设置/原controller重新接入统一从此UI经管理协议调用；旧私有设置窗口已删除。
+本产品只有一个CodexPlus原生运行体；原生菜单/设置和CLI管理自己的增强，不启动、停止或重启SmartShadow。
 
-# SmartShadow 管理接缝 v1
+## 自身服务器
 
-独立管理 App 提供设置和组件状态；Plus 原生运行体保留 controller、手机网关、窗口路由和现有增强。管理 App 退出只取消自己的连接，不停止运行体或手机宿主。
+独占 `~/Library/Application Support/codex-plus/enhancements/tool-control.sock`，0600，父目录无其他用户写权。JSON行请求使用 `command=codex-plus-management-v1`、protocol1及UUID request_id；响应回同request_id、真实独立runtime身份/版本/实例和capabilities。
 
-## 正式原生生命周期
+操作：status、settings.read、settings.write、codex.open、enhancements.reconnect、lifecycle.prepare-stop、lifecycle.resume、lifecycle.stop。设置写入核实例/revision和五项严格类型；停止核已prepare的scope revision，未知结果只对账。停止只释放自己的controller/session/socket，保留官方后台及手机目标。状态不包含网关/iOS版本。
 
-78已通过正式ss-service纳管与实际停启。沿[生命周期合同](designs/interactiond-lifecycle.md)使用`--lifecycle-status`、`--lifecycle-prepare-stop`、`--lifecycle-stop`及`--lifecycle-resume`，不新增常驻进程。CLI request-id先规范化，再与回执核对；stop响应写出后通过RunLoop common modes发起AppKit退出，controller结束回调沿同一RunLoop完成。完整停机、重启及手机恢复证据见[验收](acceptance.md)。关闭管理窗口与明确停止interactiond是两个独立动作。
+独立状态CLI使用同根status.sock；工具命令同根tool-control.sock，已停时不自动启动。安装路径与签名身份为 `/Applications/Codex Plus.app` / `me.longbiaochen.codex-plus`。普通设置入口为自身SwiftUI窗口。
 
-## 当前源码合同
+## SmartShadow只读客户端
 
-复用原 `0600 tool-control.sock` 和 `ToolControlServer`，一连接一个 JSON 行。`management-v1` 仅接受：
+另一个连接只读未来 `~/Library/Application Support/SmartShadow/interactiond/management.sock`，发送SmartShadow的 `management-v1` status。先验证内核peer PID与该进程签名/安装身份，响应中的runtime PID必须相同。完整用途字段与撤权/错误语义见[生产合同](designs/standalone-enhancements-v4.md)。它与Plus自己的socket、command和写操作不共用。
 
-- `status`：返回真实 native PID、bundle、全局安装路径、版本、实例 UUID、权限及组件状态。controller/mobile 未知版本为 null，不冒充 iOS 安装版本。
-- `settings.read`：返回原五个设置及其规范化 SHA-256 revision。
-- `settings.write`：校验当前实例、原 revision、严格类型和字段范围，沿既有偏好与回调写入并读回。冲突或实例变化不写入。
-
-已删除完整工作台操作、查询字段、空状态回执及专用恢复。不能从未知操作拒绝推断历史开窗结果。小看板是独立 SwiftUI 窗口，经正式 taskd inspect 返回的 `mcp.executable/arguments` 启动原 LocalMcpClient，以 `tasks_read` 读取配置登记范围；不预留上一版工作台协议或 HTTP 适配器。
-
-管理客户端校验 socket/父目录所有者与权限、peer UID，以及返回 PID 对应的真实签名、bundle 和路径。取消只 shutdown 本连接，由原 worker 关闭 fd；没有自动重发写入或重启运行体的回退。未知设置写入只读核对实际值。
-
-## 仍有消费者的设置与状态
-
-用户菜单和页面设置入口打开已核签名的全局 SmartShadow 管理 App。Agent 设置页仍被 ToolWindowRouter 的显式入口消费，底层 SettingsModel 仍为管理协议提供偏好读写和回调。本轮保留，不把重复界面当作长期要求；唯一入口的迁接尚待决定。
-
-管理产品为独立 `SmartShadowManager` target，只依赖 Core 数据和客户端；通过已安装 `ss-service` 读取组件状态，小看板仅为只读视图，不引入业务存储或另一套发布器。薄生命周期采用情况由 #613 另证。`build-manager`/`install-manager` 与 Plus/手机构建安装边界保持。
-
-## 精简后恢复边界
-
-用户2026-11-15已批准恢复开发、相称检查、合并、既定安装和真实验收。管理App最小启停/状态由#613交付，服务安装切换保持唯一操作者。当前已安装 Plus78、iOS53；旧完整工作台已按原身份确认消失，原窗口、草稿及历史未知结果保留。精简阶段的Plus74冻结与切换前置见[历史交接](workbench-simplification.md)，不用于冒认当前版本或结算旧请求。
-
-## 薄生命周期管理
-
-管理App启动只读三服务状态，不自动启动interactiond。各模块的启动/停止按钮调用同一正式 `ss-service`，读取 `smart-shadow.service-inspect/v1`；未安装模块明确显示且按钮禁用。interactiond设置连接失败不影响taskd/contextd。取消窗口只取消只读子请求，不中断已发出的生命周期操作；未知结果只读核对，不自动重发。原设置身份/revision核验保持。
-
-## 小看板
-
-每次打开或手动刷新，创建一个只读 MCP 连接，完成 initialize 与 tasks_read 后关闭。HMAC 和凭据只在原 LocalMcpClient/Vault 内处理；Swift 不读取密钥、不写业务状态。关闭看板只取消本次只读客户端，不停止 taskd、手机宿主或 Codex Run。
-
-以 repository/number 标识事项；重复身份拒绝显示，输入版本变化后仍保留明确绑定的在途尝试和成果，标注“输入版本已更新”，避免成果评论更新 Issue 后隐藏原 Run。任务完成只认 coordination.status，finished Run 仍显示“运行结束”，不计已完成任务。4102安装版仅覆盖taskd登记范围；4103已安装验收，按[统一统计合同](designs/unified-current-tasks.md)加入本机Codex当前工作，taskd精确host/thread/run绑定才去重。来源或关联不完整时标记暂列项，界面提供原案和成果链接；4105保留该看板实现。
-
-安装版 4101 已经由正式 taskd 入口读到 #611 的真实执行中任务。任务数仅覆盖登记范围，成果回执仍须单独核验。
-
-管理主窗口具有稳定的场景标识。关闭全部窗口后再次打开 App，应用委托重开管理场景；该操作不重新启动服务。4102 安装版已验证同一进程无窗口后正常重开，原手机宿主和后台保持。看板也已显示真实同次成果回执；完整范围见[验收记录](acceptance.md)。
+当前生产合同尚待SmartShadow迁接；缺失时Plus等待准确授权，不借旧socket转发管理写操作。旧融合协议为[历史版本](https://github.com/felixlark/codex-plus/blob/b879019b55dcbca7ded7440fe4b06b2e20bf5576/docs/management-api.md)，不作为当前安装验收。
