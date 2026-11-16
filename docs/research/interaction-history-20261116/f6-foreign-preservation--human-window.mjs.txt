@@ -1,0 +1,22 @@
+import {createHash} from 'node:crypto';
+const reviewedHostResource={sha256:'eba5577e16a50a8106a64a05025fa23d0a589d8b4f775a6fe065ba7d916e6b1c'};
+
+// Bind only the native geometry key, through the same remote-call lifetime helper
+// used by the host's Wbxh module. Never expose a generic native-state writer.
+export function adaptHumanWindowState(source, adapted) {
+  if (createHash('sha256').update(source).digest('hex') !== reviewedHostResource.sha256) return {supported:false,reason:'unreviewed-human-window-host'};
+  const needle='if(null==e)throw Error("Global state is unavailable");return e}';
+  if (source.split(needle).length !== 2 || !source.includes('o=n("GaA7"),l=n("q77y")')) return {supported:false,reason:'native-state-contract'};
+  const replacement='if(null==e)throw Error("Global state is unavailable");globalThis.__codexPlusWindowState??={read:()=>l.P(e.read("electron-main-window-bounds")),write:v=>l.P(e.write("electron-main-window-bounds",v))};return e}';
+  return {supported:true,source:adapted.replace(needle,replacement)};
+}
+
+export function preferredHumanNumbers(pages, frames) {
+  const preferred={};
+  for(const frame of frames) {
+    if(![1,2].includes(frame.number))continue;
+    const matches=pages.filter(page=>page.frame&&['x','y','width','height'].every(k=>Number.isFinite(frame[k])&&Math.abs(frame[k]-page.frame[k])<3));
+    if(matches.length===1)preferred[matches[0].target]=frame.number;
+  }
+  return preferred;
+}
